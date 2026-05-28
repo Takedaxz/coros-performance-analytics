@@ -1,5 +1,6 @@
 """Gemini AI client wrapper."""
 
+from collections.abc import Iterator
 from google import genai
 from google.genai import types
 
@@ -45,6 +46,44 @@ def ask_coach(question: str, context: str, history: list[dict] = None) -> str:
         return response.text or "No response from AI."
     except Exception as e:
         return f"Error communicating with AI: {str(e)}"
+
+
+def ask_coach_stream(
+    question: str,
+    context: str,
+    history: list[dict[str, str]] | None = None,
+) -> Iterator[str]:
+    """Stream questions to the AI coach."""
+    client: genai.Client | None = get_client()
+    if not client:
+        yield "AI features are currently disabled."
+        return
+
+    history_str: str = ""
+    if history:
+        history_str = "Recent Conversation History:\n"
+        # Only keep the last 4 messages to save context length
+        for msg in history[-4:]:
+            role: str = "Athlete" if msg["role"] == "user" else "Coach"
+            history_str += f"{role}: {msg['content']}\n"
+        history_str += "\n"
+
+    prompt: str = f"{context}\n\n{history_str}Athlete Question:\n{question}"
+
+    try:
+        response = client.models.generate_content_stream(
+            model=settings.gemini_model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=COACH_SYSTEM_PROMPT,
+                temperature=0.7,
+            ),
+        )
+        for chunk in response:
+            if chunk.text:
+                yield chunk.text
+    except Exception as e:
+        yield f"Error communicating with AI: {str(e)}"
 
 
 def generate_briefing(context: str) -> str:

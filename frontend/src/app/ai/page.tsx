@@ -47,16 +47,17 @@ export default function AiPage() {
   }, [messages, isInitialized]);
 
   async function handleSend(forcedInput?: string) {
-    const userMsg = (forcedInput || input).trim();
+    const userMsg: string = (forcedInput || input).trim();
     if (!userMsg) return;
     
-    setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+    const nextHistory = [...messages, { role: "user" as const, content: userMsg }];
+    setMessages(nextHistory);
     if (!forcedInput) setInput("");
     setIsLoading(true);
 
     try {
-      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const res = await fetch(`${apiBase}/api/ai/ask`, {
+      const apiBase: string = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res: Response = await fetch(`${apiBase}/api/ai/ask/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -66,11 +67,65 @@ export default function AiPage() {
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setMessages((prev) => [...prev, { role: "ai", content: data.answer }]);
-      } else {
+      if (!res.ok) {
         setMessages((prev) => [...prev, { role: "ai", content: "Error communicating with AI backend." }]);
+        setIsLoading(false);
+        return;
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        setMessages((prev) => [...prev, { role: "ai", content: "No readable response body from AI backend." }]);
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(false);
+
+      const decoder: TextDecoder = new TextDecoder();
+      
+      // Append an empty AI message to start streaming into
+      setMessages((prev) => [...prev, { role: "ai", content: "" }]);
+      
+      let aiResponse: string = "";
+      let buffer: string = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        let boundary: number = buffer.indexOf("\n\n");
+
+        while (boundary !== -1) {
+          const message: string = buffer.slice(0, boundary).trim();
+          buffer = buffer.slice(boundary + 2);
+
+          const lines: string[] = message.split("\n");
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const parsed = JSON.parse(line.substring(6));
+                if (parsed.text) {
+                  aiResponse += parsed.text;
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    if (updated.length > 0) {
+                      updated[updated.length - 1] = {
+                        ...updated[updated.length - 1],
+                        content: aiResponse,
+                      };
+                    }
+                    return updated;
+                  });
+                }
+              } catch (err) {
+                // Incomplete JSON or noise
+              }
+            }
+          }
+          boundary = buffer.indexOf("\n\n");
+        }
       }
     } catch {
       setMessages((prev) => [...prev, { role: "ai", content: "Failed to connect to AI coach." }]);
