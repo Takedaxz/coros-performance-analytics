@@ -46,11 +46,12 @@ export default function AiPage() {
     }
   }, [messages, isInitialized]);
 
-  async function handleSend(forcedInput?: string) {
+  async function handleSend(forcedInput?: string, overrideHistory?: { role: "user" | "ai"; content: string }[]) {
     const userMsg: string = (forcedInput || input).trim();
     if (!userMsg) return;
     
-    const nextHistory = [...messages, { role: "user" as const, content: userMsg }];
+    const baseHistory = overrideHistory || messages;
+    const nextHistory = [...baseHistory, { role: "user" as const, content: userMsg }];
     setMessages(nextHistory);
     if (!forcedInput) setInput("");
     setIsLoading(true);
@@ -63,7 +64,7 @@ export default function AiPage() {
         body: JSON.stringify({ 
           question: userMsg, 
           context_days: 14,
-          history: messages.slice(-4) // Send last 4 messages for context
+          history: baseHistory.slice(-4) // Send last 4 messages for context
         }),
       });
 
@@ -80,8 +81,7 @@ export default function AiPage() {
         return;
       }
 
-      setIsLoading(false);
-
+      // Keep isLoading true while streaming; it will be cleared after the stream completes.
       const decoder: TextDecoder = new TextDecoder();
       
       // Append an empty AI message to start streaming into
@@ -131,6 +131,23 @@ export default function AiPage() {
       setMessages((prev) => [...prev, { role: "ai", content: "Failed to connect to AI coach." }]);
     }
     setIsLoading(false);
+  }
+
+  async function handleRetry() {
+    if (messages.length < 2) return;
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage.role !== "ai") return;
+
+    const userMessages = messages.filter((m) => m.role === "user");
+    if (userMessages.length === 0) return;
+    const lastUserMsg = userMessages[userMessages.length - 1].content;
+    
+    // Remove the trailing error message and the last user message from the history to re-send
+    const cleanHistory = messages.slice(0, -2);
+    setMessages(cleanHistory);
+    
+    // Re-send the last user message with the clean history
+    await handleSend(lastUserMsg, cleanHistory);
   }
 
   async function generateBriefing() {
@@ -222,6 +239,21 @@ export default function AiPage() {
                           <ReactMarkdown>
                             {msg.content}
                           </ReactMarkdown>
+                          {(msg.content.includes("Error") || msg.content.includes("Failed")) && idx === messages.length - 1 && (
+                            <div style={{ marginTop: "var(--space-2)" }}>
+                              <button 
+                                className="btn btn-secondary btn-sm" 
+                                onClick={handleRetry}
+                                disabled={isLoading}
+                                style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "4px 10px" }}
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                                </svg>
+                                Retry
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div style={{ whiteSpace: "pre-wrap", color: "var(--color-text)" }}>{msg.content}</div>

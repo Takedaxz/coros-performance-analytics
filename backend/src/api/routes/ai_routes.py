@@ -1,4 +1,6 @@
+"""AI routes: ask questions, get briefings, activity postmortems."""
 import json
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -10,6 +12,8 @@ from src.ai.gemini_client import ask_coach, ask_coach_stream, generate_briefing,
 from src.config import get_settings
 from src.db.engine import get_db_session
 from src.db.models import Activity
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 settings = get_settings()
@@ -92,8 +96,9 @@ async def ask_ai_stream(
         try:
             for chunk in ask_coach_stream(req.question, context, history_dicts):
                 yield f"data: {json.dumps({'text': chunk})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'text': f'Error streaming response: {str(e)}'})}\n\n"
+        except Exception:
+            logger.exception("Error streaming response from AI coach")
+            yield f"data: {json.dumps({'text': 'Error streaming response.'})}\n\n"
 
     return StreamingResponse(
         event_generator(),

@@ -6,18 +6,18 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import Activity, DailyHealth, SleepSession, User
+from src.db.models import Activity, DailyHealth, Goal, SleepSession, User
 
 
 async def _fetch_user_goal(db: AsyncSession, user_id: str) -> str:
-    """Return a markdown string describing the user's training goal and profile, or empty string."""
+    """Return a markdown string describing user goals and profile, or empty string."""
     from sqlalchemy import select as sa_select
     res = await db.execute(sa_select(User).where(User.id == user_id))
     user = res.scalar_one_or_none()
     if not user:
         return ""
     parts: list[str] = []
-    
+
     # Biometrics & Profile
     profile_parts = []
     if user.first_name or user.last_name or user.nickname:
@@ -40,26 +40,77 @@ async def _fetch_user_goal(db: AsyncSession, user_id: str) -> str:
         parts.append("### Athlete Profile\n" + "\n".join(profile_parts) + "\n")
 
     # Goals
-    goal_parts = []
-    if user.goal_race_name:
-        goal_parts.append(f"**Target Race:** {user.goal_race_name}")
-    if user.goal_race_date:
-        import datetime as _dt
-        days_to_race = (user.goal_race_date - _dt.date.today()).days
-        goal_parts.append(f"**Race Date:** {user.goal_race_date.isoformat()} ({days_to_race} days away)")
-    if user.goal_target_time:
-        goal_parts.append(f"**Goal Finish Time:** {user.goal_target_time}")
-    if user.goal_description:
-        goal_parts.append(f"**Goal Notes:** {user.goal_description}")
-    if user.weekly_training_hours:
-        goal_parts.append(f"**Weekly Training Hours Target:** {user.weekly_training_hours}h")
-    
-    if goal_parts:
-        parts.append("### Athlete Goal\n" + "\n".join(goal_parts))
+    goals_res = await db.execute(
+        sa_select(Goal)
+        .where(Goal.user_id == user_id, Goal.is_active)
+        .order_by(Goal.goal_race_date.asc())
+    )
+    active_goals = goals_res.scalars().all()
+
+    if active_goals:
+        parts.append("### Athlete Goals")
+        for i, goal in enumerate(active_goals, 1):
+            goal_details = []
+            if goal.goal_race_name:
+                goal_details.append(f"  - **Target Race:** {goal.goal_race_name}")
+            if goal.goal_race_date:
+                import datetime as _dt
+                days_to_race = (goal.goal_race_date - _dt.date.today()).days
+                goal_details.append(
+                    f"  - **Race Date:** {goal.goal_race_date.isoformat()} "
+                    f"({days_to_race} days away)"
+                )
+            if goal.goal_target_time:
+                goal_details.append(f"  - **Goal Finish Time:** {goal.goal_target_time}")
+            if goal.weekly_training_hours:
+                goal_details.append(
+                    f"  - **Weekly Training Target:** {goal.weekly_training_hours}h"
+                )
+            if goal.goal_description:
+                goal_details.append(f"  - **Notes:** {goal.goal_description}")
+
+            if goal_details:
+                parts.append(f"\n**Goal {i}:**")
+                parts.extend(goal_details)
+
+    # Target Training Paces
+    if user.threshold_pace_s_per_km:
+        pace = user.threshold_pace_s_per_km
+
+        def fmt_pace(secs_per_km: float) -> str:
+            m = int(secs_per_km // 60)
+            s = int(round(secs_per_km % 60))
+            if s >= 60:
+                m += 1
+                s -= 60
+            return f"{m}:{s:02d}/km"
+
+        daniels_paces = [
+            f"  - **Repetition (@R):** {fmt_pace(pace * 0.85)}",
+            f"  - **Interval (@I):** {fmt_pace(pace * 0.93)}",
+            f"  - **Threshold (@T):** {fmt_pace(pace)}",
+            f"  - **Marathon (@M):** {fmt_pace(pace * 1.15)}",
+            f"  - **Easy (@E):** {fmt_pace(pace * 1.25)}"
+        ]
+
+        friel_zones = [
+            f"  - **Z5c (Anaerobic):** < {fmt_pace(pace * 0.90)}",
+            f"  - **Z5a/b (Super-Threshold):** {fmt_pace(pace)} to {fmt_pace(pace * 0.90)}",
+            f"  - **Z4 (Threshold):** {fmt_pace(pace * 1.05)} to {fmt_pace(pace)}",
+            f"  - **Z3 (Tempo):** {fmt_pace(pace * 1.14)} to {fmt_pace(pace * 1.05)}",
+            f"  - **Z2 (Endurance):** {fmt_pace(pace * 1.29)} to {fmt_pace(pace * 1.14)}",
+            f"  - **Z1 (Recovery):** > {fmt_pace(pace * 1.29)}"
+        ]
+
+        parts.append("\n### Athlete Target Training Paces")
+        parts.append("**Daniels' Running Formula:**")
+        parts.extend(daniels_paces)
+        parts.append("\n**Friel's Triathlete's Training Bible Zones:**")
+        parts.extend(friel_zones)
 
     if not parts:
         return ""
-        
+
     return "\n".join(parts)
 
 _ICAL_URL = "https://p135-caldav.icloud.com/published/2/MTAzNTc1NTUzNDMxMDM1N4gPI9Eruy25g9v9R_Ci0txlHRMQJW0ifWYN4qF0Rbss"
