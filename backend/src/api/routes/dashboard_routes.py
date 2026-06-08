@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.engine import get_db_session
-from src.db.models import Activity, DailyHealth, FitnessEstimate, SleepSession
+from src.db.models import Activity, DailyHealth, FitnessEstimate, SleepSession, User
 
 router = APIRouter()
 
@@ -234,3 +234,85 @@ async def personal_records(
         }
 
     return prs
+
+
+_ZONE_BOUNDARIES_PCT: list[tuple[float, float]] = [
+    (0.50, 0.60),  # Zone 1 — Active Recovery
+    (0.60, 0.70),  # Zone 2 — Aerobic Base
+    (0.70, 0.80),  # Zone 3 — Aerobic Threshold
+    (0.80, 0.90),  # Zone 4 — Lactate Threshold
+    (0.90, 1.00),  # Zone 5 — VO2 Max
+]
+
+
+def _classify_zone(avg_hr: int, max_hr: int) -> int:
+    """Return HR zone 1-5. Anything below zone 1 lower bound = zone 1."""
+    pct = avg_hr / max_hr
+    for zone_index, (low, high) in enumerate(_ZONE_BOUNDARIES_PCT, start=1):
+        if pct < high:
+            return zone_index
+    return 5
+
+
+@router.get("/weekly-hr-zones")
+async def weekly_hr_zones(
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Minutes spent in each HR zone (1-5) over the rolling last 7 days.
+
+    Uses Activity.avg_hr_bpm as zone classifier and Activity.elapsed_time_s for
+    duration. The max HR reference is taken from User.max_hr_bpm when available,
+    then 220-age from birthdate, then 190 bpm as final fallback.
+    """
+    today = date.today()
+    window_start = today - timedelta(days=6)  # rolling 7-day window
+    window_end = today + timedelta(days=1)    # exclusive: captures all of today
+
+    # Fetch a user max_hr_bpm (first user in the table — single-user app)
+    user_result = await db.execute(select(User).limit(1))
+    user = user_result.scalar_one_or_none()
+    if user and user.max_hr_bpm:
+        max_hr: int = user.max_hr_bpm
+    elif user and user.birthdate:
+        age = (date.today() - user.birthdate).days // 365
+        max_hr = max(160, 220 - age)  # 160 floor prevents absurd values for very old ages
+    else:
+        max_hr = 190  # population-level fallback when no profile data exists
+
+    act_result = await db.execute(
+        select(Activity).where(
+            Activity.start_time >= window_start,
+            Activity.start_time < window_end,
+            Activity.avg_hr_bpm.is_not(None),
+            Activity.elapsed_time_s.is_not(None),
+        )
+    )
+    activities = act_result.scalars().all()
+
+    zone_minutes: dict[int, float] = {z: 0.0 for z in range(1, 6)}
+    zone_activities: dict[int, list[str]] = {z: [] for z in range(1, 6)}
+
+    for act in activities:
+        zone = _classify_zone(act.avg_hr_bpm, max_hr)
+        zone_minutes[zone] += act.elapsed_time_s / 60.0
+        if act.title:
+            zone_activities[zone].append(act.title)
+
+    total_minutes = sum(zone_minutes.values())
+
+    return {
+        "week_start": str(window_start),
+        "week_end": str(today),  # display as today, +1 is an internal exclusive bound
+        "max_hr_used": max_hr,
+        "total_minutes": round(total_minutes, 1),
+        "zones": [
+            {
+                "zone": z,
+                "label": ["Active Recovery", "Aerobic Base", "Aerobic Threshold", "Lactate Threshold", "VO2 Max"][z - 1],
+                "hr_range": f"{int(_ZONE_BOUNDARIES_PCT[z-1][0]*max_hr)}–{int(_ZONE_BOUNDARIES_PCT[z-1][1]*max_hr)} bpm",
+                "minutes": round(zone_minutes[z], 1),
+                "activities": zone_activities[z],
+            }
+            for z in range(1, 6)
+        ],
+    }

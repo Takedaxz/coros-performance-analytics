@@ -9,7 +9,10 @@ export const metadata: Metadata = {
   title: "COROS Analytics - Personal Health & Performance",
   description: "Personal analytics dashboard for COROS watch data. Track training load, recovery, sleep, HRV, and fitness progression.",
   icons: {
-    icon: "/favicon-32.png",
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon-32.png", type: "image/png", sizes: "32x32" },
+    ],
     apple: "/apple-icon.png",
   },
 };

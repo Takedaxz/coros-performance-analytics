@@ -55,6 +55,16 @@ function daysUntil(dateStr: string): number | null {
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
+/** Returns the goal's lifecycle state based on race date vs. today */
+function goalRaceState(dateStr: string): "upcoming" | "recovery" | "expired" | "no-date" {
+  if (!dateStr) return "no-date";
+  const days = daysUntil(dateStr);
+  if (days === null) return "no-date";
+  if (days >= 0) return "upcoming";
+  if (days >= -30) return "recovery";  // 0–30 days after race
+  return "expired";                    // 30+ days after race
+}
+
 export default function SettingsPage() {
   const [syncConfig, setSyncConfig] = useState<SyncStatus | null>(null);
   const [appStatus, setAppStatus] = useState<AppStatus | null>(null);
@@ -453,40 +463,106 @@ export default function SettingsPage() {
                 ) : (
                   goals.map((g) => {
                     const daysLeft = daysUntil(g.goal_race_date);
+                    const raceState = goalRaceState(g.goal_race_date);
+                    const isFrozen = g.is_active && (raceState === "recovery" || raceState === "expired");
+                    const daysSinceRace = daysLeft !== null && daysLeft < 0 ? Math.abs(daysLeft) : null;
+
                     return (
-                      <div 
-                        key={g.id} 
-                        style={{ 
-                          border: "1px solid var(--border-color)", 
-                          borderRadius: "var(--radius-md)", 
+                      <div
+                        key={g.id}
+                        style={{
+                          border: `1px solid ${
+                            isFrozen ? "rgba(139,149,168,0.3)" : "var(--border-color)"
+                          }`,
+                          borderRadius: "var(--radius-md)",
                           padding: "var(--space-4)",
-                          background: g.is_active ? "var(--color-bg-secondary)" : "var(--color-bg-tertiary)",
-                          opacity: g.is_active ? 1 : 0.75,
+                          background: isFrozen
+                            ? "rgba(139,149,168,0.06)"
+                            : g.is_active
+                            ? "var(--color-bg-secondary)"
+                            : "var(--color-bg-tertiary)",
+                          opacity: isFrozen ? 0.82 : g.is_active ? 1 : 0.7,
                           transition: "all var(--transition-fast)",
-                          position: "relative"
+                          position: "relative",
                         }}
                       >
+                        {/* Frozen overlay label for recovery/expired goals */}
+                        {isFrozen && (
+                          <div style={{
+                            position: "absolute",
+                            top: "var(--space-2)",
+                            right: "var(--space-2)",
+                            fontSize: "10px",
+                            color: "var(--color-text-muted)",
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                            fontWeight: 600,
+                          }}>
+                            🔒 Read-only
+                          </div>
+                        )}
+
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "var(--space-3)", flexWrap: "wrap" }}>
-                          <div>
+                          <div style={{ flex: 1 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
-                              <h4 style={{ fontSize: "var(--text-base)", fontWeight: "var(--weight-semibold)", color: "var(--color-text-primary)" }}>
+                              <h4 style={{
+                                fontSize: "var(--text-base)",
+                                fontWeight: "var(--weight-semibold)",
+                                color: isFrozen ? "var(--color-text-secondary)" : "var(--color-text-primary)",
+                              }}>
                                 {g.goal_race_name || "General Fitness Goal"}
                               </h4>
-                              <span 
-                                className="badge" 
-                                style={{ 
-                                  background: g.is_active ? "rgba(0, 0, 0, 0.05)" : "var(--color-bg-secondary)", 
-                                  color: g.is_active ? "var(--color-success)" : "var(--color-text-muted)",
-                                  border: "1px solid var(--border-color)",
-                                  cursor: "pointer"
-                                }}
-                                onClick={() => g.id && toggleActive(g.id)}
-                              >
-                                {g.is_active ? "Active" : "Archived"}
-                              </span>
-                              {g.is_active && g.goal_race_date && daysLeft !== null && (
-                                <span 
-                                  className="badge" 
+
+                              {/* Active/Archived status badge — only for non-frozen goals */}
+                              {!isFrozen && (
+                                <span
+                                  className="badge"
+                                  style={{
+                                    background: g.is_active ? "rgba(0,0,0,0.05)" : "var(--color-bg-secondary)",
+                                    color: g.is_active ? "var(--color-success)" : "var(--color-text-muted)",
+                                    border: "1px solid var(--border-color)",
+                                    cursor: "pointer",
+                                  }}
+                                  onClick={() => g.id && toggleActive(g.id)}
+                                >
+                                  {g.is_active ? "Active" : "Archived"}
+                                </span>
+                              )}
+
+                              {/* Recovery Mode badge */}
+                              {g.is_active && raceState === "recovery" && (
+                                <span
+                                  className="badge"
+                                  style={{
+                                    background: "rgba(99,102,241,0.1)",
+                                    color: "#818cf8",
+                                    border: "1px solid rgba(99,102,241,0.25)",
+                                  }}
+                                  title="AI can still access this goal for post-race recovery planning for up to 30 days after the race."
+                                >
+                                  🏁 Recovery Mode
+                                </span>
+                              )}
+
+                              {/* Expired badge */}
+                              {g.is_active && raceState === "expired" && (
+                                <span
+                                  className="badge"
+                                  style={{
+                                    background: "rgba(107,114,128,0.1)",
+                                    color: "var(--color-text-muted)",
+                                    border: "1px solid rgba(107,114,128,0.2)",
+                                  }}
+                                  title="Race was over 30 days ago. AI no longer uses this goal. Archive or delete it to clean up."
+                                >
+                                  Expired
+                                </span>
+                              )}
+
+                              {/* Countdown badge for upcoming races */}
+                              {g.is_active && raceState === "upcoming" && g.goal_race_date && daysLeft !== null && (
+                                <span
+                                  className="badge"
                                   style={{
                                     background: daysLeft <= 30 ? "rgba(245,158,11,0.12)" : "rgba(52,211,153,0.1)",
                                     color: daysLeft <= 30 ? "#d97706" : "var(--color-success)",
@@ -498,10 +574,23 @@ export default function SettingsPage() {
                               )}
                             </div>
 
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-2)", marginTop: "var(--space-2)", fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>
+                            <div style={{
+                              display: "grid",
+                              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                              gap: "var(--space-2)",
+                              marginTop: "var(--space-2)",
+                              fontSize: "var(--text-sm)",
+                              color: "var(--color-text-secondary)",
+                            }}>
                               {g.goal_race_date && (
                                 <div>
-                                  <span style={{ color: "var(--color-text-muted)" }}>Date:</span> {g.goal_race_date}
+                                  <span style={{ color: "var(--color-text-muted)" }}>Date:</span>{" "}
+                                  {g.goal_race_date}
+                                  {daysSinceRace !== null && (
+                                    <span style={{ color: "var(--color-text-muted)", marginLeft: 4, fontSize: "var(--text-xs)" }}>
+                                      ({daysSinceRace}d ago)
+                                    </span>
+                                  )}
                                 </div>
                               )}
                               {g.goal_target_time && (
@@ -516,21 +605,74 @@ export default function SettingsPage() {
                               )}
                             </div>
 
+                            {/* Recovery window info note */}
+                            {g.is_active && raceState === "recovery" && (
+                              <p style={{
+                                fontSize: "var(--text-xs)",
+                                color: "#818cf8",
+                                marginTop: "var(--space-2)",
+                                padding: "var(--space-2) var(--space-3)",
+                                background: "rgba(99,102,241,0.07)",
+                                borderRadius: "var(--radius-sm)",
+                                borderLeft: "2px solid rgba(99,102,241,0.4)",
+                              }}>
+                                AI coach will use this goal for post-race recovery planning until 30 days after the race date. Archive or delete when done.
+                              </p>
+                            )}
+
+                            {g.is_active && raceState === "expired" && (
+                              <p style={{
+                                fontSize: "var(--text-xs)",
+                                color: "var(--color-text-muted)",
+                                marginTop: "var(--space-2)",
+                                padding: "var(--space-2) var(--space-3)",
+                                background: "rgba(107,114,128,0.07)",
+                                borderRadius: "var(--radius-sm)",
+                                borderLeft: "2px solid rgba(107,114,128,0.3)",
+                              }}>
+                                Race was over 30 days ago — AI no longer includes this goal in its context. Archive or delete to clean up.
+                              </p>
+                            )}
+
                             {g.goal_description && (
-                              <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", marginTop: "var(--space-3)", borderTop: "1px dashed var(--border-color)", paddingTop: "var(--space-2)", fontStyle: "italic" }}>
+                              <p style={{
+                                fontSize: "var(--text-xs)",
+                                color: "var(--color-text-secondary)",
+                                marginTop: "var(--space-3)",
+                                borderTop: "1px dashed var(--border-color)",
+                                paddingTop: "var(--space-2)",
+                                fontStyle: "italic",
+                              }}>
                                 &ldquo;{g.goal_description}&rdquo;
                               </p>
                             )}
                           </div>
 
-                          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-                            <button className="btn btn-secondary btn-sm" onClick={() => startEditGoal(g)} style={{ padding: "4px 8px", fontSize: "var(--text-xs)" }}>
-                              Edit
-                            </button>
-                            <button className="btn btn-secondary btn-sm" onClick={() => g.id && toggleActive(g.id)} style={{ padding: "4px 8px", fontSize: "var(--text-xs)" }}>
-                              {g.is_active ? "Archive" : "Activate"}
-                            </button>
-                            <button className="btn btn-danger btn-sm" onClick={() => g.id && deleteGoal(g.id)} style={{ padding: "4px 8px", fontSize: "var(--text-xs)" }}>
+                          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexShrink: 0 }}>
+                            {/* Hide Edit/Activate for frozen goals — they're read-only for AI recovery */}
+                            {!isFrozen && (
+                              <>
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => startEditGoal(g)}
+                                  style={{ padding: "4px 8px", fontSize: "var(--text-xs)" }}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => g.id && toggleActive(g.id)}
+                                  style={{ padding: "4px 8px", fontSize: "var(--text-xs)" }}
+                                >
+                                  {g.is_active ? "Archive" : "Activate"}
+                                </button>
+                              </>
+                            )}
+                            <button
+                              className="btn btn-danger btn-sm"
+                              onClick={() => g.id && deleteGoal(g.id)}
+                              style={{ padding: "4px 8px", fontSize: "var(--text-xs)" }}
+                            >
                               Delete
                             </button>
                           </div>

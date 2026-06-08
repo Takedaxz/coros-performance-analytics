@@ -192,16 +192,15 @@ a:hover {
 }
 
 .sidebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
+  flex-shrink: 0;
   width: var(--sidebar-width);
+  height: 100vh;
   background: var(--color-bg-secondary);
   box-shadow: none;
   display: flex;
   flex-direction: column;
   z-index: 100;
+  overflow-y: auto;
   transition: width var(--transition-base);
 }
 
@@ -271,8 +270,8 @@ a:hover {
 }
 
 .main-content {
-  margin-left: var(--sidebar-width);
   flex: 1;
+  min-width: 0;
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -710,6 +709,8 @@ a:hover {
   border-radius: var(--radius-lg);
   padding: var(--space-5);
   transition: all var(--transition-base);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .chart-container:hover {
@@ -855,6 +856,7 @@ a:hover {
   }
   .main-content {
     margin-left: var(--sidebar-collapsed-width);
+    width: calc(100% - var(--sidebar-collapsed-width));
   }
   .page-body {
     padding: var(--space-4);
@@ -867,6 +869,7 @@ a:hover {
   }
   .main-content {
     margin-left: 0;
+    width: 100%;
   }
   .metrics-grid {
     grid-template-columns: repeat(2, 1fr);

@@ -236,9 +236,20 @@ export default function AiPage() {
                     <div className={`chat-bubble ${msg.role}`} style={{ maxWidth: "85%", padding: "16px", borderRadius: "16px", background: msg.role === "user" ? "var(--color-bg-elevated)" : "transparent", border: msg.role === "user" ? "1px solid var(--border-color)" : "none", borderBottomRightRadius: msg.role === "user" ? "4px" : "16px", borderBottomLeftRadius: msg.role === "ai" ? "4px" : "16px" }}>
                       {msg.role === "ai" ? (
                         <div className="markdown-body">
+                          {msg.content === "" && isLoading ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <span style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>Coach is thinking</span>
+                              <span className="chat-loading-dots">
+                                <span className="chat-loading-dot" style={{ background: "var(--color-accent-violet)" }}></span>
+                                <span className="chat-loading-dot" style={{ background: "var(--color-accent-violet)" }}></span>
+                                <span className="chat-loading-dot" style={{ background: "var(--color-accent-violet)" }}></span>
+                              </span>
+                            </div>
+                          ) : (
                           <ReactMarkdown>
                             {msg.content}
                           </ReactMarkdown>
+                          )}
                           {(msg.content.includes("Error") || msg.content.includes("Failed")) && idx === messages.length - 1 && (
                             <div style={{ marginTop: "var(--space-2)" }}>
                               <button 
@@ -262,7 +273,7 @@ export default function AiPage() {
                   </div>
                 ))}
                 
-                {isLoading && (
+                {isLoading && messages[messages.length - 1]?.role !== "ai" && (
                   <div className={`chat-bubble-row ai`} style={{ display: "flex", gap: "12px", marginBottom: "24px", alignItems: "flex-start" }}>
                     <div style={{ flexShrink: 0, width: "32px", height: "32px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(139, 92, 246, 0.15)", color: "var(--color-accent-violet)" }}>
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

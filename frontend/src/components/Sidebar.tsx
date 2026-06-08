@@ -138,7 +138,8 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <h1>COROS Analytics</h1>
+        <img src="/icon.svg" alt="COROS" width={28} height={28} style={{ borderRadius: "7px", flexShrink: 0 }} />
+        <h1>COROS</h1>
       </div>
       <nav className="sidebar-nav">
         {NAV_SECTIONS.map((section) => (
