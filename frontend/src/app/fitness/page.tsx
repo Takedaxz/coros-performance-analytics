@@ -121,13 +121,13 @@ export default function FitnessPage() {
               <div className="chart-header">
                 <div className="chart-title">VO2 Max Progression (6 Months)</div>
               </div>
-              <div style={{ height: 320, marginTop: "1rem" }}>
+              <div style={{ marginTop: "1rem" }}>
                 {isLoading ? (
                   <div style={{ color: "var(--color-text-muted)" }}>Loading...</div>
                 ) : data.length === 0 ? (
                   <div style={{ color: "var(--color-text-muted)" }}>No fitness data recorded in this period.</div>
                 ) : (
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height={320}>
                     <AreaChart data={data}>
 
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />

@@ -76,10 +76,13 @@ export default function SleepPage() {
     sma: h.hrv_7d_sma || 0,
   }));
 
-  const rhrData = [...health].reverse().map((h) => ({
-    date: h.date.slice(5),
-    rhr: h.resting_hr_bpm || 0,
-  }));
+  const rhrData = [...health]
+    .reverse()
+    .filter((h) => h.resting_hr_bpm != null)
+    .map((h) => ({
+      date: h.date.slice(5),
+      rhr: h.resting_hr_bpm as number,
+    }));
 
   const sleepData = [...sleep].reverse().map((s) => ({
     date: s.sleep_start.slice(5, 10),
@@ -98,8 +101,9 @@ export default function SleepPage() {
   const avgHrv = health.length > 0
     ? Math.round(health.reduce((s, h) => s + (h.overnight_hrv_avg_ms || 0), 0) / health.length)
     : 0;
-  const avgRhr = health.length > 0
-    ? Math.round(health.reduce((s, h) => s + (h.resting_hr_bpm || 0), 0) / health.length)
+  const rhrDays = health.filter((h) => h.resting_hr_bpm != null);
+  const avgRhr = rhrDays.length > 0
+    ? Math.round(rhrDays.reduce((s, h) => s + (h.resting_hr_bpm as number), 0) / rhrDays.length)
     : 0;
   const avgSleep = sleep.length > 0
     ? (sleep.reduce((s, sl) => s + sl.duration_s, 0) / sleep.length / 3600).toFixed(1)

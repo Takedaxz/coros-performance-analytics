@@ -80,7 +80,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     timezone: Mapped[str] = mapped_column(String(50), default="UTC")
     units: Mapped[str] = mapped_column(String(10), default="metric")
-    
+
     # Biometrics & Profile
     first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -98,13 +98,6 @@ class User(Base):
     sleep_target_hours: Mapped[float] = mapped_column(Float, default=8.0)
     device_preferences: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    # Training goal
-    goal_description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    goal_race_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    goal_race_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    goal_target_time: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    weekly_training_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -112,6 +105,7 @@ class User(Base):
 
     devices: Mapped[list["Device"]] = relationship(back_populates="user")
     activities: Mapped[list["Activity"]] = relationship(back_populates="user")
+    goals: Mapped[list["Goal"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Device(Base):
@@ -129,6 +123,29 @@ class Device(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="devices")
+
+
+class Goal(Base):
+    __tablename__ = "goals"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    goal_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    goal_race_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    goal_race_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    goal_target_time: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    weekly_training_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    user: Mapped["User"] = relationship(back_populates="goals")
 
 
 # ---------------------------------------------------------------------------

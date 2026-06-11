@@ -1,15 +1,19 @@
 """AI routes: ask questions, get briefings, activity postmortems."""
-
+import json
+import logging
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai.context_builder import build_plan_context, build_training_context
-from src.ai.gemini_client import ask_coach, generate_briefing, generate_postmortem
+from src.ai.gemini_client import ask_coach, ask_coach_stream, generate_briefing, generate_postmortem
 from src.config import get_settings
 from src.db.engine import get_db_session
 from src.db.models import Activity
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 settings = get_settings()
@@ -61,6 +65,49 @@ async def ask_ai(
         confidence=None,
         evidence=None,
         model=settings.gemini_model,
+    )
+
+
+@router.post("/ask/stream")
+async def ask_ai_stream(
+    req: AskRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> StreamingResponse:
+    """Ask a natural-language question about your training data and stream the response."""
+    if not settings.gemini_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="Gemini AI is not enabled. Set GEMINI_ENABLED=true and provide GEMINI_API_KEY.",
+        )
+
+    # 1. Build context from DB + training plan
+    context: str = await build_training_context(
+        db, user_id="00000000-0000-0000-0000-000000000000", days=req.context_days
+    )
+    plan_context: str = await build_plan_context(days_back=7, days_forward=30)
+    context = context + "\n\n" + plan_context
+
+    # 2. Call Gemini Stream
+    history_dicts: list[dict[str, str]] = [
+        {"role": msg.role, "content": msg.content} for msg in req.history
+    ]
+
+    def event_generator():
+        try:
+            for chunk in ask_coach_stream(req.question, context, history_dicts):
+                yield f"data: {json.dumps({'text': chunk})}\n\n"
+        except Exception:
+            logger.exception("Error streaming response from AI coach")
+            yield f"data: {json.dumps({'text': 'Error streaming response.'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
