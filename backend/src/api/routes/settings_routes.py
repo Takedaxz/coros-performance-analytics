@@ -71,6 +71,7 @@ class UserProfile(BaseModel):
     height_cm: float | None = None
     weight_kg: float | None = None
     body_fat_pct: float | None = None
+    training_notes: str | None = None
 
 
 @router.get("/sync-config")
@@ -107,6 +108,7 @@ async def get_profile(db: AsyncSession = Depends(get_db_session)) -> UserProfile
         height_cm=user.height_cm,
         weight_kg=user.weight_kg,
         body_fat_pct=user.body_fat_pct,
+        training_notes=user.training_notes,
     )
 
 
@@ -132,6 +134,7 @@ async def update_profile(
     user.height_cm = payload.height_cm
     user.weight_kg = payload.weight_kg
     user.body_fat_pct = payload.body_fat_pct
+    user.training_notes = payload.training_notes
     user.updated_at = datetime.datetime.utcnow()
 
     await db.commit()
@@ -145,6 +148,7 @@ async def update_profile(
         height_cm=user.height_cm,
         weight_kg=user.weight_kg,
         body_fat_pct=user.body_fat_pct,
+        training_notes=user.training_notes,
     )
 
 

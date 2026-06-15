@@ -14,44 +14,80 @@ from src.config import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Model fallback chain
+# When the primary model hits a rate/quota limit the client cascades through
+# this list in order.  Connection-level transient errors retry the *same*
+# model; only quota/rate errors advance to the next model.
+# ---------------------------------------------------------------------------
 
-def retry_with_backoff(func, *args, max_retries=3, initial_delay=1.0, backoff_factor=2.0, **kwargs):
-    """Execute a function with exponential backoff retries for transient errors."""
-    delay = initial_delay
-    for attempt in range(max_retries + 1):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            err_msg = str(e).lower()
-            # Check if this is a transient error (e.g. 503, 429, Unavailable, ResourceExhausted)
-            is_transient = any(
-                term in err_msg
-                for term in [
-                    "503", "429", "unavailable", "exhausted",
-                    "temporary", "demand", "limit"
-                ]
-            )
+_FALLBACK_MODELS: list[str] = [
+    "gemini-3.5-flash",       # newer flash — separate quota pool from 2.5
+    "gemini-2.5-flash-lite",  # lightest 2.5 tier, rarely exhausted
+    "gemini-3.1-pro",         # pro-tier, separate quota
+]
 
-            if attempt == max_retries or not is_transient:
-                logger.error(
-                    f"Gemini API call failed permanently: {str(e)} "
-                    f"(attempt {attempt + 1}/{max_retries + 1})"
-                )
-                raise e
+_RATE_LIMIT_TERMS: frozenset[str] = frozenset(["429", "exhausted", "quota", "limit", "demand"])
+_TRANSIENT_TERMS: frozenset[str] = frozenset([
+    "503", "unavailable", "temporary",
+    "disconnected", "connection", "protocol",
+    "reset", "eof", "broken",
+])
 
-            logger.warning(
-                f"Gemini API transient failure. Retrying in {delay:.1f}s... "
-                f"(attempt {attempt + 1}/{max_retries + 1}): {str(e)}"
-            )
-            time.sleep(delay)
-            delay *= backoff_factor
+
+def _classify_error(err_msg: str) -> str:
+    """Return 'rate_limit', 'transient', or 'permanent' for an error message."""
+    lower = err_msg.lower()
+    if any(t in lower for t in _RATE_LIMIT_TERMS):
+        return "rate_limit"
+    if any(t in lower for t in _TRANSIENT_TERMS):
+        return "transient"
+    return "permanent"
 
 
 T = TypeVar("T")
 P = ParamSpec("P")
 
 
-def retry_generator_with_backoff(  # noqa: UP047
+def _build_model_chain(primary: str) -> list[str]:
+    """Return [primary] + fallbacks, deduplicating if primary is already in the list."""
+    chain = [primary]
+    for m in _FALLBACK_MODELS:
+        if m != primary:
+            chain.append(m)
+    return chain
+
+
+def retry_with_backoff(
+    func: Callable[..., T],
+    *args,
+    max_retries: int = 3,
+    initial_delay: float = 1.0,
+    backoff_factor: float = 2.0,
+    **kwargs,
+) -> T:
+    """Execute a function with exponential backoff retries for transient errors."""
+    delay = initial_delay
+    for attempt in range(max_retries + 1):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            kind = _classify_error(str(e))
+            if attempt == max_retries or kind == "permanent":
+                logger.error(
+                    "Gemini API call failed permanently: %s (attempt %d/%d)",
+                    e, attempt + 1, max_retries + 1,
+                )
+                raise
+            logger.warning(
+                "Gemini API transient failure [%s]. Retrying in %.1fs... (attempt %d/%d): %s",
+                kind, delay, attempt + 1, max_retries + 1, e,
+            )
+            time.sleep(delay)
+            delay *= backoff_factor
+
+
+def retry_generator_with_backoff(
     func: Callable[P, Iterator[T]],
     *args: P.args,
     max_retries: int = 3,
@@ -65,34 +101,23 @@ def retry_generator_with_backoff(  # noqa: UP047
         try:
             gen: Iterator[T] = func(*args, **kwargs)
             iterator: Iterator[T] = iter(gen)
-            # Fetch the first chunk to trigger the connection
             first_chunk: T = next(iterator)
             yield first_chunk
             yield from iterator
             return
         except StopIteration:
-
             return
         except Exception as e:
-            err_msg: str = str(e).lower()
-            is_transient: bool = any(
-                term in err_msg
-                for term in [
-                    "503", "429", "unavailable", "exhausted",
-                    "temporary", "demand", "limit"
-                ]
-            )
-
-            if attempt == max_retries or not is_transient:
+            kind = _classify_error(str(e))
+            if attempt == max_retries or kind == "permanent":
                 logger.error(
-                    f"Gemini API stream call failed permanently: {str(e)} "
-                    f"(attempt {attempt + 1}/{max_retries + 1})"
+                    "Gemini API stream call failed permanently: %s (attempt %d/%d)",
+                    e, attempt + 1, max_retries + 1,
                 )
-                raise e
-
+                raise
             logger.warning(
-                f"Gemini API stream transient failure. Retrying in {delay:.1f}s... "
-                f"(attempt {attempt + 1}/{max_retries + 1}): {str(e)}"
+                "Gemini API stream transient failure [%s]. Retrying in %.1fs... (attempt %d/%d): %s",
+                kind, delay, attempt + 1, max_retries + 1, e,
             )
             time.sleep(delay)
             delay *= backoff_factor
@@ -105,6 +130,77 @@ def get_client() -> genai.Client | None:
     return genai.Client(api_key=settings.gemini_api_key)
 
 
+# ---------------------------------------------------------------------------
+# Internal helpers that try each model in the chain
+# ---------------------------------------------------------------------------
+
+def _call_with_model_fallback(
+    client: genai.Client,
+    build_request: Callable[[str], types.GenerateContentResponse],
+    primary_model: str,
+    label: str,
+) -> types.GenerateContentResponse:
+    """Call build_request(model) cycling through the fallback chain on rate limits."""
+    chain = _build_model_chain(primary_model)
+    last_exc: Exception | None = None
+
+    for model in chain:
+        try:
+            response = retry_with_backoff(lambda m=model: build_request(m))
+            if model != primary_model:
+                logger.info("Gemini %s succeeded with fallback model: %s", label, model)
+            return response
+        except Exception as e:
+            kind = _classify_error(str(e))
+            if kind == "rate_limit" and model != chain[-1]:
+                logger.warning(
+                    "Gemini %s rate-limited on %s — trying next model. Error: %s",
+                    label, model, e,
+                )
+                last_exc = e
+                continue
+            raise
+
+    raise RuntimeError(f"All models exhausted for {label}") from last_exc
+
+
+def _stream_with_model_fallback(
+    client: genai.Client,
+    build_request: Callable[[str], Iterator[types.GenerateContentResponse]],
+    primary_model: str,
+    label: str,
+) -> Iterator[types.GenerateContentResponse]:
+    """Stream build_request(model) cycling through the fallback chain on rate limits."""
+    chain = _build_model_chain(primary_model)
+    last_exc: Exception | None = None
+
+    for model in chain:
+        try:
+            yielded_any = False
+            for chunk in retry_generator_with_backoff(lambda m=model: build_request(m)):
+                yielded_any = True
+                yield chunk
+            if model != primary_model and yielded_any:
+                logger.info("Gemini %s stream succeeded with fallback model: %s", label, model)
+            return
+        except Exception as e:
+            kind = _classify_error(str(e))
+            if kind == "rate_limit" and model != chain[-1]:
+                logger.warning(
+                    "Gemini %s stream rate-limited on %s — trying next model. Error: %s",
+                    label, model, e,
+                )
+                last_exc = e
+                continue
+            raise
+
+    raise RuntimeError(f"All models exhausted for {label}") from last_exc
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def ask_coach(question: str, context: str, history: list[dict] = None) -> str:
     """Ask the AI coach a question, given the user's data context and conversation history."""
     client = get_client()
@@ -114,7 +210,6 @@ def ask_coach(question: str, context: str, history: list[dict] = None) -> str:
     history_str = ""
     if history:
         history_str = "Recent Conversation History:\n"
-        # Only keep the last 4 messages to save context length
         for msg in history[-4:]:
             role = "Athlete" if msg["role"] == "user" else "Coach"
             history_str += f"{role}: {msg['content']}\n"
@@ -122,17 +217,18 @@ def ask_coach(question: str, context: str, history: list[dict] = None) -> str:
 
     prompt = f"{context}\n\n{history_str}Athlete Question:\n{question}"
 
+    def build_request(model: str) -> types.GenerateContentResponse:
+        return client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=COACH_SYSTEM_PROMPT,
+                temperature=0.7,
+            ),
+        )
+
     try:
-        def call_api():
-            return client.models.generate_content(
-                model=settings.gemini_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=COACH_SYSTEM_PROMPT,
-                    temperature=0.7,
-                ),
-            )
-        response = retry_with_backoff(call_api)
+        response = _call_with_model_fallback(client, build_request, settings.gemini_model, "ask_coach")
         return response.text or "No response from AI."
     except Exception:
         logger.exception("Error communicating with AI (ask_coach)")
@@ -153,7 +249,6 @@ def ask_coach_stream(
     history_str: str = ""
     if history:
         history_str = "Recent Conversation History:\n"
-        # Only keep the last 4 messages to save context length
         for msg in history[-4:]:
             role: str = "Athlete" if msg["role"] == "user" else "Coach"
             history_str += f"{role}: {msg['content']}\n"
@@ -161,18 +256,18 @@ def ask_coach_stream(
 
     prompt: str = f"{context}\n\n{history_str}Athlete Question:\n{question}"
 
+    def build_request(model: str) -> Iterator[types.GenerateContentResponse]:
+        return client.models.generate_content_stream(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=COACH_SYSTEM_PROMPT,
+                temperature=0.7,
+            ),
+        )
+
     try:
-        def call_api_stream() -> Iterator[types.GenerateContentResponse]:
-            assert client is not None
-            return client.models.generate_content_stream(
-                model=settings.gemini_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=COACH_SYSTEM_PROMPT,
-                    temperature=0.7,
-                ),
-            )
-        for chunk in retry_generator_with_backoff(call_api_stream):
+        for chunk in _stream_with_model_fallback(client, build_request, settings.gemini_model, "ask_coach_stream"):
             if chunk.text:
                 yield chunk.text
     except Exception:
@@ -186,17 +281,18 @@ def generate_briefing(context: str) -> str:
     if not client:
         return "AI features are disabled."
 
+    def build_request(model: str) -> types.GenerateContentResponse:
+        return client.models.generate_content(
+            model=model,
+            contents=context,
+            config=types.GenerateContentConfig(
+                system_instruction=WEEKLY_BRIEFING_PROMPT,
+                temperature=0.5,
+            ),
+        )
+
     try:
-        def call_briefing():
-            return client.models.generate_content(
-                model=settings.gemini_model,
-                contents=context,
-                config=types.GenerateContentConfig(
-                    system_instruction=WEEKLY_BRIEFING_PROMPT,
-                    temperature=0.5,
-                ),
-            )
-        response = retry_with_backoff(call_briefing)
+        response = _call_with_model_fallback(client, build_request, settings.gemini_model, "briefing")
         return response.text or "Failed to generate briefing."
     except Exception as e:
         return f"Error: {str(e)}"
@@ -209,17 +305,21 @@ def generate_postmortem(context: str, activity_context: str) -> str:
         return "AI features are disabled."
 
     prompt = f"{context}\n\nActivity Details:\n{activity_context}"
+
+    def build_request(model: str) -> types.GenerateContentResponse:
+        return client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=POSTMORTEM_PROMPT,
+                temperature=0.5,
+            ),
+        )
+
     try:
-        def call_postmortem():
-            return client.models.generate_content(
-                model=settings.gemini_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=POSTMORTEM_PROMPT,
-                    temperature=0.5,
-                ),
-            )
-        response = retry_with_backoff(call_postmortem)
+        response = _call_with_model_fallback(client, build_request, settings.gemini_model, "postmortem")
         return response.text or "Failed to generate postmortem."
     except Exception as e:
         return f"Error: {str(e)}"
+
+

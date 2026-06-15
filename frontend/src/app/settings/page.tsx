@@ -28,6 +28,7 @@ interface UserProfile {
   height_cm: string;
   weight_kg: string;
   body_fat_pct: string;
+  training_notes: string;
 }
 
 const EMPTY_GOAL: UserGoal = {
@@ -47,6 +48,7 @@ const EMPTY_PROFILE: UserProfile = {
   height_cm: "",
   weight_kg: "",
   body_fat_pct: "",
+  training_notes: "",
 };
 
 function daysUntil(dateStr: string): number | null {
@@ -140,6 +142,7 @@ export default function SettingsPage() {
             height_cm: data.height_cm?.toString() ?? "",
             weight_kg: data.weight_kg?.toString() ?? "",
             body_fat_pct: data.body_fat_pct?.toString() ?? "",
+            training_notes: data.training_notes ?? "",
           });
         }
       } catch {}
@@ -267,6 +270,7 @@ export default function SettingsPage() {
           height_cm: profile.height_cm ? parseFloat(profile.height_cm) : null,
           weight_kg: profile.weight_kg ? parseFloat(profile.weight_kg) : null,
           body_fat_pct: profile.body_fat_pct ? parseFloat(profile.body_fat_pct) : null,
+          training_notes: profile.training_notes || null,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -799,6 +803,62 @@ export default function SettingsPage() {
                 </div>
               </form>
             )}
+          </div>
+
+          {/* Training Notes for AI */}
+          <div className="card animate-fade-in" style={{ marginBottom: "var(--space-4)" }} id="settings-training-notes">
+            <div className="card-header" style={{ borderBottom: "1px solid var(--border-color)", paddingBottom: "var(--space-3)", marginBottom: "var(--space-4)" }}>
+              <div>
+                <div className="card-title" style={{ fontSize: "var(--text-base)" }}>AI Training Notes</div>
+                <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: "4px" }}>
+                  Personal preferences and constraints injected into every AI request — rest days, injury history, schedule limits, etc.
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+              <div>
+                <label
+                  htmlFor="training-notes-input"
+                  style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}
+                >
+                  Notes
+                </label>
+                <textarea
+                  id="training-notes-input"
+                  className="chat-input"
+                  rows={5}
+                  style={{ fontSize: "var(--text-sm)", resize: "vertical", fontFamily: "inherit", width: "100%", lineHeight: 1.6 }}
+                  placeholder={"e.g.\n- Rest every Sunday — no training\n- Left knee tendinopathy, avoid downhill running\n- Max 10h/week due to work schedule\n- Prefer morning sessions before 7am"}
+                  value={profile.training_notes}
+                  onChange={(e) => setProfile((p) => ({ ...p, training_notes: e.target.value }))}
+                />
+                <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: "6px" }}>
+                  These notes are sent to the AI coach on every conversation. Use plain text or bullet points.
+                </p>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                <button
+                  id="save-training-notes-btn"
+                  className="btn btn-primary"
+                  onClick={saveProfile}
+                  disabled={profileSaving}
+                >
+                  {profileSaving ? "Saving…" : "Save Notes"}
+                </button>
+                {profileSaved && (
+                  <span style={{ fontSize: "var(--text-sm)", color: "var(--color-accent-emerald)" }}>
+                    Saved — AI coach will use these on the next request.
+                  </span>
+                )}
+                {profileError && (
+                  <span style={{ fontSize: "var(--text-sm)", color: "#ef4444" }}>
+                    {profileError}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* API Sync Configuration */}

@@ -40,6 +40,15 @@ async def _fetch_user_goal(db: AsyncSession, user_id: str) -> str:
     if profile_parts:
         parts.append("### Athlete Profile\n" + "\n".join(profile_parts) + "\n")
 
+    if user.training_notes and user.training_notes.strip():
+        parts.append(
+            "### Personal Training Notes (User Preferences & Constraints)\n"
+            "> The athlete has provided the following personal notes. "
+            "Always respect these constraints when generating plans, recommendations, or briefings.\n\n"
+            + user.training_notes.strip()
+            + "\n"
+        )
+
     today = _dt.date.today()
     # Goals within the 30-day post-race recovery window are still surfaced to the AI
     # so it can advise on recovery, deload, and next cycle planning.
