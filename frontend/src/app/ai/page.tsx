@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Sidebar from "@/components/Sidebar";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // Lightning bolt SVG for AI avatar
 function AiGlyph() {
@@ -432,7 +433,7 @@ export default function AiPage() {
                             </span>
                           ) : (
                             <div className="markdown-body">
-                              <ReactMarkdown>{msg.content}</ReactMarkdown>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                             </div>
                           )}
 

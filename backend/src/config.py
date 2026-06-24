@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     gemini_enabled: bool = False
 
+    # --- OpenAI-compatible AI ---
+    openai_compat_enabled: bool = False
+    openai_compat_api_key: str = ""
+    openai_compat_base_url: str = "https://gen.ai.kku.ac.th/okmd/api/v1"
+    openai_compat_model: str = "gemini-2.5-flash-lite"
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"

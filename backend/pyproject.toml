@@ -29,6 +29,7 @@ dependencies = [
 
     # AI
     "google-genai>=1.0.0",
+    "openai>=1.0.0",
 
     # Config and utilities
     "pydantic>=2.10.0",
