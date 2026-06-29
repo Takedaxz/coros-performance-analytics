@@ -1,8 +1,21 @@
 """Context builder for AI insights."""
 
 import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
+
+_USER_TZ = ZoneInfo("Asia/Bangkok")  # UTC+7
+
+
+def _today_local() -> datetime.date:
+    """Return today's date in the athlete's local timezone (Asia/Bangkok, UTC+7)."""
+    return datetime.datetime.now(_USER_TZ).date()
+
+
+def _now_local() -> datetime.datetime:
+    """Return current datetime in the athlete's local timezone."""
+    return datetime.datetime.now(_USER_TZ)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,7 +62,7 @@ async def _fetch_user_goal(db: AsyncSession, user_id: str) -> str:
             + "\n"
         )
 
-    today = _dt.date.today()
+    today = _today_local()
     # Goals within the 30-day post-race recovery window are still surfaced to the AI
     # so it can advise on recovery, deload, and next cycle planning.
     recovery_cutoff = today - _dt.timedelta(days=30)
@@ -225,7 +238,7 @@ async def _fetch_plan_events(window_start: datetime.date, window_end: datetime.d
 
 async def build_training_context(db: AsyncSession, user_id: str, days: int = 14) -> str:
     """Build a markdown string containing recent training context."""
-    today = datetime.date.today()
+    today = _today_local()
     start_date = today - datetime.timedelta(days=days)
 
     # 0. Fetch user goal
@@ -358,15 +371,19 @@ async def build_training_context(db: AsyncSession, user_id: str, days: int = 14)
 
 async def build_plan_context(days_back: int = 7, days_forward: int = 14) -> str:
     """Build a markdown string of upcoming and recent training plan events."""
-    today = datetime.date.today()
+    now = _now_local()
+    today = now.date()
     window_start = today - datetime.timedelta(days=days_back)
     window_end = today + datetime.timedelta(days=days_forward)
 
     events = await _fetch_plan_events(window_start, window_end)
 
+    day_name = today.strftime("%A")  # e.g. "Sunday"
+    local_time_str = now.strftime("%H:%M")
+
     lines = [
         f"### Training Plan Schedule ({window_start} to {window_end})",
-        f"Today is {today.isoformat()}.",
+        f"Current date (athlete local time, UTC+7 / Asia/Bangkok): {today.isoformat()} ({day_name}), {local_time_str}.",
         "",
         "| Date | Session | Status |",
         "|------|---------|--------|",

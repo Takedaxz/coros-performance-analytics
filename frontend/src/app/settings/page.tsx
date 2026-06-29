@@ -465,7 +465,14 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 ) : (
-                  goals.map((g) => {
+                  [...goals]
+                    .sort((a, b) => {
+                      if (!a.goal_race_date && !b.goal_race_date) return 0;
+                      if (!a.goal_race_date) return 1;
+                      if (!b.goal_race_date) return -1;
+                      return a.goal_race_date < b.goal_race_date ? -1 : a.goal_race_date > b.goal_race_date ? 1 : 0;
+                    })
+                    .map((g) => {
                     const daysLeft = daysUntil(g.goal_race_date);
                     const raceState = goalRaceState(g.goal_race_date);
                     const isFrozen = g.is_active && (raceState === "recovery" || raceState === "expired");
@@ -502,7 +509,6 @@ export default function SettingsPage() {
                             textTransform: "uppercase",
                             fontWeight: 600,
                           }}>
-                            🔒 Read-only
                           </div>
                         )}
 
@@ -544,7 +550,7 @@ export default function SettingsPage() {
                                   }}
                                   title="AI can still access this goal for post-race recovery planning for up to 30 days after the race."
                                 >
-                                  🏁 Recovery Mode
+                                  Recovery Mode
                                 </span>
                               )}
 
