@@ -23,12 +23,18 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup and shutdown lifecycle."""
-    # Startup: ensure raw file store directory exists
     import os
 
+    from src.db.engine import engine
+    from src.db.models import Base
+
     os.makedirs(settings.raw_file_store_path, exist_ok=True)
+    # Create any tables that don't exist yet (idempotent — safe to run every boot)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     yield
     # Shutdown: nothing to clean up for now
+
 
 
 app = FastAPI(

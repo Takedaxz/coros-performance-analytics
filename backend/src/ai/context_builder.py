@@ -325,7 +325,8 @@ async def build_training_context(db: AsyncSession, user_id: str, days: int = 14)
     )
 
     for s in sleep_records:
-        date_str = s.sleep_start.strftime("%Y-%m-%d")
+        local_start = s.sleep_start.replace(tzinfo=datetime.timezone.utc).astimezone(_USER_TZ)
+        date_str = local_start.strftime("%Y-%m-%d")
         dur = f"{s.duration_s / 3600:.1f}" if s.duration_s else "--"
         deep = f"{s.stage_deep_s / 3600:.1f}" if s.stage_deep_s else "--"
         rem = f"{s.stage_rem_s / 3600:.1f}" if s.stage_rem_s else "--"
@@ -341,7 +342,8 @@ async def build_training_context(db: AsyncSession, user_id: str, days: int = 14)
     )
 
     for a in activities:
-        date_str = a.start_time.strftime("%Y-%m-%d %H:%M")
+        local_start = a.start_time.replace(tzinfo=datetime.timezone.utc).astimezone(_USER_TZ)
+        date_str = local_start.strftime("%Y-%m-%d %H:%M")
         atype = a.title or (a.sport.value if a.sport else "--")
         dist = f"{a.distance_m / 1000:.2f}" if a.distance_m else "--"
         dur = f"{a.elapsed_time_s / 60:.1f}" if a.elapsed_time_s else "--"
