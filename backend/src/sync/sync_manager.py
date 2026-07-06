@@ -261,12 +261,39 @@ async def _upsert_daily_health(
 
         valid_hrvs = [val for val in hrv_by_date.values() if val is not None]
         hrv_7d_sma = int(sum(valid_hrvs) / len(valid_hrvs)) if valid_hrvs else None
+        
+        # Build RHR baseline from the incoming daily data batch
+        rhr_by_date = {
+            _parse_date(d.get("happenDay")): d.get("rhr") 
+            for d in daily if _parse_date(d.get("happenDay")) and d.get("rhr")
+        }
+        valid_rhrs = [val for val in rhr_by_date.values() if val is not None]
+        rhr_7d_sma = int(sum(valid_rhrs) / len(valid_rhrs)) if valid_rhrs else None
 
-        # Coros doesn't have a direct 'Recovery' percentage.
-        # We can approximate it by taking the inverse of 'tiredRate' (Fatigue), which is 0-100.
+        # Calculate a true readiness score based on HRV, RHR, and Fatigue
+        rhr_val = item.get("rhr")
         tired_rate = item.get("tiredRate", 0)
-        recovery = max(0, min(100, int(100 - tired_rate))) if tired_rate > 0 else None
-        readiness = recovery
+        
+        readiness_score = 100.0
+        
+        # 1. HRV component (+ points if higher than baseline, - if lower)
+        if hrv_val and hrv_7d_sma and hrv_7d_sma > 0:
+            hrv_ratio = hrv_val / hrv_7d_sma
+            readiness_score += (hrv_ratio - 1.0) * 100.0
+            
+        # 2. RHR component (- points if higher than baseline, + if lower)
+        if rhr_val and rhr_7d_sma and rhr_7d_sma > 0:
+            rhr_ratio = rhr_val / rhr_7d_sma
+            readiness_score -= (rhr_ratio - 1.0) * 100.0
+            
+        # 3. Fatigue component (penalize if tired_rate > 40)
+        if tired_rate > 40:
+            readiness_score -= (tired_rate - 40)
+            
+        # Clamp to 0-100
+        readiness = int(max(0, min(100, readiness_score)))
+        # Map this new robust score to both readiness and recovery variables
+        recovery = readiness
 
         # Compute Strain from today's activities
         day_start = datetime.combine(dt, datetime.min.time())

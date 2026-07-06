@@ -312,36 +312,13 @@ export default function AiPage() {
   }
 
   async function generateBriefing(sid: string) {
+    if (isLoading) return;
     if (sid.startsWith("temp-")) {
       const realSession = await createRealSession(sid);
       if (!realSession) return;
       sid = realSession.id;
     }
-
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.id === sid
-          ? { ...s, title: s.title === "New Chat" ? "Weekly Briefing" : s.title, updated_at: new Date().toISOString() }
-          : s
-      )
-    );
-    isStreamingRef.current = true;
-    setIsLoading(true);
-    setMessages((prev) => [...prev, { role: "user", content: "Generate a weekly briefing" }]);
-    try {
-      const res = await fetch(`${API_BASE}/api/ai/briefing`);
-      if (res.ok) {
-        const data = await res.json();
-        setMessages((prev) => [...prev, { role: "ai", content: data.briefing }]);
-      } else {
-        setMessages((prev) => [...prev, { role: "ai", content: "Error generating briefing." }]);
-      }
-    } catch {
-      setMessages((prev) => [...prev, { role: "ai", content: "Failed to fetch briefing." }]);
-    }
-    isStreamingRef.current = false;
-    setIsLoading(false);
-    fetchSessions();
+    await handleSend("Generate a weekly briefing", sid);
   }
 
   async function handleChipClick(chip: (typeof SUGGESTED_PROMPTS)[number]) {
@@ -528,7 +505,7 @@ export default function AiPage() {
         {/* ── Chat panel ── */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <header className="page-header">
-            <h2 className="page-title">AI Performance Coach</h2>
+            <h2 className="page-title">AI Coach</h2>
           </header>
 
           <div className="page-body" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", padding: 0 }}>
