@@ -72,7 +72,7 @@ async def ask_ai(
     context = await build_training_context(
         db, user_id="00000000-0000-0000-0000-000000000000", days=req.context_days
     )
-    plan_context = await build_plan_context(days_back=7, days_forward=30)
+    plan_context = await build_plan_context(days_back=14, days_forward=30)
     context = context + "\n\n" + plan_context
 
     # 2. Ask AI coach
@@ -103,7 +103,7 @@ async def ask_ai_stream(
     context: str = await build_training_context(
         db, user_id="00000000-0000-0000-0000-000000000000", days=req.context_days
     )
-    plan_context: str = await build_plan_context(days_back=7, days_forward=30)
+    plan_context: str = await build_plan_context(days_back=14, days_forward=30)
     context = context + "\n\n" + plan_context
 
     # 2. Stream AI coach response
@@ -165,7 +165,7 @@ async def weekly_briefing(
     context = await build_training_context(
         db, user_id="00000000-0000-0000-0000-000000000000", days=7
     )
-    plan_context = await build_plan_context(days_back=7, days_forward=30)
+    plan_context = await build_plan_context(days_back=14, days_forward=30)
     context = context + "\n\n" + plan_context
 
     # 2. Generate briefing
@@ -231,6 +231,7 @@ _USER_ID = "00000000-0000-0000-0000-000000000000"
 class SessionCreateResponse(BaseModel):
     id: str
     title: str
+    is_pinned: bool
     created_at: str
     updated_at: str
 
@@ -238,8 +239,14 @@ class SessionCreateResponse(BaseModel):
 class SessionListItem(BaseModel):
     id: str
     title: str
+    is_pinned: bool
     created_at: str
     updated_at: str
+
+
+class SessionUpdateRequest(BaseModel):
+    title: str | None = None
+    is_pinned: bool | None = None
 
 
 class MessageItem(BaseModel):
@@ -255,13 +262,14 @@ async def list_sessions(db: AsyncSession = Depends(get_db_session)) -> list[Sess
     res = await db.execute(
         select(DBChatSession)
         .where(DBChatSession.user_id == _USER_ID)
-        .order_by(DBChatSession.updated_at.desc())
+        .order_by(DBChatSession.is_pinned.desc(), DBChatSession.updated_at.desc())
     )
     sessions = res.scalars().all()
     return [
         SessionListItem(
             id=s.id,
             title=s.title,
+            is_pinned=s.is_pinned,
             created_at=s.created_at.isoformat(),
             updated_at=s.updated_at.isoformat(),
         )
@@ -278,6 +286,38 @@ async def create_session(db: AsyncSession = Depends(get_db_session)) -> SessionC
     return SessionCreateResponse(
         id=session.id,
         title=session.title,
+        is_pinned=session.is_pinned,
+        created_at=session.created_at.isoformat(),
+        updated_at=session.updated_at.isoformat(),
+    )
+
+
+@router.put("/sessions/{session_id}", response_model=SessionListItem)
+async def update_session(
+    session_id: str,
+    req: SessionUpdateRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> SessionListItem:
+    """Update a chat session (title, pinned status)."""
+    res = await db.execute(
+        select(DBChatSession).where(
+            DBChatSession.id == session_id, DBChatSession.user_id == _USER_ID
+        )
+    )
+    session = res.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    
+    if req.title is not None:
+        session.title = req.title
+    if req.is_pinned is not None:
+        session.is_pinned = req.is_pinned
+        
+    await db.commit()
+    return SessionListItem(
+        id=session.id,
+        title=session.title,
+        is_pinned=session.is_pinned,
         created_at=session.created_at.isoformat(),
         updated_at=session.updated_at.isoformat(),
     )
@@ -345,7 +385,7 @@ async def session_ask_stream(
 
     # Build context
     context: str = await build_training_context(db, user_id=_USER_ID, days=req.context_days)
-    plan_context: str = await build_plan_context(days_back=7, days_forward=30)
+    plan_context: str = await build_plan_context(days_back=14, days_forward=30)
     context = context + "\n\n" + plan_context
 
     history_dicts: list[dict[str, str]] = [

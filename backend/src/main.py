@@ -10,7 +10,6 @@ from src.api.routes import (
     activity_router,
     ai_router,
     dashboard_router,
-    import_router,
     settings_router,
     sync_router,
     training_plan_router,
@@ -52,7 +51,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(import_router, prefix="/api/import", tags=["import"])
 app.include_router(sync_router, prefix="/api/sync", tags=["sync"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(activity_router, prefix="/api/activities", tags=["activities"])
