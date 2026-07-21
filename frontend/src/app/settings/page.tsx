@@ -70,6 +70,8 @@ function goalRaceState(dateStr: string): "upcoming" | "recovery" | "expired" | "
 export default function SettingsPage() {
   const [syncConfig, setSyncConfig] = useState<SyncStatus | null>(null);
   const [appStatus, setAppStatus] = useState<AppStatus | null>(null);
+  const [mcpStatus, setMcpStatus] = useState<{ connected: boolean; expired?: boolean } | null>(null);
+  const [mcpConnecting, setMcpConnecting] = useState(false);
   
   // Multi-goal state
   const [goals, setGoals] = useState<UserGoal[]>([]);
@@ -148,10 +150,46 @@ export default function SettingsPage() {
       } catch {}
     }
 
+    async function fetchMcpStatus() {
+      try {
+        const res = await fetch(`${apiBase}/auth/coros-mcp/status`);
+        if (res.ok) setMcpStatus(await res.json());
+      } catch {
+        // Backend not available
+      }
+    }
+
     fetchConfig();
     fetchGoals();
     fetchProfile();
+    fetchMcpStatus();
   }, [apiBase]);
+
+  async function connectMcp() {
+    setMcpConnecting(true);
+    const popup = window.open(`${apiBase}/auth/coros-mcp/connect`, "_blank", "width=540,height=780");
+    // Poll status after popup closes or after 60 s
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${apiBase}/auth/coros-mcp/status`);
+        if (res.ok) {
+          const data = await res.json();
+          setMcpStatus(data);
+          if (data.connected) {
+            clearInterval(poll);
+            setMcpConnecting(false);
+          }
+        }
+      } catch { /* ignore */ }
+    }, 2000);
+    setTimeout(() => { clearInterval(poll); setMcpConnecting(false); }, 120_000);
+    if (popup) popup.addEventListener("close", () => clearInterval(poll));
+  }
+
+  async function disconnectMcp() {
+    await fetch(`${apiBase}/auth/coros-mcp`, { method: "DELETE" });
+    setMcpStatus({ connected: false });
+  }
 
   async function saveGoal() {
     setGoalSaving(true);
@@ -291,6 +329,60 @@ export default function SettingsPage() {
           <h2 className="page-title">Settings</h2>
         </header>
         <div className="page-body">
+
+          {/* COROS MCP — Sleep Data Integration */}
+          <div className="card animate-fade-in" style={{ marginBottom: "var(--space-4)" }} id="settings-coros-mcp">
+            <div className="card-header" style={{ borderBottom: "1px solid var(--border-color)", paddingBottom: "var(--space-3)", marginBottom: "var(--space-4)" }}>
+              <div>
+                <div className="card-title" style={{ fontSize: "var(--text-base)", display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                  COROS MCP — Sleep Data
+                  {mcpStatus?.connected && !mcpStatus?.expired && (
+                    <span style={{ fontSize: "var(--text-xs)", background: "rgba(52,211,153,0.15)", color: "#34d399", borderRadius: "999px", padding: "2px 10px", fontWeight: 600 }}>
+                      Connected
+                    </span>
+                  )}
+                  {mcpStatus?.connected && mcpStatus?.expired && (
+                    <span style={{ fontSize: "var(--text-xs)", background: "rgba(251,191,36,0.15)", color: "#fbbf24", borderRadius: "999px", padding: "2px 10px", fontWeight: 600 }}>
+                      Token Expired
+                    </span>
+                  )}
+                </div>
+                <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: "4px" }}>
+                  Connect via COROS OAuth to sync detailed sleep stages (deep / light / REM) without logging your phone out.
+                </p>
+              </div>
+              {mcpStatus?.connected ? (
+                <button
+                  id="settings-coros-mcp-disconnect"
+                  className="btn btn-secondary btn-sm"
+                  onClick={disconnectMcp}
+                  style={{ color: "#ef4444", borderColor: "#ef4444" }}
+                >
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  id="settings-coros-mcp-connect"
+                  className="btn btn-primary btn-sm"
+                  onClick={connectMcp}
+                  disabled={mcpConnecting}
+                >
+                  {mcpConnecting ? "Waiting…" : "Connect COROS MCP"}
+                </button>
+              )}
+            </div>
+            <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>
+              {!mcpStatus?.connected && (
+                <p>Click <strong>Connect COROS MCP</strong> — a COROS login window will open. After authorizing, sleep stages will sync automatically.</p>
+              )}
+              {mcpStatus?.connected && !mcpStatus?.expired && (
+                <p style={{ color: "#34d399" }}>Sleep stage sync is active. Deep / light / REM data will be fetched on each sync.</p>
+              )}
+              {mcpStatus?.connected && mcpStatus?.expired && (
+                <p style={{ color: "#fbbf24" }}>Token has expired. Click <strong>Connect COROS MCP</strong> again to re-authorize.</p>
+              )}
+            </div>
+          </div>
 
           {/* User Profile & Biometrics */}
           <div className="card animate-fade-in" style={{ marginBottom: "var(--space-4)" }} id="settings-profile">

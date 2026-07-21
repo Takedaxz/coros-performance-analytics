@@ -64,9 +64,11 @@ async def run_sync(
             password=settings.coros_password,
             redis=redis,
         )
-        # Warm both tokens once. All fetch methods below reuse these.
+        # Use Team API only (teamapi.coros.com) — no Mobile API login.
+        # Calling /coros/user/login invalidates the phone's active session;
+        # sleep stages are unavailable via Team API REST but we keep HRV
+        # from fetch_hrv() and fetch_daily_metrics() below.
         await client.login()
-        await client.mobile_login()
 
         end_date = datetime.utcnow().date()
         start_date = end_date - timedelta(days=days)
@@ -80,7 +82,7 @@ async def run_sync(
         total_upserted += activity_count
         _emit(on_event, "progress", f'{{"stage": "activities_done", "count": {activity_count}}}')
 
-        # --- Daily Health & Sleep & Fitness ---
+        # --- Daily Health & Fitness (Team API only) ---
         _emit(on_event, "progress", '{"stage": "health", "message": "Fetching daily health..."}')
         raw_health = await client.fetch_daily_metrics(start_str, end_str)
         raw_hrv = await client.fetch_hrv()
@@ -92,16 +94,28 @@ async def run_sync(
         fitness_count = await _upsert_fitness(db, user_id, raw_fitness)
         total_upserted += fitness_count
 
-        _emit(on_event, "progress", '{"stage": "sleep", "message": "Fetching sleep stages..."}')
-        raw_sleep = await client.fetch_sleep(start_str, end_str)
-        sleep_count = await _upsert_sleep(db, user_id, raw_sleep)
-        total_upserted += sleep_count
-
         _emit(
             on_event,
             "progress",
-            f'{{"stage": "health_done", "count": {health_count + sleep_count}}}',
+            f'{{"stage": "health_done", "count": {health_count}}}',
         )
+
+        # --- Sleep stages via COROS MCP (no Mobile API) ---
+        _emit(on_event, "progress", '{"stage": "sleep", "message": "Fetching sleep stages (MCP)..."}')
+        sleep_count = 0
+        try:
+            from src.mcp.sleep_client import fetch_sleep_via_mcp
+            raw_sleep = await fetch_sleep_via_mcp(start_str, end_str, db)
+            sleep_count = await _upsert_sleep(db, user_id, raw_sleep)
+            total_upserted += sleep_count
+            _emit(on_event, "progress", f'{{"stage": "sleep_done", "count": {sleep_count}}}')
+        except RuntimeError as exc:
+            # MCP not connected yet — normal on first run before OAuth
+            logger.info("coros_mcp_sleep: skipped — %s", exc)
+            _emit(on_event, "progress", '{"stage": "sleep_skipped", "reason": "MCP not connected"}')
+        except Exception as exc:
+            logger.warning("coros_mcp_sleep: unexpected error — %s", exc)
+            _emit(on_event, "progress", f'{{"stage": "sleep_error", "reason": "{exc}"}}' )
 
         sync_event.status = "completed"
         sync_event.records_upserted = total_upserted

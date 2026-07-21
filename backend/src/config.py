@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     coros_password: str | None = None
     sync_interval_minutes: int = Field(default=15, ge=1, le=1440)
 
+    # --- COROS MCP (OAuth for sleep data) ---
+    coros_mcp_url: str = "https://mcpus.coros.com/mcp"
+    coros_mcp_redirect_uri: str = "http://localhost:8000/auth/coros-mcp/callback"
+
     # --- Gemini AI ---
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"

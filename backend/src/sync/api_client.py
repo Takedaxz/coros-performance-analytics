@@ -311,7 +311,7 @@ class CorosApiClient:
             "account": self._mobile_encrypt(self.email, app_key) + "\\n",
             "accountType": 2,
             "appKey": app_key,
-            "clientType": 1,
+            "clientType": 2,
             "hasHrCalibrated": 0,
             "kbValidity": 0,
             "pwd": self._mobile_encrypt(self._md5(self.password), app_key) + "\\n",
