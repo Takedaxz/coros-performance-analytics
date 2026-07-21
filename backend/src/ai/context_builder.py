@@ -224,13 +224,28 @@ async def _fetch_plan_events(window_start: datetime.date, window_end: datetime.d
         lines = block[:end_idx].strip().splitlines()
         summary = _extract_ical_value(lines, "SUMMARY")
         dtstart_raw = _extract_ical_value(lines, "DTSTART")
+        description_raw = _extract_ical_value(lines, "DESCRIPTION")
         if not summary or not dtstart_raw:
             continue
         start_date = _parse_ical_date(dtstart_raw)
         if start_date is None:
             continue
+            
+        description = ""
+        if description_raw:
+            description = (
+                description_raw.replace("\\n", "\n")
+                .replace("\\N", "\n")
+                .replace("\\,", ",")
+                .replace("\\;", ";")
+            )
+
         if window_start <= start_date <= window_end:
-            events.append({"date": start_date.isoformat(), "summary": summary})
+            events.append({
+                "date": start_date.isoformat(), 
+                "summary": summary,
+                "description": description
+            })
 
     events.sort(key=lambda e: e["date"])
     return events
@@ -389,6 +404,8 @@ async def build_plan_context(days_back: int = 7, days_forward: int = 14) -> str:
         "|------|---------|--------|",
     ]
 
+    events_with_details = []
+
     for ev in events:
         event_date = datetime.date.fromisoformat(ev["date"])
         if event_date < today:
@@ -398,5 +415,17 @@ async def build_plan_context(days_back: int = 7, days_forward: int = 14) -> str:
         else:
             status = "Upcoming"
         lines.append(f"| {ev['date']} | {ev['summary']} | {status} |")
+        
+        if ev.get("description"):
+            events_with_details.append((ev, status))
+            
+    if events_with_details:
+        lines.append("")
+        lines.append("#### Session Details")
+        for ev, status in events_with_details:
+            lines.append(f"**{ev['date']} - {ev['summary']} ({status})**")
+            for d in ev["description"].splitlines():
+                lines.append(f"> {d}")
+            lines.append("")
 
     return "\n".join(lines)

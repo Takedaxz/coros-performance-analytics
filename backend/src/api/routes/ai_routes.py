@@ -46,6 +46,8 @@ class ChatMessage(BaseModel):
 class AskRequest(BaseModel):
     question: str
     context_days: int = 14
+    plan_days_back: int = 7
+    plan_days_forward: int = 14
     history: list[ChatMessage] = []
 
 
@@ -72,7 +74,7 @@ async def ask_ai(
     context = await build_training_context(
         db, user_id="00000000-0000-0000-0000-000000000000", days=req.context_days
     )
-    plan_context = await build_plan_context(days_back=14, days_forward=30)
+    plan_context = await build_plan_context(days_back=req.plan_days_back, days_forward=req.plan_days_forward)
     context = context + "\n\n" + plan_context
 
     # 2. Ask AI coach
@@ -103,7 +105,7 @@ async def ask_ai_stream(
     context: str = await build_training_context(
         db, user_id="00000000-0000-0000-0000-000000000000", days=req.context_days
     )
-    plan_context: str = await build_plan_context(days_back=14, days_forward=30)
+    plan_context: str = await build_plan_context(days_back=req.plan_days_back, days_forward=req.plan_days_forward)
     context = context + "\n\n" + plan_context
 
     # 2. Stream AI coach response
@@ -385,7 +387,7 @@ async def session_ask_stream(
 
     # Build context
     context: str = await build_training_context(db, user_id=_USER_ID, days=req.context_days)
-    plan_context: str = await build_plan_context(days_back=14, days_forward=30)
+    plan_context: str = await build_plan_context(days_back=req.plan_days_back, days_forward=req.plan_days_forward)
     context = context + "\n\n" + plan_context
 
     history_dicts: list[dict[str, str]] = [

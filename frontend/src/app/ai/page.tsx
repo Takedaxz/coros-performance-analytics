@@ -165,6 +165,8 @@ export default function AiPage() {
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [planDaysBack, setPlanDaysBack] = useState(7);
+  const [planDaysForward, setPlanDaysForward] = useState(14);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const aiResponseRef = useRef("");
   // Prevents the activeSessionId effect from fetching + overwriting messages while a send is in progress
@@ -334,6 +336,8 @@ export default function AiPage() {
         body: JSON.stringify({
           question: userMsg,
           context_days: 14,
+          plan_days_back: planDaysBack,
+          plan_days_forward: planDaysForward,
           history: baseHistory.slice(-6).map((m) => ({
             role: m.role === "ai" ? "assistant" : "user",
             content: m.content,
@@ -464,25 +468,40 @@ export default function AiPage() {
     return (
       <div style={{ width: "100%", maxWidth: "600px", display: "flex", flexDirection: "column", gap: "var(--space-3)", position: "relative", zIndex: 1 }}>
         <div className="cmd-bar-wrap" style={{ maxWidth: "100%" }}>
-          <input
+          <textarea
             id={sessionId ? "new-session-input" : "empty-state-input"}
             className="cmd-bar"
-            type="text"
             placeholder="How can I improve my recovery score?"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              e.target.style.height = "56px";
+              e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+            }}
             onKeyDown={async (e) => {
-              if (e.key !== "Enter" || !input.trim()) return;
-              const msg = input.trim();
-              if (!sessionId) {
-                const s = await createRealSession();
-                if (s) handleSend(msg, s.id);
-              } else {
-                handleSend(msg, sessionId);
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!input.trim()) return;
+                const msg = input.trim();
+                e.currentTarget.style.height = "56px";
+                if (!sessionId) {
+                  const s = await createRealSession();
+                  if (s) handleSend(msg, s.id);
+                } else {
+                  handleSend(msg, sessionId);
+                }
               }
             }}
             disabled={isLoading}
             autoFocus
+            style={{
+              resize: "none",
+              paddingTop: "16px",
+              paddingBottom: "16px",
+              lineHeight: "1.4",
+              overflowY: "auto"
+            }}
+            rows={1}
           />
           <button
             id={sessionId ? "new-session-send-btn" : "empty-state-send-btn"}
@@ -490,6 +509,8 @@ export default function AiPage() {
             onClick={async () => {
               if (!input.trim()) return;
               const msg = input.trim();
+              const el = document.getElementById(sessionId ? "new-session-input" : "empty-state-input");
+              if (el) el.style.height = "56px";
               if (!sessionId) {
                 const s = await createRealSession();
                 if (s) handleSend(msg, s.id);
@@ -499,6 +520,7 @@ export default function AiPage() {
             }}
             disabled={isLoading || !input.trim()}
             aria-label="Send message"
+            style={{ top: "auto", bottom: "8px", transform: "none" }}
           >
             <SendIcon />
           </button>
@@ -707,16 +729,37 @@ export default function AiPage() {
         <div className="print-block" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <header className="page-header print-hide">
             <h2 className="page-title">AI Coach</h2>
-            {activeSessionId && !isEmpty && (
-              <div style={{ display: "flex", gap: "var(--space-2)" }}>
-                <button className="btn btn-ghost btn-sm" onClick={handleExportMarkdown} title="Export as Markdown" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                  <DownloadIcon /> Export MD
-                </button>
-                <button className="btn btn-ghost btn-sm" onClick={handlePrint} title="Print / Save as PDF" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                  <PrintIcon /> Print PDF
-                </button>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginRight: "var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)" }}>
+                <span>Calendar Context:</span>
+                <input 
+                  type="number" 
+                  value={planDaysBack}
+                  onChange={(e) => setPlanDaysBack(parseInt(e.target.value) || 0)}
+                  style={{ width: "40px", padding: "2px 4px", background: "var(--color-bg-primary)", border: "1px solid var(--border-color)", borderRadius: "4px", fontSize: "var(--text-xs)" }}
+                  title="Days back"
+                />
+                <span>days back,</span>
+                <input 
+                  type="number" 
+                  value={planDaysForward}
+                  onChange={(e) => setPlanDaysForward(parseInt(e.target.value) || 0)}
+                  style={{ width: "40px", padding: "2px 4px", background: "var(--color-bg-primary)", border: "1px solid var(--border-color)", borderRadius: "4px", fontSize: "var(--text-xs)" }}
+                  title="Days forward"
+                />
+                <span>days forward</span>
               </div>
-            )}
+              {activeSessionId && !isEmpty && (
+                <>
+                  <button className="btn btn-ghost btn-sm" onClick={handleExportMarkdown} title="Export as Markdown" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                    <DownloadIcon /> Export MD
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={handlePrint} title="Print / Save as PDF" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                    <PrintIcon /> Print PDF
+                  </button>
+                </>
+              )}
+            </div>
           </header>
 
           <div className="page-body" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", padding: 0 }}>
@@ -823,17 +866,47 @@ export default function AiPage() {
                 <div className="chat-input-bar print-hide">
                   <div className="chat-input-bar-inner">
                     <div className="cmd-bar-wrap" style={{ maxWidth: "100%" }}>
-                      <input
+                      <textarea
                         id="chat-input"
                         className="cmd-bar"
-                        type="text"
                         placeholder="Ask your coach anything..."
                         value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                        onChange={(e) => {
+                          setInput(e.target.value);
+                          e.target.style.height = "56px";
+                          e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            if (!input.trim()) return;
+                            handleSend();
+                            e.currentTarget.style.height = "56px";
+                          }
+                        }}
                         disabled={isLoading}
+                        style={{
+                          resize: "none",
+                          paddingTop: "16px",
+                          paddingBottom: "16px",
+                          lineHeight: "1.4",
+                          overflowY: "auto"
+                        }}
+                        rows={1}
                       />
-                      <button id="chat-send-btn" className="cmd-bar-send" onClick={() => handleSend()} disabled={isLoading || !input.trim()} aria-label="Send message">
+                      <button 
+                        id="chat-send-btn" 
+                        className="cmd-bar-send" 
+                        onClick={() => {
+                          if (!input.trim()) return;
+                          handleSend();
+                          const el = document.getElementById("chat-input");
+                          if (el) el.style.height = "56px";
+                        }} 
+                        disabled={isLoading || !input.trim()} 
+                        aria-label="Send message"
+                        style={{ top: "auto", bottom: "8px", transform: "none" }}
+                      >
                         <SendIcon />
                       </button>
                     </div>
