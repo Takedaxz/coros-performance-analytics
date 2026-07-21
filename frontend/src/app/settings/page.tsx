@@ -886,12 +886,7 @@ export default function SettingsPage() {
                   {syncConfig?.api_enabled ? "Configured" : "Missing Credentials"}
                 </div>
               </div>
-              <div>
-                <div className="metric-label">Sync Interval</div>
-                <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-primary)", marginTop: "var(--space-1)" }}>
-                  Every {syncConfig?.sync_interval_minutes || "15"} minutes
-                </div>
-              </div>
+
               <div>
                 <div className="metric-label">Last Sync</div>
                 <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-primary)", marginTop: "var(--space-1)" }}>
@@ -904,37 +899,6 @@ export default function SettingsPage() {
             </p>
           </div>
 
-          {/* AI Configuration */}
-          <div className="card" style={{ marginBottom: "var(--space-4)" }} id="settings-ai">
-            <div className="card-header">
-              <div className="card-title">AI Analysis (Gemini)</div>
-              <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-                <span className="badge badge-source">gemini-3.0-flash-preview</span>
-                {appStatus?.gemini_enabled ? (
-                  <span className="badge badge-success">Connected</span>
-                ) : (
-                  <span className="badge" style={{ background: "rgba(139,149,168,0.1)", color: "var(--color-text-muted)", border: "1px solid var(--border-color)" }}>
-                    Disabled
-                  </span>
-                )}
-              </div>
-            </div>
-            
-            {appStatus?.gemini_enabled ? (
-              <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-primary)" }}>
-                API key configured successfully. AI-powered weekly briefings, activity postmortems, and natural-language Q&A are active.
-              </p>
-            ) : (
-              <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>
-                Set GEMINI_API_KEY and GEMINI_ENABLED=true in the backend .env file to enable AI-powered
-                weekly briefings, activity postmortems, and natural-language Q&A.
-              </p>
-            )}
-            
-            <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: "var(--space-2)" }}>
-              Only derived aggregates are sent to Gemini, never raw health data.
-            </p>
-          </div>
 
           {/* Data Management */}
           <div className="card" id="settings-data">

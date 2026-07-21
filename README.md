@@ -2,7 +2,7 @@
 
 > Self-hosted personal health and athletic performance analytics for COROS smartwatch users.
 
-COROS Analytics ingests data from your COROS watch via the official API and manual file imports (FIT/TCX/ZIP), computes advanced training metrics, and provides a Gemini-powered AI coach for natural-language training analysis — all running on your own infrastructure with PostgreSQL and Redis.
+COROS Analytics ingests data from your COROS watch via the official API, computes advanced training metrics, and provides an AI coach for natural-language training analysis — all running on your own infrastructure with PostgreSQL and Redis.
 
 <p align="center">
   <img src="README/hero.png" alt="COROS Analytics Dashboard" width="100%" />
@@ -17,7 +17,6 @@ COROS Analytics ingests data from your COROS watch via the official API and manu
   <img src="https://img.shields.io/badge/react-19-61dafb.svg" alt="React">
   <img src="https://img.shields.io/badge/postgresql-16-336791.svg" alt="PostgreSQL">
   <img src="https://img.shields.io/badge/redis-7-dc382d.svg" alt="Redis">
-  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
 </p>
 
 ---
@@ -26,7 +25,6 @@ COROS Analytics ingests data from your COROS watch via the official API and manu
 
 ### Data Ingestion
 - **COROS API Sync** — Real-time data pull via authenticated COROS team and mobile APIs (AES-encrypted)
-- **FIT/TCX/ZIP Import** — Drag-and-drop upload of raw activity files from COROS Training Hub exports
 - **SHA-256 deduplication** — Every record is hash-checked to prevent double-imports
 - **SSE progress streaming** — Live sync progress with stage-by-stage updates
 
@@ -40,7 +38,7 @@ COROS Analytics ingests data from your COROS watch via the official API and manu
 | Performance | Race Time Prediction (5K/10K/Half/Marathon), Pace Zones (Daniels & Friel) |
 | Anomaly | Z-score and IQR outlier detection on HRV, RHR, and training load |
 
-### AI Coach (Gemini)
+### AI Coach
 - **Chat** — Ask natural-language questions about your training data ("Am I overtraining?", "How should I taper for my race?")
 - **Weekly Briefing** — Auto-generated summary of last week's training load, recovery, and progress toward goals
 - **Workout Postmortem** — Per-activity AI analysis with context from recent training and recovery data
@@ -71,13 +69,13 @@ COROS Analytics ingests data from your COROS watch via the official API and manu
 ┌─────────────────────────────▼────────────────────────────────┐
 │                     FastAPI (Python 3.12)                      │
 │  /api/dashboard  /api/activities  /api/ai  /api/sync          │
-│  /api/import     /api/settings    /api/training-plan          │
+│  /api/settings   /api/training-plan                           │
 └───────┬──────────────────────┬───────────────────────────────┘
         │                      │
 ┌───────▼──────┐   ┌───────────▼──────────┐
 │  PostgreSQL  │   │    COROS API Client   │
 │   (asyncpg)  │   │  (team + mobile API)  │
-└──────────────┘   └──────────────────────┘
+└──────────────┘   └───────┬───────────────┘
         │
 ┌───────▼──────┐
 │  Redis       │
@@ -101,8 +99,7 @@ COROS Analytics ingests data from your COROS watch via the official API and manu
 | Migrations | Alembic | Schema versioning |
 | Job Queue | ARQ (Redis-backed) | Background parsing |
 | Cache | Redis 7 | COROS API token cache |
-| Parsing | fitdecode, lxml | .FIT binary and .TCX XML parsing |
-| AI | google-genai (Gemini) | AI coach, briefing, postmortem |
+| AI | google-genai | AI coach, briefing, postmortem |
 | Encryption | PyCryptodome | COROS mobile API AES encryption |
 | Logging | structlog | Structured KV logging |
 | Lint/Type | ruff, mypy (strict) | Code quality |
@@ -131,7 +128,7 @@ docker compose up -d
 
 ```bash
 cp .env.example .env
-# Edit .env with your COROS credentials and Gemini API key
+# Edit .env with your COROS credentials and AI API key
 ```
 
 ### 3. Backend
@@ -180,12 +177,14 @@ All settings are in `.env` (copy from `.env.example`):
 | `REDIS_URL` | Yes | `redis://localhost:6379/0` | Redis connection |
 | `COROS_EMAIL` | For sync | — | COROS account email |
 | `COROS_PASSWORD` | For sync | — | COROS account password |
-| `SYNC_INTERVAL_MINUTES` | No | `15` | Scheduled sync interval |
-| `GEMINI_API_KEY` | For AI | — | Google Gemini API key |
-| `GEMINI_ENABLED` | No | `false` | Enable AI features |
-| `GEMINI_MODEL` | No | `gemini-2.5-flash` | Gemini model ID |
+| `GEMINI_API_KEY` | For Gemini | — | Google Gemini API key |
+| `GEMINI_ENABLED` | No | `false` | Enable Gemini features |
+| `GEMINI_MODEL` | No | `gemini-3.1-pro-preview` | Gemini model ID |
+| `OPENAI_COMPAT_ENABLED` | No | `false` | Enable OpenAI-compatible client (takes priority over Gemini when enabled) |
+| `OPENAI_COMPAT_API_KEY` | For OpenAI | — | OpenAI-compatible API key |
+| `OPENAI_COMPAT_BASE_URL` | For OpenAI | — | OpenAI-compatible Base URL (e.g. KKU OKMD, LM Studio, etc.) |
+| `OPENAI_COMPAT_MODEL` | For OpenAI | — | OpenAI-compatible Model ID (e.g. claude-sonnet-4.6) |
 | `APP_SECRET_KEY` | Production | `change-me-in-production` | Secret key |
-| `RAW_FILE_STORE_PATH` | No | `./data/raw_files` | Uploaded file storage |
 
 ---
 
@@ -204,8 +203,6 @@ All settings are in `.env` (copy from `.env.example`):
 | `POST` | `/api/ai/ask` | Chat with AI coach |
 | `GET` | `/api/ai/briefing` | Weekly training briefing |
 | `GET` | `/api/ai/postmortem/{activity_id}` | Workout postmortem |
-| `POST` | `/api/import/upload` | Upload FIT/TCX/ZIP file |
-| `GET` | `/api/import/jobs` | Import job history |
 | `POST` | `/api/sync/now` | Trigger manual sync |
 | `GET` | `/api/sync/stream?job_id=` | SSE progress stream |
 | `GET` | `/api/sync/status` | Last sync status |
@@ -235,22 +232,18 @@ coros/
 │       │   ├── activity_routes.py
 │       │   ├── ai_routes.py
 │       │   ├── dashboard_routes.py
-│       │   ├── import_routes.py
 │       │   ├── settings_routes.py
 │       │   ├── sync_routes.py
 │       │   └── training_plan_routes.py
 │       ├── sync/
 │       │   ├── api_client.py    # COROS API auth + data fetching
 │       │   └── sync_manager.py  # Orchestration, upsert, SSE events
-│       ├── parsers/
-│       │   ├── fit_parser.py    # .FIT binary decoder
-│       │   └── tcx_parser.py    # .TCX XML parser
 │       ├── metrics/
 │       │   ├── derived.py       # ACWR, efficiency, HR zones, strain, biological age
 │       │   ├── baselines.py     # Rolling baseline, SMA, z-score
 │       │   └── anomaly.py       # Z-score and IQR anomaly detection
 │       └── ai/
-│           ├── gemini_client.py    # Gemini SDK wrapper
+│           ├── gemini_client.py    # AI SDK wrapper
 │           ├── context_builder.py  # Builds markdown context from DB
 │           └── prompts.py          # System prompts (coach, briefing, postmortem)
 ├── frontend/
@@ -260,7 +253,6 @@ coros/
 │       │   ├── activities/           # Activity list + detail
 │       │   ├── ai/page.tsx           # AI chat
 │       │   ├── fitness/page.tsx      # VO2max, race predictor, pace zones
-│       │   ├── import/page.tsx       # Drag-and-drop upload
 │       │   ├── plan/page.tsx         # iCal training plan
 │       │   ├── settings/page.tsx     # Profile, goal, sync/AI config
 │       │   ├── sleep/page.tsx        # HRV, sleep stages, recovery
@@ -273,21 +265,3 @@ coros/
 │           └── types.ts              # TypeScript interfaces
 └── scratch/                      # Development scratchpad
 ```
-
----
-
-## Roadmap
-
-- [ ] Multi-user authentication (currently single-user with hardcoded ID)
-- [ ] Background async file parsing via ARQ job queue
-- [ ] Data export (CSV, FIT) and full data deletion
-- [ ] Scheduled auto-sync via cron/ARQ
-- [ ] MCP (Model Context Protocol) server integration
-- [ ] Dockerized backend + frontend for one-command deployment
-- [ ] Mobile-responsive design
-
----
-
-## License
-
-MIT
