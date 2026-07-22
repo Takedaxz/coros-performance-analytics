@@ -210,6 +210,53 @@ class CorosApiClient:
 
         return all_activities
 
+    async def fetch_activity_fit_url(self, activity_id: str, sport_type: int) -> str:
+        """Call POST /activity/detail/download to get the S3 FIT file URL."""
+        url = f"{self.base_url}/activity/detail/download"
+        params = {
+            "labelId": activity_id,
+            "sportType": sport_type,
+            "fileType": 4,  # 4 = FIT format
+        }
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            headers = self._get_auth_headers()
+            resp = await client.post(url, params=params, headers=headers)
+            
+            body = None
+            is_token_invalid = resp.status_code == 401
+            
+            if resp.status_code == 200:
+                body = resp.json()
+                if body.get("result") != "0000" and "token" in body.get("message", "").lower():
+                    is_token_invalid = True
+            
+            if is_token_invalid:
+                logger.info("coros_api: refreshing token for FIT download URL")
+                await self._invalidate_token()
+                await self.login()
+                headers = self._get_auth_headers()
+                resp = await client.post(url, params=params, headers=headers)
+                body = None
+
+            resp.raise_for_status()
+            res_json = body if body is not None else resp.json()
+            if res_json.get("result") != "0000":
+                raise CorosApiClientError(f"Failed to get FIT url: {res_json.get('message')}")
+            
+            file_url = res_json.get("data", {}).get("fileUrl")
+            if not file_url:
+                raise CorosApiClientError("Response missing fileUrl")
+            return file_url
+
+    async def download_file(self, url: str) -> bytes:
+        """Download raw binary file from URL (e.g. S3)."""
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return resp.content
+
+
     async def fetch_daily_metrics(self, start_day: str, end_day: str) -> list[dict]:
         """Fetch daily health metrics for a date range (YYYYMMDD)."""
         url = f"{self.base_url}/analyse/dayDetail/query"

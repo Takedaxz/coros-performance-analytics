@@ -1,11 +1,7 @@
-"""COROS MCP sleep data client.
-
-Calls the querySleepData (or get_sleep_data) MCP tool on the COROS MCP server
-using a stored OAuth Bearer token — no Mobile API login required.
-"""
-
+import datetime
 import json
 import logging
+import re
 from typing import Any
 
 from mcp.client.session import ClientSession
@@ -70,11 +66,84 @@ async def fetch_sleep_via_mcp(
                 )
                 return []
 
-            args: dict[str, Any] = {"startDay": start_day, "endDay": end_day}
+            try:
+                dt_start = datetime.datetime.strptime(start_day, "%Y%m%d")
+                dt_end = datetime.datetime.strptime(end_day, "%Y%m%d")
+                days_diff = max(1, (dt_end - dt_start).days)
+            except Exception:
+                days_diff = 14
+
+            # Must match the required properties exactly: startDate, endDate, days
+            args: dict[str, Any] = {
+                "startDate": start_day,
+                "endDate": end_day,
+                "days": days_diff
+            }
 
             result = await session.call_tool(tool_name, args)
 
     return _parse_mcp_sleep_result(result.content)
+
+
+def parse_mcp_sleep_prose(text: str) -> list[dict[str, Any]]:
+    """Parse human-readable prose text returned by COROS MCP sleep tool."""
+    # Split text into sections starting with a date e.g. 2026-07-22
+    sections = re.split(r'(?:\r?\n)+(?=20\d{2}-\d{2}-\d{2})', text.strip())
+    
+    records = []
+    for section in sections:
+        section = section.strip()
+        if not section:
+            continue
+            
+        date_match = re.match(r'^(20\d{2})-(\d{2})-(\d{2})', section)
+        if not date_match:
+            continue
+            
+        y, m, d = date_match.groups()
+        happen_day = f"{y}{m}{d}"
+        
+        score_match = re.search(r'Sleep Score:\s*(\d+)', section, re.I)
+        score = int(score_match.group(1)) if score_match else None
+        
+        main_sleep_match = re.search(r'Main Sleep:\s*([^\n]+)', section, re.I)
+        total_minutes = 0
+        if main_sleep_match:
+            duration_str = main_sleep_match.group(1)
+            h_match = re.search(r'(\d+)\s*h', duration_str, re.I)
+            m_match = re.search(r'(\d+)\s*min', duration_str, re.I)
+            hours = int(h_match.group(1)) if h_match else 0
+            mins = int(m_match.group(1)) if m_match else 0
+            total_minutes = hours * 60 + mins
+            
+        deep_match = re.search(r'Deep Sleep Ratio:\s*(\d+)\s*%', section, re.I)
+        light_match = re.search(r'Light Sleep Ratio:\s*(\d+)\s*%', section, re.I)
+        rem_match = re.search(r'REM Ratio:\s*(\d+)\s*%', section, re.I)
+        awake_ratio_match = re.search(r'Awake Ratio:\s*(\d+)\s*%', section, re.I)
+        
+        deep_pct = int(deep_match.group(1)) if deep_match else 0
+        light_pct = int(light_match.group(1)) if light_match else 0
+        rem_pct = int(rem_match.group(1)) if rem_match else 0
+        awake_pct = int(awake_ratio_match.group(1)) if awake_ratio_match else 0
+        
+        deep_time = round((deep_pct / 100) * total_minutes) if total_minutes else 0
+        light_time = round((light_pct / 100) * total_minutes) if total_minutes else 0
+        rem_time = round((rem_pct / 100) * total_minutes) if total_minutes else 0
+        wake_time = round((awake_pct / 100) * total_minutes) if total_minutes else 0
+        
+        records.append({
+            "happenDay": happen_day,
+            "performance": score,
+            "sleepData": {
+                "totalSleepTime": total_minutes,
+                "deepTime": deep_time,
+                "lightTime": light_time,
+                "eyeTime": rem_time,
+                "wakeTime": wake_time,
+            }
+        })
+        
+    return records
 
 
 def _parse_mcp_sleep_result(content: list[Any]) -> list[dict[str, Any]]:
@@ -102,25 +171,25 @@ def _parse_mcp_sleep_result(content: list[Any]) -> list[dict[str, Any]]:
 
         try:
             parsed = json.loads(raw_text)
-        except (json.JSONDecodeError, TypeError):
-            continue
-
-        # The MCP tool may return a list or a single object.
-        if isinstance(parsed, list):
-            records.extend(_normalize_sleep_record(r) for r in parsed if isinstance(r, dict))
-        elif isinstance(parsed, dict):
-            # May be wrapped: {"data": [...]} or {"statisticData": {"dayDataList": [...]}}
-            day_list = (
-                parsed.get("dayDataList")
-                or parsed.get("data", {}).get("statisticData", {}).get("dayDataList")
-                or parsed.get("data")
-            )
-            if isinstance(day_list, list):
-                records.extend(
-                    _normalize_sleep_record(r) for r in day_list if isinstance(r, dict)
+            if isinstance(parsed, list):
+                records.extend(_normalize_sleep_record(r) for r in parsed if isinstance(r, dict))
+            elif isinstance(parsed, dict):
+                day_list = (
+                    parsed.get("dayDataList")
+                    or parsed.get("data", {}).get("statisticData", {}).get("dayDataList")
+                    or parsed.get("data")
                 )
-            elif parsed.get("happenDay") or parsed.get("sleepData"):
-                records.append(_normalize_sleep_record(parsed))
+                if isinstance(day_list, list):
+                    records.extend(
+                        _normalize_sleep_record(r) for r in day_list if isinstance(r, dict)
+                    )
+                elif parsed.get("happenDay") or parsed.get("sleepData"):
+                    records.append(_normalize_sleep_record(parsed))
+            elif isinstance(parsed, str):
+                records.extend(parse_mcp_sleep_prose(parsed))
+        except (json.JSONDecodeError, TypeError):
+            # Parse human-readable text block fallback
+            records.extend(parse_mcp_sleep_prose(raw_text))
 
     return [r for r in records if r]
 

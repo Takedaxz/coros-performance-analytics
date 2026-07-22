@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import {
   LineChart,
   Line,
@@ -14,6 +15,8 @@ import {
 } from "recharts";
 import Sidebar from "@/components/Sidebar";
 import ReactMarkdown from "react-markdown";
+
+const Map = dynamic(() => import("@/components/Map"), { ssr: false });
 
 interface ActivityDetail {
   id: string;
@@ -52,6 +55,8 @@ interface RecordPoint {
   altitude_m?: number;
   power_w?: number;
   cadence?: number;
+  position_lat?: number;
+  position_long?: number;
 }
 
 function formatPace(speedMps: number): string {
@@ -156,6 +161,16 @@ export default function ActivityDetailPage() {
       power: r.power_w,
     }));
 
+  const routePoints = records
+    .filter((r) => r.position_lat != null && r.position_long != null)
+    .map((r) => ({
+      lat: r.position_lat!,
+      lng: r.position_long!,
+    }));
+
+  const routeSampleRate = Math.max(1, Math.floor(routePoints.length / 600));
+  const sampledRoutePoints = routePoints.filter((_, i) => i % routeSampleRate === 0);
+
   return (
     <div className="app-layout">
       <Sidebar />
@@ -219,42 +234,68 @@ export default function ActivityDetailPage() {
             )}
           </div>
 
-          {/* Time-Series Charts */}
-          {chartData.length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "var(--space-4)" }}>
-              <div className="chart-container" id="chart-hr-speed">
-                <div className="chart-header">
-                  <div className="chart-title">Heart Rate & Speed</div>
+          {/* Route Map & Elevation Grid */}
+          {(sampledRoutePoints.length > 0 || chartData.some((d) => d.alt != null)) && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(350px, 1fr))", gap: "var(--space-4)", marginBottom: "var(--space-4)" }}>
+              {/* Route Map Card */}
+              {sampledRoutePoints.length > 0 && (
+                <div className="chart-container" id="chart-route" style={{ display: "flex", flexDirection: "column" }}>
+                  <div className="chart-header" style={{ paddingBottom: "var(--space-2)" }}>
+                    <div className="chart-title">Route</div>
+                  </div>
+                  <div style={{ flex: 1, position: "relative", minHeight: "260px" }}>
+                    <Map points={sampledRoutePoints} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", marginTop: "var(--space-2)", fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#3b82f6" }} /> Start
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#f59e0b" }} /> Finish
+                    </div>
+                  </div>
                 </div>
-                <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                    <XAxis dataKey="time" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="min" />
-                    <YAxis yAxisId="hr" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={["dataMin - 10", "dataMax + 10"]} />
-                    <YAxis yAxisId="speed" orientation="right" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="km/h" />
-                    <Tooltip contentStyle={{ background: "var(--color-bg-card)", border: "1px solid var(--border-color)", borderRadius: 8, fontSize: 12 }} />
-                    <Line yAxisId="hr" type="monotone" dataKey="hr" stroke="var(--chart-4)" strokeWidth={1.5} dot={false} name="Heart Rate (bpm)" />
-                    <Line yAxisId="speed" type="monotone" dataKey="speed" stroke="var(--chart-1)" strokeWidth={1.5} dot={false} name="Speed (km/h)" />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              )}
 
+              {/* Elevation Profile Card */}
               {chartData.some((d) => d.alt != null) && (
-                <div className="chart-container" id="chart-elevation">
+                <div className="chart-container" id="chart-elevation" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                   <div className="chart-header">
                     <div className="chart-title">Elevation Profile</div>
                   </div>
-                  <ResponsiveContainer width="100%" height={150}>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                      <XAxis dataKey="time" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} />
-                      <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="m" />
-                      <Tooltip contentStyle={{ background: "var(--color-bg-card)", border: "1px solid var(--border-color)", borderRadius: 8, fontSize: 12 }} />
-                      <Line type="monotone" dataKey="alt" stroke="var(--chart-2)" strokeWidth={1.5} dot={false} name="Elevation (m)" fill="rgba(16,185,129,0.1)" />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <LineChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                        <XAxis dataKey="time" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" min" />
+                        <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="m" />
+                        <Tooltip contentStyle={{ background: "var(--color-bg-card)", border: "1px solid var(--border-color)", borderRadius: 8, fontSize: 12 }} />
+                        <Line type="monotone" dataKey="alt" stroke="#10b981" strokeWidth={1.5} dot={false} name="Elevation (m)" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Time-Series Heart Rate & Speed Chart */}
+          {chartData.length > 0 && (
+            <div className="chart-container" id="chart-hr-speed" style={{ marginBottom: "var(--space-4)" }}>
+              <div className="chart-header">
+                <div className="chart-title">Heart Rate & Speed</div>
+              </div>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                  <XAxis dataKey="time" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" min" />
+                  <YAxis yAxisId="hr" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={["dataMin - 10", "dataMax + 10"]} />
+                  <YAxis yAxisId="speed" orientation="right" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" km/h" />
+                  <Tooltip contentStyle={{ background: "var(--color-bg-card)", border: "1px solid var(--border-color)", borderRadius: 8, fontSize: 12 }} />
+                  <Line yAxisId="hr" type="monotone" dataKey="hr" stroke="var(--chart-4)" strokeWidth={1.5} dot={false} name="Heart Rate (bpm)" />
+                  <Line yAxisId="speed" type="monotone" dataKey="speed" stroke="var(--chart-1)" strokeWidth={1.5} dot={false} name="Speed (km/h)" />
+                </LineChart>
+              </ResponsiveContainer>
             </div>
           )}
 

@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import get_settings
 from src.db.models import (
     Activity,
+    ActivityLap,
+    ActivityRecord,
     DailyHealth,
     FitnessEstimate,
     SleepSession,
@@ -78,7 +80,7 @@ async def run_sync(
         # --- Activities ---
         _emit(on_event, "progress", '{"stage": "activities", "message": "Fetching activities..."}')
         raw_activities = await client.fetch_activities(start_str, end_str)
-        activity_count = await _upsert_activities(db, user_id, raw_activities)
+        activity_count = await _upsert_activities(db, user_id, raw_activities, client)
         total_upserted += activity_count
         _emit(on_event, "progress", f'{{"stage": "activities_done", "count": {activity_count}}}')
 
@@ -167,8 +169,14 @@ def _parse_date(d: str) -> date_type | None:
             return None
 
 
-async def _upsert_activities(db: AsyncSession, user_id: str, items: list[dict]) -> int:
+async def _upsert_activities(
+    db: AsyncSession, user_id: str, items: list[dict], client: CorosApiClient
+) -> int:
     count = 0
+    from sqlalchemy import func
+    from src.parsers.fit_parser import parse_fit_file
+    import os
+
     for item in items:
         start_dt = _parse_timestamp(item.get("startTime"))
         if not start_dt:
@@ -241,6 +249,81 @@ async def _upsert_activities(db: AsyncSession, user_id: str, items: list[dict]) 
                 activity.avg_power_w = item.get("avgPower") or activity.avg_power_w
                 activity.avg_speed_mps = speed_mps or activity.avg_speed_mps
                 count += 1
+
+        # Flush to obtain activity.id if newly created
+        await db.flush()
+
+        # Fetch records and laps if not already populated
+        records_count = await db.scalar(
+            select(func.count(ActivityRecord.id)).where(ActivityRecord.activity_id == activity.id)
+        )
+        if records_count == 0:
+            label_id = item.get("labelId")
+            if label_id:
+                logger.info(f"coros_sync: fetching FIT file for activity {activity.id} (labelId: {label_id})")
+                try:
+                    fit_url = await client.fetch_activity_fit_url(label_id, raw_sport)
+                    fit_bytes = await client.download_file(fit_url)
+
+                    # Save raw file to settings.raw_file_store_path
+                    settings = get_settings()
+                    os.makedirs(settings.raw_file_store_path, exist_ok=True)
+                    fit_filename = f"{activity.id}.fit"
+                    fit_filepath = os.path.join(settings.raw_file_store_path, fit_filename)
+                    with open(fit_filepath, "wb") as f:
+                        f.write(fit_bytes)
+
+                    activity.source_filename = fit_filename
+
+                    # Parse FIT
+                    parsed_fit = parse_fit_file(fit_bytes)
+                    if parsed_fit.errors:
+                        logger.warning(f"coros_sync: parsed FIT file with errors for activity {activity.id}: {parsed_fit.errors}")
+
+                    # Upsert laps
+                    db_laps = [
+                        ActivityLap(
+                            activity_id=activity.id,
+                            lap_index=l.lap_index,
+                            start_time=l.start_time.replace(tzinfo=None) if l.start_time.tzinfo else l.start_time,
+                            elapsed_s=l.elapsed_s,
+                            distance_m=l.distance_m,
+                            avg_hr_bpm=l.avg_hr_bpm,
+                            max_hr_bpm=l.max_hr_bpm,
+                            avg_speed_mps=l.avg_speed_mps,
+                            avg_power_w=l.avg_power_w,
+                            calories_kcal=l.calories_kcal,
+                            avg_cadence=l.avg_cadence,
+                            lap_trigger=l.lap_trigger,
+                        )
+                        for l in parsed_fit.laps
+                    ]
+                    db.add_all(db_laps)
+
+                    # Upsert records
+                    first_ts = parsed_fit.records[0].timestamp if parsed_fit.records else None
+                    db_records = [
+                        ActivityRecord(
+                            activity_id=activity.id,
+                            timestamp=r.timestamp.replace(tzinfo=None) if r.timestamp.tzinfo else r.timestamp,
+                            elapsed_s=(r.timestamp - first_ts).total_seconds() if first_ts else 0.0,
+                            position_lat=r.position_lat,
+                            position_long=r.position_long,
+                            distance_m=r.distance_m,
+                            altitude_m=r.altitude_m,
+                            speed_mps=r.speed_mps,
+                            heart_rate_bpm=r.heart_rate_bpm,
+                            cadence=r.cadence,
+                            power_w=r.power_w,
+                            temperature_c=r.temperature_c,
+                        )
+                        for r in parsed_fit.records
+                    ]
+                    db.add_all(db_records)
+                    logger.info(f"coros_sync: populated {len(db_records)} records and {len(db_laps)} laps for activity {activity.id}")
+
+                except Exception as exc:
+                    logger.warning(f"coros_sync: failed to fetch/parse FIT file for activity {activity.id}: {exc}")
 
     await db.flush()
     return count
@@ -446,6 +529,24 @@ async def _upsert_sleep(db: AsyncSession, user_id: str, daily_sleep: list[dict])
                 source_hash=source_hash,
             )
             db.add(session)
+            count += 1
+        else:
+            session.sleep_end = end_dt
+            session.duration_s = duration_s
+            
+            new_deep = sd.get("deepTime", 0) * 60
+            new_light = sd.get("lightTime", 0) * 60
+            new_rem = sd.get("eyeTime", 0) * 60
+            new_awake = sd.get("wakeTime", 0) * 60
+            
+            if new_deep > 0 or new_light > 0 or new_rem > 0 or new_awake > 0:
+                session.stage_deep_s = new_deep
+                session.stage_light_s = new_light
+                session.stage_rem_s = new_rem
+                session.stage_awake_s = new_awake
+                
+            if item.get("performance") is not None:
+                session.sleep_quality_vendor = item.get("performance")
             count += 1
 
     await db.flush()
