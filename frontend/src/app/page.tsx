@@ -134,14 +134,61 @@ export default function DashboardPage() {
         <Sidebar />
         <main className="main-content">
           <header className="page-header">
-            <h2 className="page-title">
-              {new Date().toLocaleDateString("en-US", { weekday: 'long', month: 'short', day: 'numeric' })}
-            </h2>
+            <h2 className="page-title">Dashboard</h2>
+            {isLoading && <div className="skeleton" aria-hidden="true" style={{ width: 82, height: 32, borderRadius: 999 }} />}
           </header>
           <div className="page-body">
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", color: "var(--color-text-muted)" }}>
-              {isLoading ? "Loading health intelligence..." : loadError ?? "No COROS data available."}
-            </div>
+            {isLoading ? (
+              <div
+                aria-busy="true"
+                aria-label="Loading dashboard"
+                style={{ display: "grid", gridTemplateColumns: "minmax(300px, 360px) 1fr", gap: "var(--space-5)" }}
+              >
+                <div className="card no-hover" style={{ minHeight: 650, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "var(--space-5)" }}>
+                  <div>
+                    <div className="skeleton" style={{ width: 112, height: 11 }} />
+                    <div style={{ display: "flex", justifyContent: "space-around", gap: "var(--space-3)", margin: "var(--space-5) 0" }}>
+                      {[0, 1].map((item) => (
+                        <div className="skeleton" key={item} style={{ width: 136, height: 136, borderRadius: "50%" }} />
+                      ))}
+                    </div>
+                    <div className="skeleton" style={{ width: "82%", height: 13, margin: "0 auto" }} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    {Array.from({ length: 4 }).map((_, item) => (
+                      <div className="skeleton" key={item} style={{ height: 125, borderRadius: 16 }} />
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "var(--space-5)" }}>
+                    {[0, 1].map((item) => (
+                      <div className="card no-hover" key={item} style={{ minHeight: 306 }}>
+                        <div className="skeleton" style={{ width: 90, height: 11 }} />
+                        <div className="skeleton" style={{ width: "42%", height: 28, marginTop: "var(--space-4)" }} />
+                        <div className="skeleton" style={{ width: "100%", height: 96, marginTop: "var(--space-5)", borderRadius: 14 }} />
+                        <div className="skeleton" style={{ width: "70%", height: 12, marginTop: "var(--space-5)" }} />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="card no-hover" style={{ minHeight: 324, display: "flex", flexDirection: "column" }}>
+                    <div className="skeleton" style={{ width: 112, height: 11 }} />
+                    <div className="skeleton" style={{ width: "46%", height: 12, marginTop: "var(--space-3)" }} />
+                    <div style={{ flex: 1, display: "flex", alignItems: "flex-end", justifyContent: "space-around", gap: "var(--space-4)", padding: "var(--space-6) var(--space-3) 0" }}>
+                      {["38%", "62%", "52%", "78%", "46%", "88%", "70%"].map((height, item) => (
+                        <div className="skeleton" key={item} style={{ width: "8%", height, borderRadius: "10px 10px 2px 2px" }} />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ color: "var(--color-status-critical)", padding: "var(--space-8) 0", textAlign: "center" }}>
+                {loadError ?? "No COROS data available."}
+              </div>
+            )}
           </div>
         </main>
       </div>
@@ -679,7 +726,7 @@ export default function DashboardPage() {
 
                 {/* Recharts Rounded Bar Chart (Rolling 7 Days Ending Today) */}
                 <ResponsiveContainer width="100%" height={230}>
-                  <BarChart data={weeklyActivityData} margin={{ top: 6, right: 8, left: 0, bottom: 0 }} barGap={3}>
+                  <BarChart data={weeklyActivityData} margin={{ top: 6, right: 8, left: 0, bottom: 0 }} barGap={2}>
                     <CartesianGrid strokeDasharray="2 6" stroke="rgba(255, 255, 255, 0.055)" vertical={false} />
                     <XAxis dataKey="day" tick={{ fill: "var(--color-text-muted)", fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} dy={4} height={22} />
                     <YAxis
@@ -726,7 +773,7 @@ export default function DashboardPage() {
                         dataKey={isRelativeChart ? `${metric}Relative` : metric}
                         name={WEEKLY_ACTIVITY_CONFIG[metric].label}
                         radius={[10, 10, 0, 0]}
-                        maxBarSize={selectedMetrics.length === 1 ? 42 : 26}
+                        barSize={selectedMetrics.length === 1 ? 42 : 26}
                         isAnimationActive={false}
                       >
                         {weeklyActivityData.map((entry) => (

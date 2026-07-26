@@ -30,9 +30,9 @@ def _get_client() -> OpenAI | None:
 
 
 def _build_history_messages(history: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Convert internal history dicts to OpenAI message format (last 4 turns)."""
+    """Convert up to six recent conversation turns to OpenAI message format."""
     messages: list[dict[str, str]] = []
-    for msg in history[-4:]:
+    for msg in history[-12:]:
         role = "user" if msg["role"] == "user" else "assistant"
         messages.append({"role": role, "content": msg["content"]})
     return messages

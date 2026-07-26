@@ -15,6 +15,8 @@ interface TrainingEvent {
   is_all_day: boolean;
 }
 
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 function localDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -123,13 +125,34 @@ export default function TrainingPlanPage() {
           </div>
 
           {error && <div className="plan-calendar-message error">Calendar unavailable: {error}</div>}
-          {isLoading && <div className="plan-calendar-message">Loading calendar…</div>}
+          {isLoading && (
+            <div className="plan-calendar-layout plan-calendar-skeleton" aria-label="Loading calendar" aria-busy="true">
+              <section className="plan-calendar-grid">
+                <div className="plan-calendar-weekdays">
+                  {WEEKDAYS.map((day) => <span key={day}>{day}</span>)}
+                </div>
+                <div className="plan-calendar-days">
+                  {days.map((date) => (
+                    <div className="plan-calendar-day" key={localDateKey(date)}>
+                      <span className="skeleton plan-calendar-skeleton-date" />
+                      <span className="skeleton plan-calendar-skeleton-entry" />
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <aside className="plan-day-detail">
+                <div className="skeleton plan-calendar-skeleton-label" />
+                <div className="skeleton plan-calendar-skeleton-title" />
+                <div className="skeleton plan-calendar-skeleton-line" />
+              </aside>
+            </div>
+          )}
 
           {!isLoading && !error && (
             <div className="plan-calendar-layout">
               <section className="plan-calendar-grid" aria-label={`${monthLabel} training calendar`}>
                 <div className="plan-calendar-weekdays">
-                  {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}
+                  {WEEKDAYS.map((day) => <span key={day}>{day}</span>)}
                 </div>
                 <div className="plan-calendar-days">
                   {days.map((date) => {

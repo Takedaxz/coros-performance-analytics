@@ -210,7 +210,7 @@ def ask_coach(question: str, context: str, history: list[dict] = None) -> str:
     history_str = ""
     if history:
         history_str = "Recent Conversation History:\n"
-        for msg in history[-4:]:
+        for msg in history[-12:]:
             role = "Athlete" if msg["role"] == "user" else "Coach"
             history_str += f"{role}: {msg['content']}\n"
         history_str += "\n"
@@ -249,7 +249,7 @@ def ask_coach_stream(
     history_str: str = ""
     if history:
         history_str = "Recent Conversation History:\n"
-        for msg in history[-4:]:
+        for msg in history[-12:]:
             role: str = "Athlete" if msg["role"] == "user" else "Coach"
             history_str += f"{role}: {msg['content']}\n"
         history_str += "\n"

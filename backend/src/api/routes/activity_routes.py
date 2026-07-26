@@ -422,6 +422,7 @@ async def get_activity(
         "cardiac_drift_pct_app": activity.cardiac_drift_pct_app,
         "hr_quality_flag": activity.hr_quality_flag,
         "strength_detail": activity.strength_detail,
+        "postmortem": activity.postmortem,
         "source_type": activity.source_type,
         "laps": lap_payload,
         "lap_splits": lap_splits,

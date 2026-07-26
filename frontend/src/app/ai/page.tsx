@@ -321,7 +321,7 @@ export default function AiPage() {
           context_days: 14,
           plan_days_back: planDaysBack,
           plan_days_forward: planDaysForward,
-          history: baseHistory.slice(-6).map((m) => ({
+          history: baseHistory.slice(-12).map((m) => ({
             role: m.role === "ai" ? "assistant" : "user",
             content: m.content,
           })),
@@ -766,10 +766,12 @@ export default function AiPage() {
                         }
                         return (
                           <div key={idx} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
-                            <div className="avatar-sq ai" aria-label="AI Coach"><AiGlyph /></div>
+                            <div className="avatar-sq ai" aria-label={msg.content === "" && isLoading ? "AI Coach is thinking" : "AI Coach"}>
+                              <AiGlyph />
+                            </div>
                             <div className="ai-text">
                               {msg.content === "" && isLoading ? (
-                                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
+                                <span className="ai-thinking-status" style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
                                   thinking
                                   <span className="chat-loading-dots" aria-label="Loading">
                                     <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
@@ -794,9 +796,9 @@ export default function AiPage() {
 
                       {isLoading && messages[messages.length - 1]?.role !== "ai" && (
                         <div className="msg-row ai-row msg-enter">
-                          <div className="avatar-sq ai" aria-hidden="true"><AiGlyph /></div>
+                          <div className="avatar-sq ai" aria-label="AI Coach is thinking"><AiGlyph /></div>
                           <div className="ai-text">
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
+                            <span className="ai-thinking-status" style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
                               thinking
                               <span className="chat-loading-dots" aria-label="Loading">
                                 <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />

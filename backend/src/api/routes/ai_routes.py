@@ -371,10 +371,12 @@ async def activity_postmortem_stream(
     async def event_generator() -> AsyncIterator[str]:
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         loop = asyncio.get_event_loop()
+        accumulated: list[str] = []
 
         def _produce(sync_iter: Iterator[str]) -> None:
             try:
                 for chunk in sync_iter:
+                    accumulated.append(chunk)
                     loop.call_soon_threadsafe(queue.put_nowait, chunk)
             except Exception:
                 logger.exception("Error streaming postmortem analysis")
@@ -393,6 +395,24 @@ async def activity_postmortem_stream(
                 yield f"data: {json.dumps({'text': item})}\n\n"
         finally:
             await producer
+            await _persist_postmortem(activity_id, accumulated)
+
+    async def _persist_postmortem(
+        persisted_activity_id: str,
+        accumulated: list[str],
+    ) -> None:
+        analysis = "".join(accumulated)
+        if not analysis:
+            return
+        async with async_session_factory() as persist_db:
+            result = await persist_db.execute(
+                select(Activity).where(Activity.id == persisted_activity_id)
+            )
+            persisted_activity = result.scalar_one_or_none()
+            if persisted_activity is None:
+                return
+            persisted_activity.postmortem = analysis
+            await persist_db.commit()
 
     return StreamingResponse(
         event_generator(),

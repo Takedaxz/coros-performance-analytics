@@ -157,7 +157,7 @@ export default function FitnessPage() {
             {/* Chart: VO2 Max Trend */}
             <div className="card" id="chart-vo2max">
               <div className="card-header">
-                <span className="card-title">VO2 Max Progression (6 Months)</span>
+                <span className="card-title">VO2 Max Progression (12 Weeks)</span>
                 {vo2Readings.length > 0 && (
                   <div style={{ display: "flex", alignItems: "baseline", gap: "var(--space-2)", textAlign: "right" }}>
                     <strong className="mono" style={{ fontSize: "20px", color: "var(--color-accent-primary)" }}>{latestVo2.toFixed(1)}</strong>

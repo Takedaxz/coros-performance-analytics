@@ -5,10 +5,8 @@ import { createSSEConnection } from "@/lib/api";
 
 interface SyncState {
   isSyncing: boolean;
-  stage: string;
   message: string;
   error: string | null;
-  lastSyncAt: string | null;
 }
 
 interface SyncButtonProps {
@@ -18,10 +16,8 @@ interface SyncButtonProps {
 export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
   const [syncState, setSyncState] = useState<SyncState>({
     isSyncing: false,
-    stage: "",
     message: "",
     error: null,
-    lastSyncAt: null,
   });
 
   const triggerSync = useCallback(async () => {
@@ -30,7 +26,6 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
     setSyncState((prev) => ({
       ...prev,
       isSyncing: true,
-      stage: "starting",
       message: "Connecting to COROS...",
       error: null,
     }));
@@ -57,16 +52,13 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
             if (event === "progress") {
               setSyncState((prev) => ({
                 ...prev,
-                stage: parsed.stage || "",
-                message: parsed.message || `Synced ${parsed.count || 0} records`,
+                message: parsed.message || prev.message,
               }));
             } else if (event === "complete") {
               setSyncState({
                 isSyncing: false,
-                stage: "complete",
-                message: parsed.message || "Sync complete",
+                message: "",
                 error: null,
-                lastSyncAt: new Date().toISOString(),
               });
               if (onSyncComplete) onSyncComplete();
             } else if (event === "error") {
@@ -89,10 +81,8 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
               if (statusData.last_sync_status === "completed") {
                 setSyncState({
                   isSyncing: false,
-                  stage: "complete",
-                  message: "Sync complete",
+                  message: "",
                   error: null,
-                  lastSyncAt: statusData.last_sync_at || new Date().toISOString(),
                 });
                 if (onSyncComplete) onSyncComplete();
                 return;
@@ -103,6 +93,7 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
           setSyncState((prev) => ({
             ...prev,
             isSyncing: false,
+            message: "",
             error: null,
           }));
         }
@@ -111,6 +102,7 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
       setSyncState((prev) => ({
         ...prev,
         isSyncing: false,
+        message: "",
         error: err instanceof Error ? err.message : "Sync failed",
       }));
     }
@@ -123,7 +115,9 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
         onClick={triggerSync}
         disabled={syncState.isSyncing}
         id="sync-now-button"
-        style={{ padding: "6px 12px", fontSize: "var(--text-sm)" }}
+        aria-busy={syncState.isSyncing}
+        aria-label={syncState.isSyncing ? "Syncing COROS data" : "Sync COROS data"}
+        title={syncState.isSyncing ? "Syncing COROS data" : "Sync COROS data"}
       >
         <svg
           viewBox="0 0 24 24"
@@ -132,24 +126,17 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          style={{
-            width: 14,
-            height: 14,
-            animation: syncState.isSyncing ? "spin 1s linear infinite" : "none",
-          }}
         >
           <polyline points="23 4 23 10 17 10" />
           <polyline points="1 20 1 14 7 14" />
           <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
         </svg>
-        {syncState.isSyncing ? "Syncing..." : "Sync"}
       </button>
 
       {syncState.isSyncing && (
-        <span className="sync-status">
-          <span className="sync-dot" />
+        <div className="sync-toast" role="status" aria-live="polite">
           {syncState.message}
-        </span>
+        </div>
       )}
 
       {syncState.error && (
@@ -158,19 +145,6 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
         </span>
       )}
 
-      {!syncState.isSyncing && syncState.lastSyncAt && (
-        <span className="sync-status">
-          <span className="sync-dot" />
-          Last sync: {new Date(syncState.lastSyncAt).toLocaleTimeString()}
-        </span>
-      )}
-
-      <style jsx>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   );
 }

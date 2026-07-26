@@ -650,7 +650,12 @@ export default function SettingsPage() {
                       </div>
                       <label className="settings-check" htmlFor="goal-active-checkbox">
                         <input id="goal-active-checkbox" type="checkbox" checked={goalForm.is_active} onChange={(e) => setGoalForm((g) => ({ ...g, is_active: e.target.checked }))} />
-                        Keep this goal active
+                        <span className="settings-check-control" aria-hidden="true">
+                          <svg viewBox="0 0 16 16">
+                            <path d="m3.5 8.25 2.75 2.75 6.25-6.25" />
+                          </svg>
+                        </span>
+                        <span>Keep this goal active</span>
                       </label>
                       <div className="settings-actions">
                         <button type="submit" className="btn btn-primary" disabled={goalSaving}>{goalSaving ? "Saving…" : "Save goal"}</button>

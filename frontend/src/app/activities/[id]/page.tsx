@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useEffect } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -25,6 +25,15 @@ function AiGlyph() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+function LoadingGlyph() {
+  return (
+    <svg className="ai-loading-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" opacity="0.25" />
+      <path d="M21 12a9 9 0 0 0-9-9" />
     </svg>
   );
 }
@@ -168,6 +177,19 @@ export default function ActivityDetailPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [expandedLapIndex, setExpandedLapIndex] = useState<number | null>(null);
   const [expandedTriathlonLeg, setExpandedTriathlonLeg] = useState<string | null>(null);
+  const sampledRoutePoints = useMemo(() => {
+    const routePoints = records
+      .filter((record) => record.position_lat != null && record.position_long != null)
+      .map((record) => ({
+        lat: record.position_lat!,
+        lng: record.position_long!,
+        elapsed_s: record.elapsed_s,
+      }));
+    const routeSampleRate = Math.max(1, Math.floor(routePoints.length / 600));
+    return routePoints.filter(
+      (_, index) => index % routeSampleRate === 0 || index === routePoints.length - 1,
+    );
+  }, [records]);
 
   useEffect(() => {
     async function fetchDetail() {
@@ -434,15 +456,6 @@ export default function ActivityDetailPage() {
   const hasSpeedData = chartData.some((point) => point.speed != null);
   const hasTelemetryData = hasHeartRateData || hasSpeedData;
 
-  const routePoints = records
-    .filter((r) => r.position_lat != null && r.position_long != null)
-    .map((r) => ({
-      lat: r.position_lat!,
-      lng: r.position_long!,
-    }));
-
-  const routeSampleRate = Math.max(1, Math.floor(routePoints.length / 600));
-  const sampledRoutePoints = routePoints.filter((_, i) => i % routeSampleRate === 0);
   const strength = activity.sport === "strength" ? activity.strength_detail : undefined;
   const isSwim = activity.sport === "swim";
   const isRun = ["run", "trail_run"].includes(activity.sport);
@@ -666,7 +679,7 @@ export default function ActivityDetailPage() {
                     <span className="card-title">GPS Route Overlay</span>
                   </div>
                   <div style={{ flex: 1, position: "relative", minHeight: "260px", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-                    <Map points={sampledRoutePoints} />
+                    <Map key={activityId} points={sampledRoutePoints} />
                   </div>
                 </div>
               )}
@@ -800,19 +813,31 @@ export default function ActivityDetailPage() {
                       const isRest = isLapSwim
                         ? !lap.distance_m || lap.distance_m <= 0
                         : lap.lap_type === "rest" || lap.lap_type === "recovery";
+                      const canExpand = kilometerSplits.length > 1;
+                      const toggleLap = (): void => setExpandedLapIndex(isExpanded ? null : lap.lap_index);
 
                       return (
                         <Fragment key={lap.lap_index}>
-                          <tr>
+                          <tr
+                            className={`lap-summary-row${isExpanded ? " is-expanded" : ""}${canExpand ? " is-clickable" : ""}`}
+                            onClick={canExpand ? toggleLap : undefined}
+                          >
                             <td className="mono">
-                              {kilometerSplits.length > 1 ? (
+                              {canExpand ? (
                                 <button
                                   type="button"
-                                  className="lap-expand-button"
+                                  className="lap-expand-button lap-expand-button-plain"
                                   aria-expanded={isExpanded}
-                                  onClick={() => setExpandedLapIndex(isExpanded ? null : lap.lap_index)}
+                                  aria-label={`Toggle kilometre breakdown for lap ${lapNumber}`}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    toggleLap();
+                                  }}
                                 >
-                                  {lapNumber}
+                                  <span>{lapNumber}</span>
+                                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                                    <path d="m4 6 4 4 4-4" />
+                                  </svg>
                                 </button>
                               ) : isRest ? "Rest" : lap.lap_type === "run" ? "Run" : lap.lap_type === "functional" ? "Functional" : isTriathlon && lap.leg ? `${lap.leg === "ride" ? "Bike" : lap.leg[0].toUpperCase() + lap.leg.slice(1)} ${legLapNumber}` : lapNumber}
                             </td>
@@ -825,17 +850,23 @@ export default function ActivityDetailPage() {
                           {isExpanded && (
                             <tr className="lap-split-row">
                               <td colSpan={6}>
-                                <div className="lap-split-label">{isSwim ? "Length breakdown" : "Kilometre breakdown"}</div>
-                                <table className="lap-split-table">
-                                  <thead><tr><th>{isSwim ? "Length" : "Km"}</th><th>Distance</th><th>Duration</th><th>Avg HR</th><th>Max HR</th><th>{isSwim ? "Pace /100m" : "Pace"}</th></tr></thead>
+                                <div className="lap-split-header">
+                                  <div>
+                                    <div className="lap-split-label">{isSwim ? "Length breakdown" : "Kilometre breakdown"}</div>
+                                    <div className="lap-split-description">{isSwim ? "Pace and heart rate by pool length" : "Pace and heart rate by kilometre"}</div>
+                                  </div>
+                                  <span className="lap-split-count">{kilometerSplits.length} splits</span>
+                                </div>
+                                <table className="lap-split-table mono">
+                                  <thead><tr><th>{isSwim ? "Length" : "Km"}</th><th>Distance</th><th>Duration</th><th>{isSwim ? "Pace /100m" : "Pace"}</th><th>Avg HR</th><th>Max HR</th></tr></thead>
                                   <tbody>{kilometerSplits.map((split, index) => (
                                     <tr key={`${lap.lap_index}-${index}`}>
-                                      <td>{index + 1}</td>
+                                      <td><span className="lap-split-index">{index + 1}</span></td>
                                       <td>{split.distance_m ? isSwim ? `${Math.round(split.distance_m)} m` : `${(split.distance_m / 1000).toFixed(2)} km` : "--"}</td>
                                       <td>{formatSplitDuration(split.elapsed_s)}</td>
+                                      <td className="lap-split-pace">{split.avg_speed_mps ? isSwim ? formatSwimPace(split.avg_speed_mps) : `${formatPace(split.avg_speed_mps)}/km` : "--"}</td>
                                       <td>{split.avg_hr_bpm ? `${split.avg_hr_bpm} bpm` : "--"}</td>
                                       <td>{split.max_hr_bpm ? `${split.max_hr_bpm} bpm` : "--"}</td>
-                                      <td>{split.avg_speed_mps ? isSwim ? formatSwimPace(split.avg_speed_mps) : `${formatPace(split.avg_speed_mps)}/km` : "--"}</td>
                                     </tr>
                                   ))}</tbody>
                                 </table>
@@ -852,43 +883,37 @@ export default function ActivityDetailPage() {
           )}
 
           {/* AI Performance Coach Analysis */}
-          <div className="card" id="ai-analysis-card">
-            <div className="card-header">
-              <span className="card-title" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-                <span
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: "6px",
-                    background: "rgba(33, 230, 165, 0.15)",
-                    color: "var(--color-accent-primary)",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
+          <div className="card no-hover ai-analysis-card" id="ai-analysis-card">
+            <div className="ai-analysis-header">
+              <div className="ai-analysis-heading">
+                <span className="ai-analysis-icon">
                   <AiGlyph />
                 </span>
-                AI Performance Coach Analysis
-              </span>
+                <div>
+                  <span className="card-title">AI Performance Coach Analysis</span>
+                {!postmortem && (
+                  <span className="ai-analysis-meta">
+                    Workout execution, pacing, load & recovery
+                  </span>
+                )}
+                </div>
+              </div>
               <button className="btn btn-primary btn-sm" onClick={generatePostmortem} disabled={isGenerating}>
                 {isGenerating ? (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                    <LoadingGlyph />
                     Analyzing
-                    <span className="chat-loading-dots">
-                      <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
-                    </span>
                   </span>
                 ) : (
-                  "Run AI Analysis"
+                  postmortem ? "Run again" : "Run AI Analysis"
                 )}
               </button>
             </div>
             {isGenerating && !postmortem && (
-              <div className="msg-row ai-row" style={{ marginTop: "var(--space-4)" }}>
-                <div className="avatar-sq ai" aria-label="AI Coach"><AiGlyph /></div>
+              <div className="msg-row ai-row ai-analysis-thinking">
+                <div className="avatar-sq ai" aria-label="AI Coach is analyzing"><AiGlyph /></div>
                 <div className="ai-text">
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
+                  <span className="ai-thinking-status" style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
                     evaluating splits & physiological recovery
                     <span className="chat-loading-dots" aria-label="Loading">
                       <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
@@ -898,12 +923,9 @@ export default function ActivityDetailPage() {
               </div>
             )}
             {postmortem && (
-              <div className="msg-row ai-row" style={{ marginTop: "var(--space-4)", width: "100%" }}>
-                <div className="avatar-sq ai" aria-label="AI Coach" style={{ flexShrink: 0 }}><AiGlyph /></div>
-                <div className="ai-text" style={{ flex: 1, minWidth: 0 }}>
-                  <div className="markdown-body">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{postmortem}</ReactMarkdown>
-                  </div>
+              <div className="ai-analysis-response">
+                <div className="markdown-body">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{postmortem}</ReactMarkdown>
                 </div>
               </div>
             )}

@@ -41,6 +41,7 @@ export default function FitnessScoresPanel({ fitness }: FitnessScoresPanelProps)
         border: "1px solid var(--border-color)",
         borderRadius: "var(--radius-md)",
         padding: "var(--space-5)",
+        marginBottom: "var(--space-6)",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)" }}>

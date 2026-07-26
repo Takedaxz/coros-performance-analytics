@@ -221,6 +221,7 @@ class Activity(Base):
     efficiency_factor_app: Mapped[float | None] = mapped_column(Float, nullable=True)
     cardiac_drift_pct_app: Mapped[float | None] = mapped_column(Float, nullable=True)
     hr_quality_flag: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    postmortem: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Provenance
     source_type: Mapped[str] = mapped_column(Enum(SourceType, name="source_type"), nullable=False)
