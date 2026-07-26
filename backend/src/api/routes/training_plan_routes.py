@@ -23,21 +23,22 @@ class TrainingEvent(BaseModel):
     end: str
     description: str
     location: str
-    event_type: Literal["run", "strength", "swim", "yoga", "pilates", "race", "other"]
+    event_type: Literal["run", "ride", "strength", "swim", "yoga", "pilates", "race", "other"]
     is_all_day: bool
 
 
-def _classify_event(summary: str) -> Literal["run", "strength", "swim", "yoga", "pilates", "race", "other"]:
+def _classify_event(summary: str) -> Literal["run", "ride", "strength", "swim", "yoga", "pilates", "race", "other"]:
     s = summary.lower()
     # Explicit run keywords
     if any(k in s for k in ("run", "tempo", "long run", "easy run", "marathon", "hyrox")):
         return "run"
+    if re.search(r"\b(?:bike|ride|cycling|cycle|trainer)\b", s):
+        return "ride"
     # Distance / interval / pace notation → running session
     # e.g. "5 × 8 min @ T", "6×800m @ 4:40", "4:30/km", "@ i", "@ t", "min @"
     if any(k in s for k in ("@ t", "@ i", "@ m", "min @", "×", "x 1 km", "/km", "strides", "intervals")):
         return "run"
     # Standalone distance markers without "run" keyword (e.g. "17.5 km")
-    import re
     if re.search(r"\d+(\.\d+)?\s*km", s):
         return "run"
     if "swim" in s:
@@ -95,6 +96,16 @@ def _extract_value(lines: list[str], prop: str) -> str:
     return ""
 
 
+def _unescape_ical_text(value: str) -> str:
+    """Decode iCalendar text escapes for readable event details."""
+    return (
+        value.replace("\\n", "\n")
+        .replace("\\,", ",")
+        .replace("\\;", ";")
+        .replace("\\\\", "\\")
+    )
+
+
 async def _fetch_and_parse_ical() -> list[TrainingEvent]:
     """Fetch the iCal feed and return parsed TrainingEvent objects."""
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -115,8 +126,8 @@ async def _fetch_and_parse_ical() -> list[TrainingEvent]:
 
         uid = _extract_value(lines, "UID")
         summary = _extract_value(lines, "SUMMARY")
-        description = _extract_value(lines, "DESCRIPTION").replace("\\n", "\n")
-        location = _extract_value(lines, "LOCATION").replace("\\,", ",").replace("\\n", ", ")
+        description = _unescape_ical_text(_extract_value(lines, "DESCRIPTION"))
+        location = _unescape_ical_text(_extract_value(lines, "LOCATION")).replace("\n", ", ")
 
         dtstart_raw = _extract_value(lines, "DTSTART")
         dtend_raw = _extract_value(lines, "DTEND")

@@ -8,14 +8,25 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import get_settings
+from src.db.credential_store import (
+    clear_coros_credentials,
+    load_coros_credentials,
+    save_coros_credentials,
+)
 from src.db.engine import get_db_session
 from src.db.models import Goal, User
+from src.db.owner import get_owner_id
 
 router = APIRouter()
 settings = get_settings()
 
-_DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000000"
 
+async def _api_enabled(db: AsyncSession) -> bool:
+    """Return True when COROS credentials are available (DB or env fallback)."""
+    creds = await load_coros_credentials(db, settings.app_secret_key)
+    if creds is not None:
+        return True
+    return bool(settings.coros_email and settings.coros_password)
 
 class SyncConfig(BaseModel):
     api_enabled: bool
@@ -75,28 +86,71 @@ class UserProfile(BaseModel):
 
 
 @router.get("/sync-config")
-async def get_sync_config() -> SyncConfig:
+async def get_sync_config(
+    db: AsyncSession = Depends(get_db_session),
+) -> SyncConfig:
     """Current API sync configuration."""
     return SyncConfig(
-        api_enabled=bool(settings.coros_email and settings.coros_password),
+        api_enabled=await _api_enabled(db),
         sync_interval_minutes=settings.sync_interval_minutes,
     )
 
 
 @router.get("/status")
-async def app_status() -> dict[str, str | bool]:
+async def app_status(
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, str | bool]:
     """Application status and feature flags."""
     return {
         "app_env": settings.app_env,
         "gemini_enabled": settings.gemini_enabled,
-        "api_enabled": bool(settings.coros_email and settings.coros_password),
+        "api_enabled": await _api_enabled(db),
     }
+
+
+class CorosCredentialPayload(BaseModel):
+    email: str
+    password: str
+
+
+@router.post("/coros-credentials", status_code=200)
+async def set_coros_credentials(
+    payload: CorosCredentialPayload,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, str | bool]:
+    """Save COROS API credentials (encrypted in DB). Password is never returned."""
+    if not payload.email.strip() or not payload.password:
+        raise HTTPException(status_code=400, detail="Email and password are required.")
+    await save_coros_credentials(db, payload.email, payload.password, settings.app_secret_key)
+    return {"configured": True, "email": payload.email.strip()}
+
+
+@router.get("/coros-credentials")
+async def get_coros_credentials(
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, str | bool | None]:
+    """Return credential status. Password is never included in the response."""
+    creds = await load_coros_credentials(db, settings.app_secret_key)
+    if creds:
+        return {"configured": True, "email": creds[0], "source": "db"}
+    if settings.coros_email and settings.coros_password:
+        return {"configured": True, "email": settings.coros_email, "source": "env"}
+    return {"configured": False, "email": None, "source": None}
+
+
+@router.delete("/coros-credentials", status_code=200)
+async def delete_coros_credentials(
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, bool]:
+    """Remove stored COROS credentials from the database."""
+    await clear_coros_credentials(db)
+    return {"configured": False}
 
 
 @router.get("/profile", response_model=UserProfile)
 async def get_profile(db: AsyncSession = Depends(get_db_session)) -> UserProfile:
     """Retrieve the user's biometric profile."""
-    res = await db.execute(select(User).where(User.id == _DEFAULT_USER_ID))
+    res = await db.execute(select(User).where(User.id == get_owner_id()))
     user = res.scalar_one_or_none()
     if not user:
         return UserProfile()
@@ -118,7 +172,7 @@ async def update_profile(
     db: AsyncSession = Depends(get_db_session),
 ) -> UserProfile:
     """Save or update the user's biometric profile."""
-    res = await db.execute(select(User).where(User.id == _DEFAULT_USER_ID))
+    res = await db.execute(select(User).where(User.id == get_owner_id()))
     user = res.scalar_one_or_none()
     if not user:
         return UserProfile()
@@ -157,7 +211,7 @@ async def get_goal(db: AsyncSession = Depends(get_db_session)) -> UserGoal:
     """Retrieve the user's current active training goal (backwards-compatibility)."""
     res = await db.execute(
         select(Goal)
-        .where(Goal.user_id == _DEFAULT_USER_ID, Goal.is_active)
+        .where(Goal.user_id == get_owner_id(), Goal.is_active)
         .order_by(Goal.updated_at.desc())
     )
     goal = res.scalars().first()
@@ -180,12 +234,12 @@ async def update_goal(
     """Save or update the user's active training goal (backwards-compatibility)."""
     res = await db.execute(
         select(Goal)
-        .where(Goal.user_id == _DEFAULT_USER_ID, Goal.is_active)
+        .where(Goal.user_id == get_owner_id(), Goal.is_active)
         .order_by(Goal.updated_at.desc())
     )
     goal = res.scalars().first()
     if not goal:
-        goal = Goal(user_id=_DEFAULT_USER_ID, is_active=True)
+        goal = Goal(user_id=get_owner_id(), is_active=True)
         db.add(goal)
 
     goal.goal_description = payload.goal_description
@@ -216,7 +270,7 @@ async def get_goals(db: AsyncSession = Depends(get_db_session)) -> list[Goal]:
     """Retrieve all training goals for the user, ordered by active status and creation date."""
     res = await db.execute(
         select(Goal)
-        .where(Goal.user_id == _DEFAULT_USER_ID)
+        .where(Goal.user_id == get_owner_id())
         .order_by(Goal.is_active.desc(), Goal.created_at.desc())
     )
     return list(res.scalars().all())
@@ -229,7 +283,7 @@ async def create_goal(
 ) -> Goal:
     """Create a new training goal."""
     goal = Goal(
-        user_id=_DEFAULT_USER_ID,
+        user_id=get_owner_id(),
         goal_description=payload.goal_description,
         goal_race_name=payload.goal_race_name,
         goal_race_date=payload.goal_race_date,
@@ -251,7 +305,7 @@ async def update_user_goal(
 ) -> Goal:
     """Update an existing training goal."""
     res = await db.execute(
-        select(Goal).where(Goal.id == goal_id, Goal.user_id == _DEFAULT_USER_ID)
+        select(Goal).where(Goal.id == goal_id, Goal.user_id == get_owner_id())
     )
     goal = res.scalar_one_or_none()
     if not goal:
@@ -285,7 +339,7 @@ async def delete_goal(
 ) -> dict[str, str]:
     """Delete a training goal."""
     res = await db.execute(
-        select(Goal).where(Goal.id == goal_id, Goal.user_id == _DEFAULT_USER_ID)
+        select(Goal).where(Goal.id == goal_id, Goal.user_id == get_owner_id())
     )
     goal = res.scalar_one_or_none()
     if not goal:
@@ -303,7 +357,7 @@ async def toggle_goal_active(
 ) -> Goal:
     """Toggle a goal's active/inactive state."""
     res = await db.execute(
-        select(Goal).where(Goal.id == goal_id, Goal.user_id == _DEFAULT_USER_ID)
+        select(Goal).where(Goal.id == goal_id, Goal.user_id == get_owner_id())
     )
     goal = res.scalar_one_or_none()
     if not goal:

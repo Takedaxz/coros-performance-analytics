@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { Fragment, useState, useEffect } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
@@ -14,9 +14,20 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import Sidebar from "@/components/Sidebar";
+import StrengthBodyMap from "@/components/StrengthBodyMap";
+import { getSportVisual, SportIcon } from "@/components/SportActivityIcon";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const Map = dynamic(() => import("@/components/Map"), { ssr: false });
+
+function AiGlyph() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
 
 interface ActivityDetail {
   id: string;
@@ -38,17 +49,67 @@ interface ActivityDetail {
   training_load_vendor?: number;
   efficiency_factor_app?: number;
   cardiac_drift_pct_app?: number;
-  laps: Array<{
-    lap_index: number;
-    elapsed_s: number;
-    distance_m?: number;
-    avg_hr_bpm?: number;
-    avg_speed_mps?: number;
-    avg_power_w?: number;
+  strength_detail?: StrengthDetail;
+  postmortem?: string;
+  laps: ActivityLap[];
+  lap_splits?: Record<string, ActivityLap[]>;
+}
+
+interface ActivityLap {
+  lap_index: number;
+  start_time?: string;
+  leg?: "swim" | "ride" | "run";
+  elapsed_s: number;
+  distance_m?: number;
+  avg_hr_bpm?: number;
+  max_hr_bpm?: number;
+  avg_speed_mps?: number;
+  avg_power_w?: number;
+  avg_cadence?: number;
+  lap_type?: "recovery" | "rest" | "run" | "functional";
+}
+
+interface StrengthDetail {
+  sets: number;
+  total_reps: number;
+  total_weight_kg: number;
+  exercises: number;
+  calories: number;
+  duration_s: number;
+  avg_hr_bpm?: number;
+  max_hr_bpm?: number;
+  training_load?: number;
+  aerobic_effect?: number;
+  anaerobic_effect?: number;
+  exercises_detail: Array<{
+    name_key: string;
+    name?: string | null;
+    sets: number;
+    total_reps: number;
+    entries: Array<{ reps: number; weight_kg: number; work_s: number; rest_s: number; calories: number }>;
   }>;
 }
 
+type ActivityMetric = [label: string, value: string | number, unit?: string];
+
+const STRENGTH_BODY_REGION_NAMES: Record<string, string> = {
+  S4208: "Full Body",
+  S4209: "Shoulders",
+  S4210: "Arms",
+  S4211: "Chest",
+  S4212: "Back",
+  S4213: "Abs",
+  S4214: "Legs & Hips",
+};
+
+function strengthExerciseName(nameKey: string, name: string | null | undefined): string {
+  const rawName = name?.trim();
+  if (rawName && !/^[TS]\d/.test(rawName)) return rawName;
+  return STRENGTH_BODY_REGION_NAMES[nameKey] ?? nameKey;
+}
+
 interface RecordPoint {
+  timestamp: string;
   elapsed_s?: number;
   heart_rate_bpm?: number;
   speed_mps?: number;
@@ -67,35 +128,67 @@ function formatPace(speedMps: number): string {
   return `${min}:${sec.toString().padStart(2, "0")}`;
 }
 
+function formatSwimPace(speedMps: number): string {
+  if (speedMps <= 0) return "--";
+  const paceSecondsPer100m = 100 / speedMps;
+  const min = Math.floor(paceSecondsPer100m / 60);
+  const sec = Math.round(paceSecondsPer100m % 60);
+  return `${min}:${sec.toString().padStart(2, "0")}`;
+}
+
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = Math.round(seconds % 60);
+  return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function formatSplitDuration(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.round(seconds % 60);
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function formatLegDuration(seconds: number): string {
+  return seconds >= 3600 ? formatDuration(seconds) : formatSplitDuration(seconds);
+}
+
 export default function ActivityDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const activityId = params.id as string;
+  const sportHint = searchParams.get("sport") || "";
+  const isStrengthSkeleton = sportHint === "strength";
+  const isTriathlonSkeleton = sportHint === "multisport";
+
   const [activity, setActivity] = useState<ActivityDetail | null>(null);
   const [records, setRecords] = useState<RecordPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [postmortem, setPostmortem] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [expandedLapIndex, setExpandedLapIndex] = useState<number | null>(null);
+  const [expandedTriathlonLeg, setExpandedTriathlonLeg] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchDetail() {
       try {
         const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const [detailRes, recordsRes] = await Promise.all([
-          fetch(`${apiBase}/api/activities/${activityId}`),
-          fetch(`${apiBase}/api/activities/${activityId}/records`),
-        ]);
+        const detailRes = await fetch(`${apiBase}/api/activities/${activityId}`);
 
         if (detailRes.ok) {
           const detailData = await detailRes.json();
           setActivity(detailData);
           setPostmortem(detailData.postmortem || null);
+          setExpandedLapIndex(null);
+          setExpandedTriathlonLeg(null);
         }
+        const recordsRes = await fetch(`${apiBase}/api/activities/${activityId}/records`);
         if (recordsRes.ok) {
           const data = await recordsRes.json();
           setRecords(data.records || []);
         }
       } catch {
-        // Backend not available
+        // Backend offline fallback
       }
       setIsLoading(false);
     }
@@ -105,14 +198,53 @@ export default function ActivityDetailPage() {
 
   async function generatePostmortem() {
     setIsGenerating(true);
+    setPostmortem("");
     try {
       const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const res = await fetch(`${apiBase}/api/ai/postmortem/${activityId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setPostmortem(data.analysis);
-      } else {
-        setPostmortem("Error generating postmortem.");
+      const res = await fetch(`${apiBase}/api/ai/postmortem/${activityId}/stream`);
+
+      if (!res.ok || !res.body) {
+        setPostmortem("Error generating postmortem analysis.");
+        setIsGenerating(false);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("data: ")) {
+            try {
+              const payload = JSON.parse(trimmed.slice(6));
+              if (payload.text) {
+                setPostmortem((prev) => prev + payload.text);
+              }
+            } catch {
+              // Ignore SSE parse errors
+            }
+          }
+        }
+      }
+
+      if (buffer.trim().startsWith("data: ")) {
+        try {
+          const payload = JSON.parse(buffer.trim().slice(6));
+          if (payload.text) {
+            setPostmortem((prev) => prev + payload.text);
+          }
+        } catch {
+          // Ignore SSE parse errors
+        }
       }
     } catch {
       setPostmortem("Failed to generate postmortem.");
@@ -125,9 +257,137 @@ export default function ActivityDetailPage() {
       <div className="app-layout">
         <Sidebar />
         <main className="main-content">
-          <header className="page-header"><h2 className="page-title">Activity Detail</h2></header>
-          <div className="page-body" style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh", color: "var(--color-text-muted)" }}>
-            Loading...
+          <header className="page-header">
+            <h2 className="page-title">Activity Detail</h2>
+            <Link href="/activities" className="btn btn-secondary btn-sm">Back</Link>
+          </header>
+
+          <div className="page-body">
+            {/* Activity Header Identity Skeleton */}
+            <div className="activity-detail-identity">
+              <div className="skeleton" style={{ width: 38, height: 38, borderRadius: "var(--radius-sm)", flexShrink: 0 }} />
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <div className="skeleton" style={{ width: "160px", height: "20px", borderRadius: "4px" }} />
+                <div className="skeleton" style={{ width: "110px", height: "12px", borderRadius: "3px" }} />
+              </div>
+            </div>
+
+            {/* Metric Strip Pills Skeleton */}
+            <div className="activity-metric-strip">
+              {(isStrengthSkeleton
+                ? [100, 85, 120, 110, 95, 80, 85, 90]
+                : [130, 120, 140, 135, 90, 105, 115, 110]
+              ).map((width, i) => (
+                <div
+                  key={i}
+                  className="skeleton"
+                  style={{ width: `${width}px`, height: "26px", borderRadius: "999px" }}
+                />
+              ))}
+            </div>
+
+            {/* Sport-Specific Layout Skeletons */}
+            {isStrengthSkeleton ? (
+              <>
+                <div className="strength-overview">
+                  <div className="card" style={{ minHeight: "340px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <div className="skeleton" style={{ width: "140px", height: "14px", borderRadius: "4px" }} />
+                    <div className="skeleton" style={{ flex: 1, width: "100%", borderRadius: "10px" }} />
+                  </div>
+                  <div className="card" style={{ minHeight: "340px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <div className="skeleton" style={{ width: "200px", height: "14px", borderRadius: "4px" }} />
+                    <div className="skeleton" style={{ flex: 1, width: "100%", borderRadius: "10px" }} />
+                  </div>
+                </div>
+
+                <div className="card" style={{ marginTop: "var(--space-6)", marginBottom: "var(--space-6)" }}>
+                  <div className="card-header">
+                    <div className="skeleton" style={{ width: "150px", height: "14px", borderRadius: "4px" }} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <div className="skeleton" style={{ width: "140px", height: "16px", borderRadius: "4px" }} />
+                          <div className="skeleton" style={{ width: "100px", height: "14px", borderRadius: "4px" }} />
+                        </div>
+                        <div className="skeleton" style={{ width: "100%", height: "90px", borderRadius: "8px" }} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : isTriathlonSkeleton ? (
+              <>
+                <div className="card telemetry-card-standalone" style={{ minHeight: "340px", display: "flex", flexDirection: "column", gap: "14px" }}>
+                  <div className="card-header">
+                    <div className="skeleton" style={{ width: "220px", height: "14px", borderRadius: "4px" }} />
+                  </div>
+                  <div className="skeleton" style={{ flex: 1, width: "100%", borderRadius: "10px" }} />
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "var(--space-6)", marginTop: "var(--space-6)", marginBottom: "var(--space-6)" }}>
+                  <div className="card" style={{ minHeight: "300px", display: "flex", flexDirection: "column", gap: "14px" }}>
+                    <div className="card-header">
+                      <div className="skeleton" style={{ width: "130px", height: "14px", borderRadius: "4px" }} />
+                    </div>
+                    <div className="skeleton" style={{ flex: 1, width: "100%", borderRadius: "var(--radius-md)" }} />
+                  </div>
+                  <div className="card" style={{ minHeight: "300px", display: "flex", flexDirection: "column", gap: "14px" }}>
+                    <div className="card-header">
+                      <div className="skeleton" style={{ width: "130px", height: "14px", borderRadius: "4px" }} />
+                    </div>
+                    <div className="skeleton" style={{ flex: 1, width: "100%", borderRadius: "var(--radius-md)" }} />
+                  </div>
+                </div>
+
+                <div className="card" style={{ marginBottom: "var(--space-6)" }}>
+                  <div className="card-header">
+                    <div className="skeleton" style={{ width: "160px", height: "14px", borderRadius: "4px" }} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="skeleton" style={{ width: "100%", height: "40px", borderRadius: "8px" }} />
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="card telemetry-card-standalone" style={{ minHeight: "340px", display: "flex", flexDirection: "column", gap: "14px" }}>
+                  <div className="card-header">
+                    <div className="skeleton" style={{ width: "220px", height: "14px", borderRadius: "4px" }} />
+                  </div>
+                  <div className="skeleton" style={{ flex: 1, width: "100%", borderRadius: "10px" }} />
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "var(--space-6)", marginTop: "var(--space-6)", marginBottom: "var(--space-6)" }}>
+                  <div className="card" style={{ minHeight: "300px", display: "flex", flexDirection: "column", gap: "14px" }}>
+                    <div className="card-header">
+                      <div className="skeleton" style={{ width: "130px", height: "14px", borderRadius: "4px" }} />
+                    </div>
+                    <div className="skeleton" style={{ flex: 1, width: "100%", borderRadius: "var(--radius-md)" }} />
+                  </div>
+                  <div className="card" style={{ minHeight: "300px", display: "flex", flexDirection: "column", gap: "14px" }}>
+                    <div className="card-header">
+                      <div className="skeleton" style={{ width: "130px", height: "14px", borderRadius: "4px" }} />
+                    </div>
+                    <div className="skeleton" style={{ flex: 1, width: "100%", borderRadius: "var(--radius-md)" }} />
+                  </div>
+                </div>
+
+                <div className="card" style={{ marginBottom: "var(--space-6)" }}>
+                  <div className="card-header">
+                    <div className="skeleton" style={{ width: "130px", height: "14px", borderRadius: "4px" }} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <div key={i} className="skeleton" style={{ width: "100%", height: "36px", borderRadius: "8px" }} />
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </main>
       </div>
@@ -141,7 +401,7 @@ export default function ActivityDetailPage() {
         <main className="main-content">
           <header className="page-header"><h2 className="page-title">Activity Not Found</h2></header>
           <div className="page-body" style={{ textAlign: "center", paddingTop: "var(--space-16)", color: "var(--color-text-muted)" }}>
-            <p>Activity not found. It may not have been imported yet.</p>
+            <p>Activity details could not be loaded.</p>
             <Link href="/activities" className="btn btn-secondary" style={{ marginTop: "var(--space-4)" }}>Back to Activities</Link>
           </div>
         </main>
@@ -149,7 +409,6 @@ export default function ActivityDetailPage() {
     );
   }
 
-  // Downsample records for chart rendering (every nth point)
   const sampleRate = Math.max(1, Math.floor(records.length / 300));
   const chartData = records
     .filter((_, i) => i % sampleRate === 0)
@@ -157,9 +416,23 @@ export default function ActivityDetailPage() {
       time: r.elapsed_s ? Math.round(r.elapsed_s / 60) : 0,
       hr: r.heart_rate_bpm,
       speed: r.speed_mps ? Math.round(r.speed_mps * 3.6 * 10) / 10 : undefined,
-      alt: r.altitude_m ? Math.round(r.altitude_m) : undefined,
+      alt: r.altitude_m != null ? Math.round(r.altitude_m) : undefined,
       power: r.power_w,
     }));
+  const elevationValues = chartData
+    .map((point) => point.alt)
+    .filter((altitude): altitude is number => altitude != null);
+  const elevationBounds: [number, number] | null = elevationValues.length
+    ? [Math.min(...elevationValues), Math.max(...elevationValues)]
+    : null;
+  const elevationPadding = elevationBounds
+    ? elevationBounds[1] === elevationBounds[0]
+      ? 5
+      : Math.max(1, (elevationBounds[1] - elevationBounds[0]) * 0.2)
+    : 0;
+  const hasHeartRateData = chartData.some((point) => point.hr != null);
+  const hasSpeedData = chartData.some((point) => point.speed != null);
+  const hasTelemetryData = hasHeartRateData || hasSpeedData;
 
   const routePoints = records
     .filter((r) => r.position_lat != null && r.position_long != null)
@@ -170,207 +443,468 @@ export default function ActivityDetailPage() {
 
   const routeSampleRate = Math.max(1, Math.floor(routePoints.length / 600));
   const sampledRoutePoints = routePoints.filter((_, i) => i % routeSampleRate === 0);
+  const strength = activity.sport === "strength" ? activity.strength_detail : undefined;
+  const isSwim = activity.sport === "swim";
+  const isRun = ["run", "trail_run"].includes(activity.sport);
+  const triathlonLegs = ["swim", "ride", "run"]
+    .map((sport) => ({
+      sport,
+      laps: activity.laps.filter((lap) => lap.leg === sport),
+    }))
+    .filter((leg) => leg.laps.length > 0);
+  const triathlonLegDetails = triathlonLegs.map((leg, index) => {
+    const start = leg.laps[0]?.start_time ? new Date(leg.laps[0].start_time).getTime() : 0;
+    const nextStartTime = triathlonLegs[index + 1]?.laps[0]?.start_time;
+    const nextStart = nextStartTime
+      ? new Date(nextStartTime).getTime()
+      : 0;
+    const recordBeforeNextLeg = nextStart
+      ? [...records].reverse().find((record) => new Date(record.timestamp).getTime() < nextStart)
+      : records[records.length - 1];
+    const recordAtNextLeg = nextStart
+      ? records.find((record) => new Date(record.timestamp).getTime() >= nextStart)
+      : undefined;
+    const end = recordBeforeNextLeg ? new Date(recordBeforeNextLeg.timestamp).getTime() : 0;
+    const timelineDuration = start && end > start ? (end - start) / 1000 : 0;
+    const transition = recordBeforeNextLeg && recordAtNextLeg
+      ? (new Date(recordAtNextLeg.timestamp).getTime() - end) / 1000
+      : 0;
+    const lapDuration = leg.laps.reduce((total, lap) => total + lap.elapsed_s, 0);
+    const duration = transition > 0 && Math.abs(lapDuration - timelineDuration) >= transition - 2
+      ? timelineDuration
+      : lapDuration;
+    const distance = leg.laps.reduce((total, lap) => total + (lap.distance_m ?? 0), 0);
+    const legRecords = records.filter((record) => {
+      const timestamp = new Date(record.timestamp).getTime();
+      return timestamp >= start && timestamp <= end && record.heart_rate_bpm != null;
+    });
+    const avgHr = legRecords.length
+      ? Math.round(legRecords.reduce((total, record) => total + (record.heart_rate_bpm ?? 0), 0) / legRecords.length)
+      : null;
+    const powerDuration = leg.laps
+      .filter((lap) => lap.avg_power_w != null)
+      .reduce((total, lap) => total + lap.elapsed_s, 0);
+    const avgPower = powerDuration
+      ? Math.round(leg.laps.reduce((total, lap) => total + (lap.avg_power_w ?? 0) * lap.elapsed_s, 0) / powerDuration)
+      : null;
+    const cadenceDuration = leg.laps
+      .filter((lap) => lap.avg_cadence != null)
+      .reduce((total, lap) => total + lap.elapsed_s, 0);
+    const avgCadence = cadenceDuration
+      ? Math.round(leg.laps.reduce((total, lap) => total + (lap.avg_cadence ?? 0) * lap.elapsed_s, 0) / cadenceDuration)
+      : null;
+
+    return { ...leg, distance, duration, avgHr, avgPower, avgCadence, transition };
+  });
+  const isTriathlon = activity.sport === "multisport" && triathlonLegDetails.length > 1;
+  const triathlonSpeedMetrics: ActivityMetric[] = isTriathlon
+    ? triathlonLegDetails.flatMap((leg) => {
+        const speed = leg.distance / leg.duration;
+        if (!Number.isFinite(speed) || speed <= 0) return [];
+        if (leg.sport === "swim") return [["Swim pace", formatSwimPace(speed), "/100m"] as ActivityMetric];
+        if (leg.sport === "run") return [["Run pace", formatPace(speed), "/km"] as ActivityMetric];
+        return [["Bike speed", (speed * 3.6).toFixed(1), "km/h"] as ActivityMetric];
+      })
+    : [];
+  const sportVisual = getSportVisual(activity.sport);
+  const activityTime = new Date(activity.start_time).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const activeSwimLaps = isSwim ? activity.laps.filter((lap) => (lap.distance_m ?? 0) > 0) : [];
+  const activeSwimDistance = activeSwimLaps.reduce((total, lap) => total + (lap.distance_m ?? 0), 0);
+  const activeSwimDuration = activeSwimLaps.reduce((total, lap) => total + lap.elapsed_s, 0);
+  const activeRunLaps = isRun
+    ? activity.laps.filter((lap) => (lap.distance_m ?? 0) > 0 && lap.lap_type !== "recovery")
+    : [];
+  const activeRunDistance = activeRunLaps.reduce((total, lap) => total + (lap.distance_m ?? 0), 0);
+  const activeRunDuration = activeRunLaps.reduce((total, lap) => total + lap.elapsed_s, 0);
+  const activityMetrics: ActivityMetric[] = strength
+    ? [
+        ["Sets", strength.sets],
+        ["Reps", strength.total_reps],
+        ["Total weight", strength.total_weight_kg, "kg"],
+        ["Calories", strength.calories, "kcal"],
+        ["Duration", formatDuration(strength.duration_s)],
+        ["Avg HR", strength.avg_hr_bpm ?? "--", "bpm"],
+        ["Max HR", strength.max_hr_bpm ?? "--", "bpm"],
+        ["Training load", strength.training_load ?? activity.training_load_vendor ?? "--"],
+        ["Aerobic", strength.aerobic_effect?.toFixed(1) ?? "--"],
+        ["Anaerobic", strength.anaerobic_effect?.toFixed(1) ?? "--"],
+      ]
+    : [
+        ...(activity.distance_m != null && activity.distance_m > 0
+          ? [["Distance", (activity.distance_m / 1000).toFixed(2), "km"] as ActivityMetric]
+          : []),
+        ...(activity.elapsed_time_s != null && activity.elapsed_time_s > 0
+          ? [["Duration", formatDuration(activity.elapsed_time_s)] as ActivityMetric]
+          : []),
+        ...(activity.avg_speed_mps != null && activity.avg_speed_mps > 0 && !isTriathlon
+          ? activity.sport === "swim"
+            ? [["Overall pace", formatSwimPace(activity.avg_speed_mps), "/100m"] as ActivityMetric]
+            : ["run", "trail_run", "walk", "hike"].includes(activity.sport)
+              ? [["Overall pace", formatPace(activity.avg_speed_mps), "/km"] as ActivityMetric]
+              : [["Avg speed", (activity.avg_speed_mps * 3.6).toFixed(1), "km/h"] as ActivityMetric]
+          : []),
+        ...triathlonSpeedMetrics,
+        ...(activeSwimDistance > 0 && activeSwimDuration > 0
+          ? [["Active pace", formatSwimPace(activeSwimDistance / activeSwimDuration), "/100m"] as ActivityMetric]
+          : []),
+        ...(activeRunDistance > 0 && activeRunDuration > 0
+          ? [["Active pace", formatPace(activeRunDistance / activeRunDuration), "/km"] as ActivityMetric]
+          : []),
+        ...(activity.avg_hr_bpm != null ? [["Avg HR", activity.avg_hr_bpm, "bpm"] as ActivityMetric] : []),
+        ...(activity.max_hr_bpm != null ? [["Max HR", activity.max_hr_bpm, "bpm"] as ActivityMetric] : []),
+        ...(activity.avg_power_w != null && activity.avg_power_w > 0
+          ? [["Avg power", Math.round(activity.avg_power_w), "W"] as ActivityMetric]
+          : []),
+        ...(activity.avg_cadence != null && activity.avg_cadence > 0
+          ? [["Cadence", Math.round(activity.avg_cadence), "spm"] as ActivityMetric]
+          : []),
+        ...(activity.elevation_gain_m != null && activity.elevation_gain_m > 0
+          ? [["Elevation gain", `+${Math.round(activity.elevation_gain_m)}`, "m"] as ActivityMetric]
+          : []),
+        ...(activity.calories_kcal != null && activity.calories_kcal > 0
+          ? [["Calories", Math.round(activity.calories_kcal), "kcal"] as ActivityMetric]
+          : []),
+        ...(activity.training_load_vendor != null
+          ? [["Training load", activity.training_load_vendor] as ActivityMetric]
+          : []),
+      ];
+  const telemetryCard = hasTelemetryData && (
+    <div className={`card${strength ? "" : " telemetry-card-standalone"}`} id="chart-hr-speed" style={{ marginBottom: "var(--space-6)" }}>
+      <div className="card-header">
+        <span className="card-title">Heart Rate & Speed Telemetry</span>
+      </div>
+      <div className="telemetry-chart">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+            <XAxis dataKey="time" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" min" />
+            {hasHeartRateData && <YAxis yAxisId="hr" width={42} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={["dataMin - 10", "dataMax + 10"]} />}
+            {hasSpeedData && <YAxis yAxisId="speed" orientation="right" width={48} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" km/h" />}
+            <Tooltip />
+            {hasHeartRateData && <Line yAxisId="hr" type="monotone" dataKey="hr" stroke="var(--color-status-critical)" strokeWidth={2} dot={false} name="Heart Rate (bpm)" />}
+            {hasSpeedData && <Line yAxisId="speed" type="monotone" dataKey="speed" stroke="var(--color-accent-primary)" strokeWidth={2} dot={false} name="Speed (km/h)" />}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
 
   return (
     <div className="app-layout">
       <Sidebar />
       <main className="main-content">
         <header className="page-header">
-          <h2 className="page-title">{activity.title || activity.sport}</h2>
-          <span style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
-            {new Date(activity.start_time).toLocaleString()}
-          </span>
+          <h2 className="page-title">Activity Detail</h2>
+          <Link href="/activities" className="btn btn-secondary btn-sm">Back</Link>
         </header>
+
         <div className="page-body">
-          {/* Summary Metrics */}
-          <div className="metrics-grid">
-            {activity.distance_m != null && (
-              <div className="metric-card">
-                <div className="metric-label">Distance</div>
-                <div className="metric-value">{(activity.distance_m / 1000).toFixed(2)}<span className="card-value-unit">km</span></div>
-              </div>
-            )}
-            {activity.elapsed_time_s != null && (
-              <div className="metric-card">
-                <div className="metric-label">Duration</div>
-                <div className="metric-value">{Math.floor(activity.elapsed_time_s / 3600)}:{String(Math.floor((activity.elapsed_time_s % 3600) / 60)).padStart(2, "0")}:{String(Math.round(activity.elapsed_time_s % 60)).padStart(2, "0")}</div>
-              </div>
-            )}
-            {activity.avg_hr_bpm != null && (
-              <div className="metric-card">
-                <div className="metric-label">Avg / Max HR</div>
-                <div className="metric-value">{activity.avg_hr_bpm}<span className="card-value-unit">/ {activity.max_hr_bpm} bpm</span></div>
-              </div>
-            )}
-            {activity.avg_speed_mps != null && (
-              <div className="metric-card">
-                <div className="metric-label">Avg Pace</div>
-                <div className="metric-value">{formatPace(activity.avg_speed_mps)}<span className="card-value-unit">/km</span></div>
-              </div>
-            )}
-            {activity.avg_power_w != null && (
-              <div className="metric-card">
-                <div className="metric-label">Avg / Max Power</div>
-                <div className="metric-value">{activity.avg_power_w}<span className="card-value-unit">/ {activity.max_power_w} W</span></div>
-              </div>
-            )}
-            {activity.elevation_gain_m != null && (
-              <div className="metric-card">
-                <div className="metric-label">Elevation</div>
-                <div className="metric-value">+{Math.round(activity.elevation_gain_m)}<span className="card-value-unit">/ -{Math.round(activity.elevation_loss_m || 0)} m</span></div>
-              </div>
-            )}
-            {activity.training_load_vendor != null && (
-              <div className="metric-card">
-                <div className="metric-label">Training Load</div>
-                <div className="metric-value">{activity.training_load_vendor}</div>
-              </div>
-            )}
-            {activity.calories_kcal != null && (
-              <div className="metric-card">
-                <div className="metric-label">Calories</div>
-                <div className="metric-value">{activity.calories_kcal}<span className="card-value-unit">kcal</span></div>
-              </div>
-            )}
+          <div className="activity-detail-identity">
+            <span className="activity-detail-icon" style={{ background: sportVisual.background, color: sportVisual.color }}>
+              <SportIcon sport={activity.sport} />
+            </span>
+            <div>
+              <h1>{activity.title || sportVisual.label}</h1>
+              <span>{activityTime}</span>
+            </div>
           </div>
+          <div className="activity-metric-strip">
+            {activityMetrics.map(([label, value, unit]) => (
+              <span className="activity-metric-pill" key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+                {unit && <em>{unit}</em>}
+              </span>
+            ))}
+          </div>
+          {strength ? (
+            <>
+              <div className="strength-overview">
+                <StrengthBodyMap exercises={strength.exercises_detail} />
+                {telemetryCard}
+              </div>
+            </>
+          ) : (
+            telemetryCard
+          )}
 
-          {/* Route Map & Elevation Grid */}
-          {(sampledRoutePoints.length > 0 || chartData.some((d) => d.alt != null)) && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(350px, 1fr))", gap: "var(--space-4)", marginBottom: "var(--space-4)" }}>
-              {/* Route Map Card */}
-              {sampledRoutePoints.length > 0 && (
-                <div className="chart-container" id="chart-route" style={{ display: "flex", flexDirection: "column" }}>
-                  <div className="chart-header" style={{ paddingBottom: "var(--space-2)" }}>
-                    <div className="chart-title">Route</div>
-                  </div>
-                  <div style={{ flex: 1, position: "relative", minHeight: "260px" }}>
-                    <Map points={sampledRoutePoints} />
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-4)", marginTop: "var(--space-2)", fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                      <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#3b82f6" }} /> Start
+          {strength && (
+            <div className="card" style={{ marginTop: "var(--space-6)", marginBottom: "var(--space-6)" }}>
+              <div className="card-header"><span className="card-title">Strength Breakdown</span></div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+                {strength.exercises_detail.map((exercise, exerciseIndex) => (
+                  <div key={`${exercise.name_key}-${exerciseIndex}`}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "var(--space-2)" }}>
+                      <strong>{exerciseIndex + 1}. {strengthExerciseName(exercise.name_key, exercise.name)}</strong>
+                      <span style={{ color: "var(--color-text-secondary)", fontSize: "13px" }}>{exercise.sets} sets · {exercise.total_reps} reps</span>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                      <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "#f59e0b" }} /> Finish
+                    <div className="table-responsive">
+                      <table className="data-table">
+                        <thead><tr><th>Set</th><th>Reps</th><th>Weight</th><th>Time</th><th>Rest</th><th>Calories</th></tr></thead>
+                        <tbody>{exercise.entries.map((entry, setIndex) => (
+                          <tr key={setIndex}><td>{setIndex + 1}</td><td>{entry.reps}</td><td>{entry.weight_kg > 0 ? `${entry.weight_kg} kg` : "--"}</td><td>{formatDuration(entry.work_s)}</td><td>{entry.rest_s > 0 ? formatDuration(entry.rest_s) : "--"}</td><td>{entry.calories}</td></tr>
+                        ))}</tbody>
+                      </table>
                     </div>
                   </div>
-                </div>
-              )}
-
-              {/* Elevation Profile Card */}
-              {chartData.some((d) => d.alt != null) && (
-                <div className="chart-container" id="chart-elevation" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                  <div className="chart-header">
-                    <div className="chart-title">Elevation Profile</div>
-                  </div>
-                  <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
-                    <ResponsiveContainer width="100%" height={260}>
-                      <LineChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                        <XAxis dataKey="time" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" min" />
-                        <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="m" />
-                        <Tooltip contentStyle={{ background: "var(--color-bg-card)", border: "1px solid var(--border-color)", borderRadius: 8, fontSize: 12 }} />
-                        <Line type="monotone" dataKey="alt" stroke="#10b981" strokeWidth={1.5} dot={false} name="Elevation (m)" />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              )}
+                ))}
+              </div>
             </div>
           )}
 
-          {/* Time-Series Heart Rate & Speed Chart */}
-          {chartData.length > 0 && (
-            <div className="chart-container" id="chart-hr-speed" style={{ marginBottom: "var(--space-4)" }}>
-              <div className="chart-header">
-                <div className="chart-title">Heart Rate & Speed</div>
-              </div>
-              <ResponsiveContainer width="100%" height={250}>
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                  <XAxis dataKey="time" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" min" />
-                  <YAxis yAxisId="hr" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={["dataMin - 10", "dataMax + 10"]} />
-                  <YAxis yAxisId="speed" orientation="right" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" km/h" />
-                  <Tooltip contentStyle={{ background: "var(--color-bg-card)", border: "1px solid var(--border-color)", borderRadius: 8, fontSize: 12 }} />
-                  <Line yAxisId="hr" type="monotone" dataKey="hr" stroke="var(--chart-4)" strokeWidth={1.5} dot={false} name="Heart Rate (bpm)" />
-                  <Line yAxisId="speed" type="monotone" dataKey="speed" stroke="var(--chart-1)" strokeWidth={1.5} dot={false} name="Speed (km/h)" />
-                </LineChart>
-              </ResponsiveContainer>
+          {/* Route Map & Elevation Grid */}
+          {(sampledRoutePoints.length > 0 || chartData.some((d) => d.alt != null)) && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "var(--space-6)", marginBottom: "var(--space-6)" }}>
+              {sampledRoutePoints.length > 0 && (
+                <div className="card" id="chart-route" style={{ display: "flex", flexDirection: "column" }}>
+                  <div className="card-header">
+                    <span className="card-title">GPS Route Overlay</span>
+                  </div>
+                  <div style={{ flex: 1, position: "relative", minHeight: "260px", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
+                    <Map points={sampledRoutePoints} />
+                  </div>
+                </div>
+              )}
+
+              {elevationBounds && (
+                <div className="card" id="chart-elevation" style={{ display: "flex", flexDirection: "column" }}>
+                  <div className="card-header">
+                    <span className="card-title">Elevation Profile</span>
+                  </div>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+                      <XAxis dataKey="time" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" min" />
+                      <YAxis domain={[elevationBounds[0] - elevationPadding, elevationBounds[1] + elevationPadding]} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="m" />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="alt" stroke="var(--color-status-positive)" strokeWidth={2} dot={false} name="Elevation (m)" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </div>
           )}
 
           {/* Laps Table */}
-          {activity.laps.length > 0 && (
-            <div className="card" style={{ marginTop: "var(--space-4)" }} id="laps-table">
+          {isTriathlon && (
+            <div className="card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
               <div className="card-header">
-                <div className="card-title">Laps</div>
+                <span className="card-title">Triathlon Breakdown</span>
               </div>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Lap</th>
-                    <th>Distance</th>
-                    <th>Duration</th>
-                    <th>Avg HR</th>
-                    <th>Pace</th>
-                    <th>Power</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activity.laps.map((lap) => (
-                    <tr key={lap.lap_index}>
-                      <td className="mono">{lap.lap_index + 1}</td>
-                      <td className="mono">{lap.distance_m ? `${(lap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
-                      <td className="mono">{Math.floor(lap.elapsed_s / 60)}:{String(Math.round(lap.elapsed_s % 60)).padStart(2, "0")}</td>
-                      <td className="mono">{lap.avg_hr_bpm || "--"}</td>
-                      <td className="mono">{lap.avg_speed_mps ? formatPace(lap.avg_speed_mps) : "--"}</td>
-                      <td className="mono">{lap.avg_power_w ? `${lap.avg_power_w}W` : "--"}</td>
+              <div className="table-responsive">
+                <table className="data-table">
+                  <thead>
+                    <tr><th>Leg</th><th>Distance</th><th>Duration</th><th>Avg HR</th><th>Pace / Speed</th><th>Power / Cadence</th></tr>
+                  </thead>
+                  <tbody>
+                    {triathlonLegDetails.map((leg, index) => {
+                      const speed = leg.distance > 0 && leg.duration > 0 ? leg.distance / leg.duration : 0;
+                      const label = leg.sport === "ride" ? "Bike" : leg.sport[0].toUpperCase() + leg.sport.slice(1);
+                      const paceOrSpeed = leg.sport === "swim"
+                        ? `${formatSwimPace(speed)}/100m`
+                        : leg.sport === "run"
+                          ? `${formatPace(speed)}/km`
+                          : `${(speed * 3.6).toFixed(1)} km/h`;
+                      const isExpanded = expandedTriathlonLeg === leg.sport;
+
+                      return (
+                        <Fragment key={leg.sport}>
+                          <tr>
+                            <td className="mono">
+                              <button
+                                type="button"
+                                className="lap-expand-button"
+                                aria-expanded={isExpanded}
+                                onClick={() => setExpandedTriathlonLeg(isExpanded ? null : leg.sport)}
+                              >
+                                {label}
+                              </button>
+                            </td>
+                            <td className="mono">{(leg.distance / 1000).toFixed(2)} km</td>
+                            <td className="mono">{formatLegDuration(leg.duration)}</td>
+                            <td className="mono">{leg.avgHr ? `${leg.avgHr} bpm` : "--"}</td>
+                            <td className="mono">{paceOrSpeed}</td>
+                            <td className="mono">{leg.sport === "swim" ? leg.avgCadence ? `${leg.avgCadence} spm` : "--" : leg.avgPower ? `${leg.avgPower} W` : "--"}</td>
+                          </tr>
+                          {isExpanded && (
+                            <tr className="lap-split-row">
+                              <td colSpan={6}>
+                                <div className="lap-split-label">{label} lap breakdown</div>
+                                <table className="lap-split-table">
+                                  <thead><tr><th>Lap</th><th>Distance</th><th>Duration</th><th>Avg HR</th><th>Pace / Speed</th><th>Power / Cadence</th></tr></thead>
+                                  <tbody>{leg.laps.map((lap, lapIndex) => (
+                                    <tr key={lap.lap_index}>
+                                      <td>{lapIndex + 1}</td>
+                                      <td>{lap.distance_m ? leg.sport === "swim" ? `${Math.round(lap.distance_m)} m` : `${(lap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
+                                      <td>{formatSplitDuration(lap.elapsed_s)}</td>
+                                      <td>{lap.avg_hr_bpm ? `${lap.avg_hr_bpm} bpm` : "--"}</td>
+                                      <td>{lap.avg_speed_mps ? leg.sport === "swim" ? formatSwimPace(lap.avg_speed_mps) : leg.sport === "run" ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : "--"}</td>
+                                      <td>{leg.sport === "swim" ? lap.avg_cadence ? `${lap.avg_cadence} spm` : "--" : lap.avg_power_w ? `${lap.avg_power_w} W` : "--"}</td>
+                                    </tr>
+                                  ))}</tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          )}
+                          {leg.transition > 0 && (
+                            <tr>
+                              <td className="mono">T{index + 1}</td>
+                              <td className="mono">--</td>
+                              <td className="mono">{formatSplitDuration(leg.transition)}</td>
+                              <td className="mono">--</td>
+                              <td className="mono" colSpan={2}>Transition</td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activity.sport !== "strength" && !isTriathlon && activity.laps.length > 0 && (
+            <div className="card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
+              <div className="card-header">
+                <span className="card-title">Split Breakdown</span>
+              </div>
+              <div className="table-responsive">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Lap</th>
+                      <th>Distance</th>
+                      <th>Duration</th>
+                      <th>Avg HR</th>
+                      <th>{isTriathlon ? "Pace / Speed" : isSwim ? "Pace /100m" : "Pace"}</th>
+                      <th>{isTriathlon ? "Power / Cadence" : isSwim ? "Stroke rate" : "Power"}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {activity.laps.map((lap) => {
+                      const kilometerSplits = activity.lap_splits?.[String(lap.lap_index)] ?? [];
+                      const isExpanded = expandedLapIndex === lap.lap_index;
+                      const lapSport = lap.leg ?? activity.sport;
+                      const isLapSwim = lapSport === "swim";
+                      const isLapPaceSport = ["run", "trail_run", "walk", "hike"].includes(lapSport);
+                      const lapNumber = lap.lap_index === 0 ? 1 : lap.lap_index;
+                      const legLapNumber = isTriathlon && lap.leg
+                        ? activity.laps.filter((candidate) => candidate.leg === lap.leg).indexOf(lap) + 1
+                        : lapNumber;
+                      const isRest = isLapSwim
+                        ? !lap.distance_m || lap.distance_m <= 0
+                        : lap.lap_type === "rest" || lap.lap_type === "recovery";
+
+                      return (
+                        <Fragment key={lap.lap_index}>
+                          <tr>
+                            <td className="mono">
+                              {kilometerSplits.length > 1 ? (
+                                <button
+                                  type="button"
+                                  className="lap-expand-button"
+                                  aria-expanded={isExpanded}
+                                  onClick={() => setExpandedLapIndex(isExpanded ? null : lap.lap_index)}
+                                >
+                                  {lapNumber}
+                                </button>
+                              ) : isRest ? "Rest" : lap.lap_type === "run" ? "Run" : lap.lap_type === "functional" ? "Functional" : isTriathlon && lap.leg ? `${lap.leg === "ride" ? "Bike" : lap.leg[0].toUpperCase() + lap.leg.slice(1)} ${legLapNumber}` : lapNumber}
+                            </td>
+                            <td className="mono">{lap.distance_m ? isLapSwim ? `${Math.round(lap.distance_m)} m` : `${(lap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
+                            <td className="mono">{Math.floor(lap.elapsed_s / 60)}:{String(Math.round(lap.elapsed_s % 60)).padStart(2, "0")}</td>
+                            <td className="mono">{lap.avg_hr_bpm ? `${lap.avg_hr_bpm} bpm` : "--"}</td>
+                            <td className="mono">{lap.avg_speed_mps ? isLapSwim ? formatSwimPace(lap.avg_speed_mps) : isLapPaceSport ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : "--"}</td>
+                            <td className="mono">{isLapSwim ? lap.avg_cadence ? `${lap.avg_cadence} spm` : "--" : lap.avg_power_w ? `${lap.avg_power_w} W` : "--"}</td>
+                          </tr>
+                          {isExpanded && (
+                            <tr className="lap-split-row">
+                              <td colSpan={6}>
+                                <div className="lap-split-label">{isSwim ? "Length breakdown" : "Kilometre breakdown"}</div>
+                                <table className="lap-split-table">
+                                  <thead><tr><th>{isSwim ? "Length" : "Km"}</th><th>Distance</th><th>Duration</th><th>Avg HR</th><th>Max HR</th><th>{isSwim ? "Pace /100m" : "Pace"}</th></tr></thead>
+                                  <tbody>{kilometerSplits.map((split, index) => (
+                                    <tr key={`${lap.lap_index}-${index}`}>
+                                      <td>{index + 1}</td>
+                                      <td>{split.distance_m ? isSwim ? `${Math.round(split.distance_m)} m` : `${(split.distance_m / 1000).toFixed(2)} km` : "--"}</td>
+                                      <td>{formatSplitDuration(split.elapsed_s)}</td>
+                                      <td>{split.avg_hr_bpm ? `${split.avg_hr_bpm} bpm` : "--"}</td>
+                                      <td>{split.max_hr_bpm ? `${split.max_hr_bpm} bpm` : "--"}</td>
+                                      <td>{split.avg_speed_mps ? isSwim ? formatSwimPace(split.avg_speed_mps) : `${formatPace(split.avg_speed_mps)}/km` : "--"}</td>
+                                    </tr>
+                                  ))}</tbody>
+                                </table>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
-          {/* App-Derived Insights */}
-          {(activity.efficiency_factor_app || activity.cardiac_drift_pct_app) && (
-            <div className="card" style={{ marginTop: "var(--space-4)" }}>
-              <div className="card-header">
-                <div className="card-title">App-Derived Insights</div>
-                <span className="badge badge-source">app-computed</span>
-              </div>
-              <div className="metrics-grid" style={{ marginBottom: 0 }}>
-                {activity.efficiency_factor_app && (
-                  <div className="metric-card">
-                    <div className="metric-label">Efficiency Factor</div>
-                    <div className="metric-value">{activity.efficiency_factor_app.toFixed(4)}</div>
-                  </div>
+          {/* AI Performance Coach Analysis */}
+          <div className="card" id="ai-analysis-card">
+            <div className="card-header">
+              <span className="card-title" style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                <span
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: "6px",
+                    background: "rgba(33, 230, 165, 0.15)",
+                    color: "var(--color-accent-primary)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <AiGlyph />
+                </span>
+                AI Performance Coach Analysis
+              </span>
+              <button className="btn btn-primary btn-sm" onClick={generatePostmortem} disabled={isGenerating}>
+                {isGenerating ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                    Analyzing
+                    <span className="chat-loading-dots">
+                      <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
+                    </span>
+                  </span>
+                ) : (
+                  "Run AI Analysis"
                 )}
-                {activity.cardiac_drift_pct_app != null && (
-                  <div className="metric-card">
-                    <div className="metric-label">Cardiac Drift</div>
-                    <div className="metric-value" style={{ color: Math.abs(activity.cardiac_drift_pct_app) > 5 ? "var(--color-warning)" : "var(--color-success)" }}>
-                      {activity.cardiac_drift_pct_app > 0 ? "+" : ""}{activity.cardiac_drift_pct_app.toFixed(1)}%
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* AI Postmortem */}
-          <div className="card" style={{ marginTop: "var(--space-4)" }}>
-            <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div className="card-title">AI Coach Postmortem</div>
-              <button className="btn btn-secondary" onClick={generatePostmortem} disabled={isGenerating}>
-                {isGenerating ? "Generating..." : "Analyze Workout"}
               </button>
             </div>
+            {isGenerating && !postmortem && (
+              <div className="msg-row ai-row" style={{ marginTop: "var(--space-4)" }}>
+                <div className="avatar-sq ai" aria-label="AI Coach"><AiGlyph /></div>
+                <div className="ai-text">
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
+                    evaluating splits & physiological recovery
+                    <span className="chat-loading-dots" aria-label="Loading">
+                      <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
+                    </span>
+                  </span>
+                </div>
+              </div>
+            )}
             {postmortem && (
-              <div className="markdown-body" style={{ marginTop: "1rem", padding: "16px", background: "var(--color-bg-elevated)", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-                <ReactMarkdown>
-                  {postmortem}
-                </ReactMarkdown>
+              <div className="msg-row ai-row" style={{ marginTop: "var(--space-4)", width: "100%" }}>
+                <div className="avatar-sq ai" aria-label="AI Coach" style={{ flexShrink: 0 }}><AiGlyph /></div>
+                <div className="ai-text" style={{ flex: 1, minWidth: 0 }}>
+                  <div className="markdown-body">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{postmortem}</ReactMarkdown>
+                  </div>
+                </div>
               </div>
             )}
           </div>

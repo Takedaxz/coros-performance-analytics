@@ -24,6 +24,7 @@ export interface HealthDay {
   hrv_7d_sma?: number;
   recovery_vendor?: number;
   steps?: number;
+  active_calories_kcal?: number;
   readiness_score_app?: number;
   strain_score_app?: number;
   anomaly_flags?: Record<string, unknown>;
@@ -32,14 +33,17 @@ export interface HealthDay {
 export interface SleepSummary {
   sleep_start: string;
   duration_s: number;
+  is_nap: boolean;
   stage_deep_s?: number;
   stage_rem_s?: number;
   stage_light_s?: number;
   stage_awake_s?: number;
+  sleep_quality_vendor?: number;
 }
 
 export interface FitnessSummary {
   vo2max?: number;
+  vo2max_30d_avg?: number | null;
   ftp?: number;
   running_fitness?: number;
   biological_age?: number;
@@ -50,6 +54,7 @@ export interface DashboardData {
   period_days: number;
   activities: ActivitySummary[];
   health: HealthDay[];
+  latest_steps?: Pick<HealthDay, "date" | "steps" | "active_calories_kcal"> | null;
   sleep: SleepSummary[];
   fitness: FitnessSummary;
 }

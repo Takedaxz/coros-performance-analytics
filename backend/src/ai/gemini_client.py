@@ -323,3 +323,28 @@ def generate_postmortem(context: str, activity_context: str) -> str:
         return f"Error: {str(e)}"
 
 
+def generate_postmortem_stream(context: str, activity_context: str) -> Iterator[str]:
+    """Stream a postmortem analysis chunk by chunk."""
+    client = get_client()
+    if not client:
+        yield "AI features are disabled."
+        return
+
+    prompt = f"{context}\n\nActivity Details:\n{activity_context}"
+
+    try:
+        response_stream = client.models.generate_content_stream(
+            model=settings.gemini_model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=POSTMORTEM_PROMPT,
+                temperature=0.5,
+            ),
+        )
+        for chunk in response_stream:
+            if chunk.text:
+                yield chunk.text
+    except Exception as e:
+        yield f"Error: {str(e)}"
+
+

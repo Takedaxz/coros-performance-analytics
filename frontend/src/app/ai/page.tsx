@@ -15,6 +15,15 @@ function AiGlyph() {
   );
 }
 
+function UserIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 21a8 8 0 0 0-16 0" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+}
+
 function SendIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -237,45 +246,25 @@ export default function AiPage() {
   }, [activeSessionId]);
 
 
-  async function createRealSession(tempIdToRemove?: string): Promise<Session | null> {
+  async function createRealSession(): Promise<Session | null> {
     const res = await fetch(`${API_BASE}/api/ai/sessions`, { method: "POST" });
     if (!res.ok) return null;
     const session: Session = await res.json();
-    setSessions((prev) => {
-      const cleanPrev = tempIdToRemove ? prev.filter((s) => s.id !== tempIdToRemove) : prev;
-      return [session, ...cleanPrev];
-    });
+    setSessions((prev) => [session, ...prev]);
     setActiveSessionId(session.id);
     return session;
   }
 
   function handleNewChat() {
     if (isLoading) return;
-    const tempId = `temp-${Date.now()}`;
-    setSessions((prev) => {
-      const cleanPrev = prev.filter((s) => !s.id.startsWith("temp-"));
-      return [{
-        id: tempId,
-        title: "New Chat",
-        is_pinned: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }, ...cleanPrev];
-    });
-    setActiveSessionId(tempId);
+    setActiveSessionId(null);
     setMessages([]);
+    setInput("");
+    sessionStorage.removeItem("ai_active_session");
   }
 
   const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (id.startsWith("temp-")) {
-      setSessions((prev) => prev.filter((s) => s.id !== id));
-      if (activeSessionId === id) {
-        setActiveSessionId(null);
-        setMessages([]);
-      }
-      return;
-    }
     try {
       await fetch(`${API_BASE}/api/ai/sessions/${id}`, { method: "DELETE" });
       if (activeSessionId === id) {
@@ -306,14 +295,8 @@ export default function AiPage() {
 
   async function handleSend(forcedInput?: string, sessionId?: string, overrideHistory?: Message[]) {
     const userMsg = (forcedInput ?? input).trim();
-    let sid = sessionId ?? activeSessionId;
+    const sid = sessionId ?? activeSessionId;
     if (!userMsg || !sid) return;
-
-    if (sid.startsWith("temp-")) {
-      const realSession = await createRealSession(sid);
-      if (!realSession) return;
-      sid = realSession.id;
-    }
 
     const baseHistory = overrideHistory ?? messages;
     // Optimistic sidebar update — title and timestamp update immediately on send
@@ -413,19 +396,14 @@ export default function AiPage() {
 
   async function generateBriefing(sid: string) {
     if (isLoading) return;
-    if (sid.startsWith("temp-")) {
-      const realSession = await createRealSession(sid);
-      if (!realSession) return;
-      sid = realSession.id;
-    }
     await handleSend("Generate a weekly briefing", sid);
   }
 
   async function handleChipClick(chip: (typeof SUGGESTED_PROMPTS)[number]) {
     if (isLoading) return;
     let sid = activeSessionId;
-    if (!sid || sid.startsWith("temp-")) {
-      const s = await createRealSession(sid || undefined);
+    if (!sid) {
+      const s = await createRealSession();
       if (!s) return;
       sid = s.id;
     }
@@ -440,12 +418,12 @@ export default function AiPage() {
     if (messages.length === 0) return;
     const session = sessions.find(s => s.id === activeSessionId);
     const title = session ? session.title : "AI Coach Session";
-    
+
     let mdContent = `# ${title}\n\n`;
     messages.forEach(m => {
       mdContent += `### ${m.role === 'user' ? 'You' : 'AI Coach'}\n${m.content}\n\n`;
     });
-    
+
     const blob = new Blob([mdContent], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -464,457 +442,426 @@ export default function AiPage() {
   const isEmpty = messages.length === 0;
 
   // Shared empty-state content (prompt bar + chips)
-  function EmptyPrompt({ sessionId }: { sessionId?: string }) {
+  function renderEmptyPrompt(sessionId?: string) {
+    const inputId = sessionId ? "new-session-input" : "empty-state-input";
+
     return (
-      <div style={{ width: "100%", maxWidth: "600px", display: "flex", flexDirection: "column", gap: "var(--space-3)", position: "relative", zIndex: 1 }}>
-        <div className="cmd-bar-wrap" style={{ maxWidth: "100%" }}>
-          <textarea
-            id={sessionId ? "new-session-input" : "empty-state-input"}
-            className="cmd-bar"
-            placeholder="How can I improve my recovery score?"
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              e.target.style.height = "56px";
-              e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
-            }}
-            onKeyDown={async (e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
+      <div className="ai-link-empty-prompt">
+        <div className="ai-link-empty-intro">
+          <p className="ai-link-empty-label"><AiGlyph /> Training intelligence</p>
+          <h1>What would you like to improve?</h1>
+          <p>AI will answer based on your recent training, recovery, sleep, and calendar data.</p>
+        </div>
+
+        <div className="ai-link-empty-composer">
+          <div className="cmd-bar-wrap">
+            <textarea
+              id={inputId}
+              className="cmd-bar"
+              placeholder="How can I improve my recovery score?"
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value);
+                e.target.style.height = "56px";
+                e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+              }}
+              onKeyDown={async (e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!input.trim()) return;
+                  const msg = input.trim();
+                  e.currentTarget.style.height = "56px";
+                  if (!sessionId) {
+                    const s = await createRealSession();
+                    if (s) handleSend(msg, s.id);
+                  } else {
+                    handleSend(msg, sessionId);
+                  }
+                }
+              }}
+              disabled={isLoading}
+              autoFocus
+              style={{
+                resize: "none",
+                lineHeight: "1.4",
+                overflowY: "auto"
+              }}
+              rows={1}
+            />
+            <button
+              id={sessionId ? "new-session-send-btn" : "empty-state-send-btn"}
+              className="cmd-bar-send"
+              onClick={async () => {
                 if (!input.trim()) return;
                 const msg = input.trim();
-                e.currentTarget.style.height = "56px";
+                const el = document.getElementById(inputId);
+                if (el) el.style.height = "56px";
                 if (!sessionId) {
                   const s = await createRealSession();
                   if (s) handleSend(msg, s.id);
                 } else {
                   handleSend(msg, sessionId);
                 }
-              }
-            }}
-            disabled={isLoading}
-            autoFocus
-            style={{
-              resize: "none",
-              paddingTop: "16px",
-              paddingBottom: "16px",
-              lineHeight: "1.4",
-              overflowY: "auto"
-            }}
-            rows={1}
-          />
-          <button
-            id={sessionId ? "new-session-send-btn" : "empty-state-send-btn"}
-            className="cmd-bar-send"
-            onClick={async () => {
-              if (!input.trim()) return;
-              const msg = input.trim();
-              const el = document.getElementById(sessionId ? "new-session-input" : "empty-state-input");
-              if (el) el.style.height = "56px";
-              if (!sessionId) {
-                const s = await createRealSession();
-                if (s) handleSend(msg, s.id);
-              } else {
-                handleSend(msg, sessionId);
-              }
-            }}
-            disabled={isLoading || !input.trim()}
-            aria-label="Send message"
-            style={{ top: "auto", bottom: "8px", transform: "none" }}
-          >
-            <SendIcon />
-          </button>
-        </div>
-        {!sessionId && <p className="input-hint" style={{ textAlign: "center" }}>↵ Enter to send</p>}
-        <div className="prompt-chips-row" role="list" aria-label="Suggested prompts">
-          {[...SUGGESTED_PROMPTS, ...goals.filter(g => g.goal_race_date && new Date(g.goal_race_date) >= new Date(new Date().setHours(0,0,0,0))).map(g => ({ label: `Plan a training block for ${g.goal_race_name}`, action: "ask" as const }))].map((chip) => (
-            <button
-              key={chip.label}
-              id={`chip-${sessionId ?? "empty"}-${chip.label.toLowerCase().replace(/\s+/g, "-")}`}
-              className="prompt-chip"
-              role="listitem"
-              onClick={() => handleChipClick(chip)}
-              disabled={isLoading}
+              }}
+              disabled={isLoading || !input.trim()}
+              aria-label="Send message"
+              style={{ top: "auto", bottom: "8px", transform: "none" }}
             >
-              {chip.label}
+              <SendIcon />
             </button>
-          ))}
+          </div>
+          <p className="ai-link-composer-meta">AI can make mistakes. Verify critical training decisions.</p>
+        </div>
+
+        <div className="ai-link-suggestions">
+          <p>Start with a focus</p>
+          <div className="prompt-chips-row" role="list" aria-label="Suggested prompts">
+            {[...SUGGESTED_PROMPTS, ...goals.filter(g => g.goal_race_date && new Date(g.goal_race_date) >= new Date(new Date().setHours(0, 0, 0, 0))).map(g => ({ label: `Plan a training block for ${g.goal_race_name}`, action: "ask" as const }))].map((chip) => (
+              <button
+                key={chip.label}
+                id={`chip-${sessionId ?? "empty"}-${chip.label.toLowerCase().replace(/\s+/g, "-")}`}
+                className="prompt-chip"
+                role="listitem"
+                onClick={() => handleChipClick(chip)}
+                disabled={isLoading}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="app-layout print-block">
+    <div className="ai-link-layout print-block">
       <Sidebar />
-      <main className="main-content print-block" style={{ display: "flex", flexDirection: "row", overflow: "hidden", padding: 0 }}>
-
-        {/* ── Sessions sidebar ── */}
-        <div className="print-hide" style={{
-          width: "240px",
-          flexShrink: 0,
-          borderRight: "1px solid var(--border-color)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          background: "var(--color-bg-secondary)",
-        }}>
-          <div style={{
-            padding: "var(--space-4) var(--space-3) var(--space-3)",
-            borderBottom: "1px solid var(--border-color)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}>
-            <span style={{ fontSize: "var(--text-xs)", fontWeight: 600, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              Sessions
-            </span>
-            <button
-              id="new-chat-btn"
-              className="btn btn-ghost btn-sm"
-              onClick={handleNewChat}
-              disabled={isLoading}
-              style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: "4px 8px" }}
-            >
-              <PlusIcon /> New
-            </button>
-          </div>
-
-          <div style={{ flex: 1, overflowY: "auto", padding: "var(--space-2)" }}>
-            {sessionsLoading ? (
-              <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>Loading…</p>
-            ) : sessions.length === 0 ? (
-              <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>No sessions yet.</p>
-            ) : (
-              sessions.map((s) => {
-                const isActive = s.id === activeSessionId;
-                const isHovered = s.id === hoveredSessionId;
-                return (
-                  <div
-                    key={s.id}
-                    id={`session-${s.id}`}
-                    onClick={() => { if (!isLoading) setActiveSessionId(s.id); }}
-                    onMouseEnter={() => setHoveredSessionId(s.id)}
-                    onMouseLeave={() => setHoveredSessionId(null)}
-                    style={{
-                      padding: "var(--space-2)",
-                      borderRadius: "var(--radius-sm)",
-                      cursor: "pointer",
-                      background: isActive ? "rgba(99,102,241,0.12)" : isHovered ? "var(--color-bg-tertiary)" : "transparent",
-                      border: isActive ? "1px solid rgba(99,102,241,0.3)" : "1px solid transparent",
-                      transition: "all var(--transition-fast)",
-                      display: "flex",
-                      alignItems: "flex-start",
-                      justifyContent: "space-between",
-                      gap: "var(--space-1)",
-                      marginBottom: "2px",
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      {editingSessionId === s.id ? (
-                        <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                          <input
-                            autoFocus
-                            value={editingTitle}
-                            onChange={(e) => setEditingTitle(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                handleUpdateSession(s.id, { title: editingTitle });
-                                setEditingSessionId(null);
-                              } else if (e.key === "Escape") {
-                                setEditingSessionId(null);
-                              }
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            style={{
-                              flex: 1,
-                              fontSize: "var(--text-xs)",
-                              padding: "2px 4px",
-                              border: "1px solid var(--border-color)",
-                              borderRadius: "4px",
-                              background: "var(--color-bg-primary)",
-                              color: "var(--color-text-primary)",
-                            }}
-                          />
-                          <button
-                            className="btn btn-ghost"
-                            style={{ padding: "2px", color: "var(--color-text-primary)" }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleUpdateSession(s.id, { title: editingTitle });
-                              setEditingSessionId(null);
-                            }}
-                          >
-                            <CheckIcon />
-                          </button>
-                          <button
-                            className="btn btn-ghost"
-                            style={{ padding: "2px", color: "var(--color-text-muted)" }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingSessionId(null);
-                            }}
-                          >
-                            <XIcon />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <p style={{
-                            fontSize: "var(--text-xs)",
-                            fontWeight: isActive ? 600 : 400,
-                            color: isActive ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            margin: 0,
-                            lineHeight: 1.4,
-                          }}>
-                            {s.title}
-                          </p>
-                          <p style={{ fontSize: "10px", color: "var(--color-text-muted)", margin: "2px 0 0", lineHeight: 1 }}>
-                            {relativeTime(s.updated_at)}
-                          </p>
-                        </>
-                      )}
-                    </div>
-                    {editingSessionId !== s.id && (s.is_pinned || isHovered || isActive) && (
-                      <div style={{ display: "flex", gap: "2px", flexShrink: 0 }}>
-                        <button
-                          className="btn btn-ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleUpdateSession(s.id, { is_pinned: !s.is_pinned });
-                          }}
-                          style={{ padding: "2px", color: s.is_pinned ? "var(--color-text-primary)" : "var(--color-text-muted)", lineHeight: 1 }}
-                          aria-label={s.is_pinned ? "Unpin session" : "Pin session"}
-                        >
-                          {s.is_pinned ? <PinnedIcon /> : <PinIcon />}
-                        </button>
-                        {(isHovered || isActive) && (
-                          <button
-                            className="btn btn-ghost"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingSessionId(s.id);
-                              setEditingTitle(s.title);
-                            }}
-                            style={{ padding: "2px", color: "var(--color-text-muted)", lineHeight: 1 }}
-                            aria-label="Edit session"
-                          >
-                            <EditIcon />
-                          </button>
-                        )}
-                        {(isHovered || isActive) && (
-                          <button
-                            id={`delete-session-${s.id}`}
-                            className="btn btn-ghost"
-                            onClick={(e) => handleDeleteSession(s.id, e)}
-                            style={{ padding: "2px", color: "var(--color-text-muted)", lineHeight: 1 }}
-                            aria-label="Delete session"
-                          >
-                            <TrashIcon />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
+      <main className="ai-link-main print-block">
+        <header className="page-header print-hide">
+          <h2 className="page-title">AI Coach</h2>
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+            <div className="ai-link-context">
+              <span>Calendar Context:</span>
+              <input
+                type="number"
+                value={planDaysBack}
+                onChange={(event) => setPlanDaysBack(Number(event.target.value) || 0)}
+                aria-label="Calendar days back"
+              />
+              <span>days back,</span>
+              <input
+                type="number"
+                value={planDaysForward}
+                onChange={(event) => setPlanDaysForward(Number(event.target.value) || 0)}
+                aria-label="Calendar days forward"
+              />
+              <span>days forward</span>
+            </div>
+            {activeSessionId && !isEmpty && (
+              <>
+                <button className="btn btn-ghost btn-sm" onClick={handleExportMarkdown} title="Export as Markdown" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                  <DownloadIcon /> Export MD
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={handlePrint} title="Print / Save as PDF" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                  <PrintIcon /> Print PDF
+                </button>
+              </>
             )}
           </div>
-        </div>
+        </header>
 
-        {/* ── Chat panel ── */}
-        <div className="print-block" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <header className="page-header print-hide">
-            <h2 className="page-title">AI Coach</h2>
-            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginRight: "var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)" }}>
-                <span>Calendar Context:</span>
-                <input 
-                  type="number" 
-                  value={planDaysBack}
-                  onChange={(e) => setPlanDaysBack(parseInt(e.target.value) || 0)}
-                  style={{ width: "40px", padding: "2px 4px", background: "var(--color-bg-primary)", border: "1px solid var(--border-color)", borderRadius: "4px", fontSize: "var(--text-xs)" }}
-                  title="Days back"
-                />
-                <span>days back,</span>
-                <input 
-                  type="number" 
-                  value={planDaysForward}
-                  onChange={(e) => setPlanDaysForward(parseInt(e.target.value) || 0)}
-                  style={{ width: "40px", padding: "2px 4px", background: "var(--color-bg-primary)", border: "1px solid var(--border-color)", borderRadius: "4px", fontSize: "var(--text-xs)" }}
-                  title="Days forward"
-                />
-                <span>days forward</span>
-              </div>
-              {activeSessionId && !isEmpty && (
-                <>
-                  <button className="btn btn-ghost btn-sm" onClick={handleExportMarkdown} title="Export as Markdown" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                    <DownloadIcon /> Export MD
-                  </button>
-                  <button className="btn btn-ghost btn-sm" onClick={handlePrint} title="Print / Save as PDF" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                    <PrintIcon /> Print PDF
-                  </button>
-                </>
+        <div className="ai-link-workspace">
+
+          {/* ── Sessions sidebar ── */}
+          <aside className="ai-link-sessions print-hide">
+            <div className="ai-link-session-header">
+              <span>Sessions</span>
+              <button
+                id="new-chat-btn"
+                className="ai-link-new-chat"
+                onClick={handleNewChat}
+                disabled={isLoading}
+              >
+                <PlusIcon /> New
+              </button>
+            </div>
+
+            <div className="ai-link-session-list">
+              {sessionsLoading ? (
+                <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>Loading…</p>
+              ) : sessions.length === 0 ? (
+                <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>No sessions yet.</p>
+              ) : (
+                sessions.map((s) => {
+                  const isActive = s.id === activeSessionId;
+                  const isHovered = s.id === hoveredSessionId;
+                  return (
+                    <div
+                      key={s.id}
+                      id={`session-${s.id}`}
+                      onClick={() => { if (!isLoading) setActiveSessionId(s.id); }}
+                      onMouseEnter={() => setHoveredSessionId(s.id)}
+                      onMouseLeave={() => setHoveredSessionId(null)}
+                      style={{
+                        padding: "var(--space-2)",
+                        borderRadius: "var(--radius-sm)",
+                        cursor: "pointer",
+                        background: isActive ? "rgba(33, 230, 165, 0.10)" : isHovered ? "var(--color-surface-secondary)" : "transparent",
+                        border: isActive ? "1px solid rgba(33, 230, 165, 0.28)" : "1px solid transparent",
+                        transition: "all var(--transition-fast)",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        justifyContent: "space-between",
+                        gap: "var(--space-1)",
+                        marginBottom: "2px",
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {editingSessionId === s.id ? (
+                          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                            <input
+                              autoFocus
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  handleUpdateSession(s.id, { title: editingTitle });
+                                  setEditingSessionId(null);
+                                } else if (e.key === "Escape") {
+                                  setEditingSessionId(null);
+                                }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                flex: 1,
+                                fontSize: "var(--text-xs)",
+                                padding: "2px 4px",
+                                border: "1px solid var(--border-color)",
+                                borderRadius: "4px",
+                                background: "var(--color-bg-primary)",
+                                color: "var(--color-text-primary)",
+                              }}
+                            />
+                            <button
+                              className="btn btn-ghost"
+                              style={{ padding: "2px", color: "var(--color-text-primary)" }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleUpdateSession(s.id, { title: editingTitle });
+                                setEditingSessionId(null);
+                              }}
+                            >
+                              <CheckIcon />
+                            </button>
+                            <button
+                              className="btn btn-ghost"
+                              style={{ padding: "2px", color: "var(--color-text-muted)" }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingSessionId(null);
+                              }}
+                            >
+                              <XIcon />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <p style={{
+                              fontSize: "var(--text-xs)",
+                              fontWeight: isActive ? 600 : 400,
+                              color: isActive ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              margin: 0,
+                              lineHeight: 1.4,
+                            }}>
+                              {s.title}
+                            </p>
+                            <p style={{ fontSize: "10px", color: "var(--color-text-muted)", margin: "2px 0 0", lineHeight: 1 }}>
+                              {relativeTime(s.updated_at)}
+                            </p>
+                          </>
+                        )}
+                      </div>
+                      {editingSessionId !== s.id && (s.is_pinned || isHovered || isActive) && (
+                        <div style={{ display: "flex", gap: "2px", flexShrink: 0 }}>
+                          <button
+                            className="btn btn-ghost"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleUpdateSession(s.id, { is_pinned: !s.is_pinned });
+                            }}
+                            style={{ padding: "2px", color: s.is_pinned ? "var(--color-text-primary)" : "var(--color-text-muted)", lineHeight: 1 }}
+                            aria-label={s.is_pinned ? "Unpin session" : "Pin session"}
+                          >
+                            {s.is_pinned ? <PinnedIcon /> : <PinIcon />}
+                          </button>
+                          {(isHovered || isActive) && (
+                            <button
+                              className="btn btn-ghost"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingSessionId(s.id);
+                                setEditingTitle(s.title);
+                              }}
+                              style={{ padding: "2px", color: "var(--color-text-muted)", lineHeight: 1 }}
+                              aria-label="Edit session"
+                            >
+                              <EditIcon />
+                            </button>
+                          )}
+                          {(isHovered || isActive) && (
+                            <button
+                              id={`delete-session-${s.id}`}
+                              className="btn btn-ghost"
+                              onClick={(e) => handleDeleteSession(s.id, e)}
+                              style={{ padding: "2px", color: "var(--color-text-muted)", lineHeight: 1 }}
+                              aria-label="Delete session"
+                            >
+                              <TrashIcon />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
-          </header>
+          </aside>
 
-          <div className="page-body" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", padding: 0 }}>
+          {/* ── Chat panel ── */}
+          <div className="ai-link-chat-panel print-block">
+            <div className="ai-link-chat-body">
 
-            {/* No session selected */}
+              {/* No session selected */}
             {!activeSessionId ? (
-              <div className="print-hide" style={{
-                flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                padding: "var(--space-8) var(--space-4)", gap: "var(--space-5)", position: "relative", overflow: "hidden",
-              }}>
-                <div aria-hidden="true" style={{
-                  position: "absolute", inset: 0, pointerEvents: "none",
-                  backgroundImage: ["linear-gradient(rgba(0,0,0,0.07) 1px, transparent 1px)", "linear-gradient(90deg, rgba(0,0,0,0.07) 1px, transparent 1px)"].join(", "),
-                  backgroundSize: "24px 24px",
-                  WebkitMaskImage: "radial-gradient(ellipse 72% 62% at 50% 50%, black 0%, transparent 78%)",
-                  maskImage: "radial-gradient(ellipse 72% 62% at 50% 50%, black 0%, transparent 78%)",
-                }} />
-                <p style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.1em", position: "relative", zIndex: 1 }}>
-                  Ask your coach anything
-                </p>
-                <EmptyPrompt />
+              <div className="ai-link-empty print-hide">
+                {renderEmptyPrompt()}
               </div>
 
             ) : isEmpty ? (
               /* Session created but no messages yet */
-              <div className="print-hide" style={{
-                flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                padding: "var(--space-8) var(--space-4)", gap: "var(--space-4)", position: "relative", overflow: "hidden",
-              }}>
-                <div aria-hidden="true" style={{
-                  position: "absolute", inset: 0, pointerEvents: "none",
-                  backgroundImage: ["linear-gradient(rgba(0,0,0,0.07) 1px, transparent 1px)", "linear-gradient(90deg, rgba(0,0,0,0.07) 1px, transparent 1px)"].join(", "),
-                  backgroundSize: "24px 24px",
-                  WebkitMaskImage: "radial-gradient(ellipse 72% 62% at 50% 50%, black 0%, transparent 78%)",
-                  maskImage: "radial-gradient(ellipse 72% 62% at 50% 50%, black 0%, transparent 78%)",
-                }} />
-                <p style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.1em", position: "relative", zIndex: 1 }}>
-                  New session — ask anything
-                </p>
-                <EmptyPrompt sessionId={activeSessionId} />
+              <div className="ai-link-empty print-hide">
+                {renderEmptyPrompt(activeSessionId)}
               </div>
 
-            ) : (
-              /* Active conversation */
-              <>
-                <h1 className="print-only-title" style={{ display: "none" }}>AI Coach Session</h1>
-                <div id="chat-history" className="print-block" style={{ flex: 1, overflowY: "auto", padding: "var(--space-6) var(--space-6) var(--space-4)", scrollBehavior: "smooth" }}>
-                  <div className="print-block" style={{ maxWidth: "800px", margin: "0 auto", width: "100%", display: "flex", flexDirection: "column", gap: 0, paddingBottom: "var(--space-4)" }}>
-                    {messages.map((msg, idx) => {
-                      const isErrorMsg = idx === messages.length - 1 && msg.role === "ai" && (msg.content.includes("Error") || msg.content.includes("Failed"));
-                      if (msg.role === "user") {
+              ) : (
+                /* Active conversation */
+                <>
+                  <h1 className="print-only-title" style={{ display: "none" }}>AI Coach Session</h1>
+                  <div id="chat-history" className="ai-link-chat-history print-block">
+                    <div className="ai-link-thread print-block">
+                      {messages.map((msg, idx) => {
+                        const isErrorMsg = idx === messages.length - 1 && msg.role === "ai" && (msg.content.includes("Error") || msg.content.includes("Failed"));
+                        if (msg.role === "user") {
+                          return (
+                            <div key={idx} className="msg-row user-row msg-enter" style={{ animationDelay: "0ms" }}>
+                              <div className="avatar-sq user" aria-hidden="true"><UserIcon /></div>
+                              <div className="user-pill">{msg.content}</div>
+                            </div>
+                          );
+                        }
                         return (
-                          <div key={idx} className="msg-row user-row msg-enter" style={{ animationDelay: "0ms" }}>
-                            <div className="avatar-sq user" aria-hidden="true">YOU</div>
-                            <div className="user-pill">{msg.content}</div>
+                          <div key={idx} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
+                            <div className="avatar-sq ai" aria-label="AI Coach"><AiGlyph /></div>
+                            <div className="ai-text">
+                              {msg.content === "" && isLoading ? (
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
+                                  thinking
+                                  <span className="chat-loading-dots" aria-label="Loading">
+                                    <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
+                                  </span>
+                                </span>
+                              ) : (
+                                <div className="markdown-body">
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                                </div>
+                              )}
+                              {isErrorMsg && (
+                                <div style={{ marginTop: "var(--space-3)" }}>
+                                  <button id="retry-btn" className="btn btn-secondary btn-sm" onClick={handleRetry} disabled={isLoading} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                    <RetryIcon /> Retry
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         );
-                      }
-                      return (
-                        <div key={idx} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
-                          <div className="avatar-sq ai" aria-label="AI Coach"><AiGlyph /></div>
+                      })}
+
+                      {isLoading && messages[messages.length - 1]?.role !== "ai" && (
+                        <div className="msg-row ai-row msg-enter">
+                          <div className="avatar-sq ai" aria-hidden="true"><AiGlyph /></div>
                           <div className="ai-text">
-                            {msg.content === "" && isLoading ? (
-                              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
-                                thinking
-                                <span className="chat-loading-dots" aria-label="Loading">
-                                  <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
-                                </span>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
+                              thinking
+                              <span className="chat-loading-dots" aria-label="Loading">
+                                <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
                               </span>
-                            ) : (
-                              <div className="markdown-body">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                              </div>
-                            )}
-                            {isErrorMsg && (
-                              <div style={{ marginTop: "var(--space-3)" }}>
-                                <button id="retry-btn" className="btn btn-secondary btn-sm" onClick={handleRetry} disabled={isLoading} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                                  <RetryIcon /> Retry
-                                </button>
-                              </div>
-                            )}
+                            </span>
                           </div>
                         </div>
-                      );
-                    })}
-
-                    {isLoading && messages[messages.length - 1]?.role !== "ai" && (
-                      <div className="msg-row ai-row msg-enter">
-                        <div className="avatar-sq ai" aria-hidden="true"><AiGlyph /></div>
-                        <div className="ai-text">
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
-                            thinking
-                            <span className="chat-loading-dots" aria-label="Loading">
-                              <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
-                            </span>
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                    <div ref={messagesEndRef} />
+                      )}
+                      <div ref={messagesEndRef} />
+                    </div>
                   </div>
-                </div>
 
-                <div className="chat-input-bar print-hide">
-                  <div className="chat-input-bar-inner">
-                    <div className="cmd-bar-wrap" style={{ maxWidth: "100%" }}>
-                      <textarea
-                        id="chat-input"
-                        className="cmd-bar"
-                        placeholder="Ask your coach anything..."
-                        value={input}
-                        onChange={(e) => {
-                          setInput(e.target.value);
-                          e.target.style.height = "56px";
-                          e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
+                  <div className="chat-input-bar ai-link-composer print-hide">
+                    <div className="chat-input-bar-inner">
+                      <div className="cmd-bar-wrap" style={{ maxWidth: "100%" }}>
+                        <textarea
+                          id="chat-input"
+                          className="cmd-bar"
+                          placeholder="Ask your coach anything..."
+                          value={input}
+                          onChange={(e) => {
+                            setInput(e.target.value);
+                            e.target.style.height = "56px";
+                            e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              if (!input.trim()) return;
+                              handleSend();
+                              e.currentTarget.style.height = "56px";
+                            }
+                          }}
+                          disabled={isLoading}
+                          style={{
+                            resize: "none",
+                            paddingTop: "16px",
+                            paddingBottom: "16px",
+                            lineHeight: "1.4",
+                            overflowY: "auto"
+                          }}
+                          rows={1}
+                        />
+                        <button
+                          id="chat-send-btn"
+                          className="cmd-bar-send"
+                          onClick={() => {
                             if (!input.trim()) return;
                             handleSend();
-                            e.currentTarget.style.height = "56px";
-                          }
-                        }}
-                        disabled={isLoading}
-                        style={{
-                          resize: "none",
-                          paddingTop: "16px",
-                          paddingBottom: "16px",
-                          lineHeight: "1.4",
-                          overflowY: "auto"
-                        }}
-                        rows={1}
-                      />
-                      <button 
-                        id="chat-send-btn" 
-                        className="cmd-bar-send" 
-                        onClick={() => {
-                          if (!input.trim()) return;
-                          handleSend();
-                          const el = document.getElementById("chat-input");
-                          if (el) el.style.height = "56px";
-                        }} 
-                        disabled={isLoading || !input.trim()} 
-                        aria-label="Send message"
-                        style={{ top: "auto", bottom: "8px", transform: "none" }}
-                      >
-                        <SendIcon />
-                      </button>
+                            const el = document.getElementById("chat-input");
+                            if (el) el.style.height = "56px";
+                          }}
+                          disabled={isLoading || !input.trim()}
+                          aria-label="Send message"
+                          style={{ top: "auto", bottom: "8px", transform: "none" }}
+                        >
+                          <SendIcon />
+                        </button>
+                      </div>
+                      <p className="input-hint">AI can make mistakes. Verify critical training decisions.</p>
                     </div>
-                    <p className="input-hint">AI can make mistakes. Verify critical training decisions.</p>
                   </div>
-                </div>
-              </>
-            )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </main>

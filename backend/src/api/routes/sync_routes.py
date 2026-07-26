@@ -3,16 +3,19 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from datetime import datetime
+from uuid import uuid4
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from src.config import get_settings
+from src.db.credential_store import load_coros_credentials
 from src.db.engine import get_db_session
 from src.db.models import SyncEvent
+from src.db.owner import get_owner_id
 
 router = APIRouter()
 settings = get_settings()
@@ -31,28 +34,22 @@ def _push_sync_event(job_id: str, event_type: str, data: str) -> None:
 
 @router.post("/now")
 async def trigger_sync(
+    days: int = Query(default=1095, ge=1, le=3650, description="Number of days back to sync (e.g. 30, 365, 1095)"),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, str]:
     """Trigger an immediate API sync. Returns a job_id for SSE tracking."""
-    if not settings.coros_email or not settings.coros_password:
+    creds = await load_coros_credentials(db, settings.app_secret_key)
+    has_creds = bool(creds or (settings.coros_email and settings.coros_password))
+    if not has_creds:
         raise HTTPException(
-            status_code=400, detail="COROS API credentials missing in configuration."
+            status_code=400,
+            detail="COROS API credentials not configured. Please configure them in Settings.",
         )
 
-    # Create sync event record
-    sync_event = SyncEvent(
-        user_id="00000000-0000-0000-0000-000000000000",
-        source_type="api_official",
-        status="started",
-        started_at=datetime.utcnow(),
-    )
-    db.add(sync_event)
-    await db.flush()
-
-    job_id = sync_event.id
+    job_id = str(uuid4())
     _sync_events[job_id] = []
 
-    async def _do_sync(job_id_val: str) -> None:
+    async def _do_sync(job_id_val: str, days_to_sync: int) -> None:
         from src.db.engine import get_db_session
         from src.sync.sync_manager import run_sync
 
@@ -65,10 +62,11 @@ async def trigger_sync(
                 try:
                     await run_sync(
                         session,
-                        "00000000-0000-0000-0000-000000000000",
-                        days=14,
+                        get_owner_id(),
+                        days=days_to_sync,
                         on_event=_on_event,
                         redis=redis_client,
+                        sync_event_id=job_id_val,
                     )
                     await session.commit()
                 except Exception as e:
@@ -78,30 +76,60 @@ async def trigger_sync(
             await redis_client.aclose()
 
     # dispatch in background
-    asyncio.create_task(_do_sync(job_id))
+    asyncio.create_task(_do_sync(job_id, days))
 
     return {"status": "accepted", "job_id": job_id}
 
 
 @router.get("/stream")
-async def sync_stream(job_id: str) -> EventSourceResponse:
+async def sync_stream(
+    job_id: str,
+    db: AsyncSession = Depends(get_db_session),
+) -> EventSourceResponse:
     """SSE stream for real-time sync progress updates."""
 
     async def event_generator() -> AsyncGenerator[dict[str, str], None]:
         sent_count = 0
-        max_wait_s = 120
+        max_wait_s = 600  # 10 minutes timeout for large initial syncs
         waited_s = 0.0
+        ping_counter = 0
+
         while waited_s < max_wait_s:
             events = _sync_events.get(job_id, [])
             while sent_count < len(events):
                 evt = events[sent_count]
                 sent_count += 1
                 yield evt
-                if evt["event"] == "complete":
+                if evt["event"] in ("complete", "error"):
                     return
-            await asyncio.sleep(0.3)
-            waited_s += 0.3
-        yield {"event": "timeout", "data": '{"message": "Sync stream timed out"}'}
+
+            # Fallback: check DB status in case of stream disconnect or reloads
+            if waited_s >= 2.0:
+                res = await db.execute(select(SyncEvent).where(SyncEvent.id == job_id))
+                se = res.scalar_one_or_none()
+                if se and se.status == "completed":
+                    yield {
+                        "event": "complete",
+                        "data": f'{{"message": "Sync complete", "total_upserted": {se.records_upserted}}}',
+                    }
+                    return
+                elif se and se.status == "failed":
+                    yield {
+                        "event": "error",
+                        "data": f'{{"message": "Sync failed: {se.error_message or "Unknown error"}"}}',
+                    }
+                    return
+
+            await asyncio.sleep(0.5)
+            waited_s += 0.5
+            ping_counter += 1
+
+            # Send heartbeat ping every 10 seconds to prevent connection drops
+            if ping_counter >= 20:
+                ping_counter = 0
+                yield {"event": "ping", "data": '{"ping": true}'}
+
+        yield {"event": "error", "data": '{"message": "Sync stream timeout"}'}
 
     return EventSourceResponse(event_generator())
 
@@ -118,8 +146,10 @@ async def sync_status(
         .limit(1)
     )
     last = result.scalar_one_or_none()
+    creds = await load_coros_credentials(db, settings.app_secret_key)
+    api_enabled = bool(creds or (settings.coros_email and settings.coros_password))
     return {
-        "api_enabled": bool(settings.coros_email and settings.coros_password),
+        "api_enabled": api_enabled,
         "sync_interval_minutes": str(settings.sync_interval_minutes),
         "last_sync_at": last.completed_at.isoformat() if last and last.completed_at else "never",
         "last_sync_status": last.status if last else "none",

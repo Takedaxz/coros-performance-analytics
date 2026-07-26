@@ -25,6 +25,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup and shutdown lifecycle."""
     import os
 
+    from sqlalchemy import text
+
     from src.db.engine import engine
     from src.db.models import Base
 
@@ -32,8 +34,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Create any tables that don't exist yet (idempotent — safe to run every boot)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Upsert (idempotent — เรียกซ้ำแล้วได้ผลลัพธ์เดิม) the owner user row so FK
+        # constraints on sync_events and other tables are satisfied.
+        await conn.execute(
+            text(
+                "INSERT INTO users (id, email, timezone, units)"
+                " VALUES (:id, :email, :tz, :units)"
+                " ON CONFLICT (id) DO NOTHING"
+            ),
+            {
+                "id": settings.owner_user_id,
+                "email": settings.owner_email,
+                "tz": settings.owner_timezone,
+                "units": settings.owner_units,
+            },
+        )
     yield
     # Shutdown: nothing to clean up for now
+
 
 
 

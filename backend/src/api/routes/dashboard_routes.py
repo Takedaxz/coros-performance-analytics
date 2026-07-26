@@ -3,7 +3,7 @@
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import cast, String, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.engine import get_db_session
@@ -35,6 +35,14 @@ async def dashboard_summary(
     )
     health_days = health_result.scalars().all()
 
+    latest_steps_result = await db.execute(
+        select(DailyHealth)
+        .where(DailyHealth.steps.is_not(None))
+        .order_by(DailyHealth.date.desc())
+        .limit(1)
+    )
+    latest_steps = latest_steps_result.scalar_one_or_none()
+
     # Sleep for period
     sleep_result = await db.execute(
         select(SleepSession)
@@ -48,6 +56,12 @@ async def dashboard_summary(
         select(FitnessEstimate).order_by(FitnessEstimate.date.desc()).limit(1)
     )
     latest_fitness = fitness_result.scalar_one_or_none()
+    vo2max_30d_avg = await db.scalar(
+        select(func.avg(FitnessEstimate.vo2max_vendor)).where(
+            FitnessEstimate.date >= date.today() - timedelta(days=30),
+            FitnessEstimate.vo2max_vendor.is_not(None),
+        )
+    )
 
     return {
         "period_days": days,
@@ -82,19 +96,31 @@ async def dashboard_summary(
             }
             for h in health_days
         ],
+        "latest_steps": (
+            {
+                "date": latest_steps.date.isoformat(),
+                "steps": latest_steps.steps,
+                "active_calories_kcal": latest_steps.active_calories_kcal,
+            }
+            if latest_steps
+            else None
+        ),
         "sleep": [
             {
                 "sleep_start": s.sleep_start.isoformat(),
                 "duration_s": s.duration_s,
+                "is_nap": s.is_nap,
                 "stage_deep_s": s.stage_deep_s,
                 "stage_rem_s": s.stage_rem_s,
                 "stage_light_s": s.stage_light_s,
                 "stage_awake_s": s.stage_awake_s,
+                "sleep_quality_vendor": s.sleep_quality_vendor,
             }
             for s in sleep_sessions
         ],
         "fitness": {
             "vo2max": latest_fitness.vo2max_vendor if latest_fitness else None,
+            "vo2max_30d_avg": float(vo2max_30d_avg) if vo2max_30d_avg is not None else None,
             "ftp": latest_fitness.ftp_vendor if latest_fitness else None,
             "running_fitness": latest_fitness.running_fitness_score if latest_fitness else None,
             "threshold_pace": latest_fitness.lactate_threshold_pace_s_per_km if latest_fitness else None,
@@ -106,7 +132,7 @@ async def dashboard_summary(
 
 @router.get("/training-load")
 async def training_load_trend(
-    days: int = Query(default=42, ge=7, le=365),
+    days: int = Query(default=365, ge=7, le=3650),
     db: AsyncSession = Depends(get_db_session),
 ) -> list[dict]:
     """Daily training load over time for trend charts."""
@@ -116,6 +142,7 @@ async def training_load_trend(
             func.date(Activity.start_time).label("day"),
             func.sum(Activity.training_load_vendor).label("total_load"),
             func.count(Activity.id).label("activity_count"),
+            func.string_agg(cast(Activity.sport, String), ",").label("sports"),
         )
         .where(Activity.start_time >= cutoff)
         .group_by(func.date(Activity.start_time))
@@ -123,7 +150,12 @@ async def training_load_trend(
     )
     rows = result.all()
     return [
-        {"date": str(r.day), "total_load": r.total_load or 0, "activity_count": r.activity_count}
+        {
+            "date": str(r.day),
+            "total_load": r.total_load or 0,
+            "activity_count": r.activity_count,
+            "sports": list(dict.fromkeys(r.sports.split(","))) if r.sports else [],
+        }
         for r in rows
     ]
 
@@ -153,87 +185,81 @@ async def fitness_trend(
         for r in rows
     ]
 
+
+@router.get("/running-fitness")
+async def running_fitness(db: AsyncSession = Depends(get_db_session)) -> dict[str, float | None]:
+    """Latest official COROS running-fitness snapshot cached during sync."""
+    user = await db.scalar(select(User).order_by(User.updated_at.desc()).limit(1))
+    preferences = user.device_preferences if user is not None else None
+    cached = preferences.get("coros_running_fitness", {}) if preferences else {}
+    snapshot = cached if isinstance(cached, dict) else {}
+    fields = (
+        "aerobicEnduranceScore",
+        "lactateThresholdCapacityScore",
+        "anaerobicEnduranceScore",
+        "anaerobicCapacityScore",
+        "lthr",
+        "ltsp",
+        "fitnessMaxHr",
+        "runningLevelHr",
+    )
+    return {field: float(snapshot[field]) if isinstance(snapshot.get(field), (int, float)) else None for field in fields}
+
+
 @router.get("/personal-records")
 async def personal_records(
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Calculate personal records (longest run, fastest 5k, etc.) from activities."""
-    prs = {}
+    """Return official COROS records cached during the latest Team API sync."""
+    user = await db.scalar(select(User).order_by(User.updated_at.desc()).limit(1))
+    preferences = user.device_preferences if user is not None else None
+    groups = preferences.get("coros_personal_record_groups", []) if preferences else []
+    return {"groups": groups}
 
-    # 1. Longest Run
-    longest_run = await db.execute(
-        select(Activity).where(Activity.sport == "run").order_by(Activity.distance_m.desc()).limit(1)
-    )
-    longest_run_act = longest_run.scalar_one_or_none()
-    if longest_run_act and longest_run_act.distance_m:
-        prs["longest_run"] = {
-            "title": longest_run_act.title or "Run",
-            "date": longest_run_act.start_time.isoformat(),
-            "distance_m": longest_run_act.distance_m,
-            "elapsed_time_s": longest_run_act.elapsed_time_s
-        }
 
-    # 2. Longest Ride
-    longest_ride = await db.execute(
-        select(Activity).where(Activity.sport == "ride").order_by(Activity.distance_m.desc()).limit(1)
-    )
-    longest_ride_act = longest_ride.scalar_one_or_none()
-    if longest_ride_act and longest_ride_act.distance_m:
-        prs["longest_ride"] = {
-            "title": longest_ride_act.title or "Ride",
-            "date": longest_ride_act.start_time.isoformat(),
-            "distance_m": longest_ride_act.distance_m,
-            "elapsed_time_s": longest_ride_act.elapsed_time_s
-        }
-
-    # 3. Best average pace run (runs >= 5km, ranked by avg_speed_mps which is on-watch computed)
-    best_pace_run = await db.execute(
-        select(Activity)
-        .where(Activity.sport.in_(["run", "trail_run"]), Activity.distance_m >= 5000, Activity.avg_speed_mps.is_not(None))
-        .order_by(Activity.avg_speed_mps.desc())
-        .limit(1)
-    )
-    best_pace_act = best_pace_run.scalar_one_or_none()
-    if best_pace_act and best_pace_act.avg_speed_mps:
-        pace_s_per_km = int(1000.0 / best_pace_act.avg_speed_mps)
-        prs["best_pace_run"] = {
-            "title": best_pace_act.title or "Run",
-            "date": best_pace_act.start_time.isoformat(),
-            "distance_m": best_pace_act.distance_m,
-            "pace_s_per_km": pace_s_per_km,
-        }
-
-    # 4. Six-month totals: activity count + total km
-    from datetime import timezone
-    from sqlalchemy import func as sa_func
-    six_months_ago = date.today() - timedelta(days=183)
-    totals_result = await db.execute(
-        select(
-            sa_func.count(Activity.id).label("total_activities"),
-            sa_func.sum(Activity.distance_m).label("total_distance_m"),
-        ).where(Activity.start_time >= six_months_ago)
-    )
-    totals_row = totals_result.one()
-    prs["six_month_totals"] = {
-        "total_activities": totals_row.total_activities or 0,
-        "total_distance_km": round((totals_row.total_distance_m or 0) / 1000, 1),
-    }
-
-    # 5. Highest Power Ride
-    highest_power = await db.execute(
-        select(Activity).where(Activity.sport == "ride").order_by(Activity.max_power_w.desc()).limit(1)
-    )
-    highest_power_act = highest_power.scalar_one_or_none()
-    if highest_power_act and highest_power_act.max_power_w:
-        prs["highest_power_ride"] = {
-            "title": highest_power_act.title or "Ride",
-            "date": highest_power_act.start_time.isoformat(),
-            "max_power_w": highest_power_act.max_power_w,
-            "avg_power_w": highest_power_act.avg_power_w,
-            "distance_m": highest_power_act.distance_m
-        }
-
-    return prs
+@router.get("/training-distributions")
+async def training_distributions(
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Return COROS zones plus locally grouped 4-week distance bands."""
+    user = await db.scalar(select(User).order_by(User.updated_at.desc()).limit(1))
+    preferences = user.device_preferences if user is not None else None
+    cached = preferences.get("coros_training_distributions", {}) if preferences else {}
+    distributions = dict(cached) if isinstance(cached, dict) else {}
+    bands = [
+        ("0–5 km", 0, 5_000),
+        ("5–10 km", 5_000, 10_000),
+        ("10–20 km", 10_000, 20_000),
+        ("20–40 km", 20_000, 40_000),
+        ("40+ km", 40_000, None)
+    ]
+    activities = (
+        await db.scalars(
+            select(Activity).where(
+                Activity.start_time >= date.today() - timedelta(days=28),
+                Activity.distance_m > 0,
+            )
+        )
+    ).all()
+    buckets = [{"index": index + 1, "value": 0.0, "load": 0.0, "duration": 0.0} for index in range(len(bands))]
+    for activity in activities:
+        distance = activity.distance_m or 0
+        for index, (_, lower, upper) in enumerate(bands):
+            if distance >= lower and (upper is None or distance < upper):
+                buckets[index]["value"] += 1
+                buckets[index]["load"] += activity.training_load_vendor or 0
+                buckets[index]["duration"] += activity.elapsed_time_s or 0
+                break
+    distributions["distance_frequency"] = [
+        {"index": bucket["index"], "value": bucket["value"]} for bucket in buckets
+    ]
+    distributions["distance_training_load"] = [
+        {"index": bucket["index"], "value": bucket["load"]} for bucket in buckets
+    ]
+    distributions["distance_time"] = [
+        {"index": bucket["index"], "value": bucket["duration"]} for bucket in buckets
+    ]
+    return distributions
 
 
 _ZONE_BOUNDARIES_PCT: list[tuple[float, float]] = [
@@ -316,3 +342,27 @@ async def weekly_hr_zones(
             for z in range(1, 6)
         ],
     }
+
+
+@router.get("/daily-health-trends")
+async def daily_health_trends(
+    days: int = Query(default=42, ge=7, le=365),
+    db: AsyncSession = Depends(get_db_session),
+) -> list[dict]:
+    """Daily steps, active calories, and resting HR over time."""
+    cutoff = date.today() - timedelta(days=days)
+    result = await db.execute(
+        select(DailyHealth)
+        .where(DailyHealth.date >= cutoff)
+        .order_by(DailyHealth.date.asc())
+    )
+    rows = result.scalars().all()
+    return [
+        {
+            "date": str(r.date),
+            "steps": r.steps,
+            "active_calories_kcal": r.active_calories_kcal,
+            "resting_hr_bpm": r.resting_hr_bpm,
+        }
+        for r in rows
+    ]

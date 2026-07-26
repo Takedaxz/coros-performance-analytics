@@ -143,3 +143,30 @@ def generate_postmortem(context: str, activity_context: str) -> str:
     except Exception as exc:
         logger.exception("OpenAI-compat generate_postmortem failed")
         return f"Error: {exc}"
+
+
+def generate_postmortem_stream(context: str, activity_context: str) -> Iterator[str]:
+    """Stream a postmortem analysis chunk by chunk."""
+    client = _get_client()
+    if not client:
+        yield "OpenAI-compatible AI is not configured."
+        return
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": POSTMORTEM_PROMPT},
+        {"role": "user", "content": f"{context}\n\nActivity Details:\n{activity_context}"},
+    ]
+
+    try:
+        stream = client.chat.completions.create(
+            model=settings.openai_compat_model,
+            messages=messages,  # type: ignore[arg-type]
+            stream=True,
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+    except Exception:
+        logger.exception("OpenAI-compat generate_postmortem_stream failed")
+        yield "Error generating postmortem."

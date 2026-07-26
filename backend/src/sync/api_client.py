@@ -249,6 +249,29 @@ class CorosApiClient:
                 raise CorosApiClientError("Response missing fileUrl")
             return file_url
 
+    async def fetch_activity_detail(self, activity_id: str, sport_type: int) -> dict:
+        """Fetch an official Team API activity-detail payload."""
+        url = f"{self.base_url}/activity/detail/query"
+        params = {"labelId": activity_id, "sportType": sport_type}
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(url, params=params, headers=self._get_auth_headers())
+                response.raise_for_status()
+                body = response.json()
+        except httpx.HTTPError as exc:
+            raise CorosApiClientError(f"Failed to fetch activity detail: {exc}") from exc
+        if body.get("result") != "0000":
+            raise CorosApiClientError(f"Failed to fetch activity detail: {body.get('message')}")
+        data = body.get("data")
+        return data if isinstance(data, dict) else {}
+
+    async def fetch_activity_feel_type(self, activity_id: str, sport_type: int) -> int | None:
+        """Fetch the end-of-activity RPE stored by COROS's Team API."""
+        detail = await self.fetch_activity_detail(activity_id, sport_type)
+        feel_info = detail.get("sportFeelInfo", {})
+        feel_type = feel_info.get("feelType") if isinstance(feel_info, dict) else None
+        return int(feel_type) if isinstance(feel_type, int) and 1 <= feel_type <= 5 else 0
+
     async def download_file(self, url: str) -> bytes:
         """Download raw binary file from URL (e.g. S3)."""
         async with httpx.AsyncClient(timeout=60) as client:
@@ -277,7 +300,7 @@ class CorosApiClient:
 
             return body.get("data", {}).get("dayList", [])
 
-    async def fetch_analyse(self) -> list[dict]:
+    async def fetch_analyse(self) -> dict:
         """Fetch summary and fitness estimates (VO2max, stamina)."""
         url = f"{self.base_url}/analyse/query"
 
@@ -285,26 +308,21 @@ class CorosApiClient:
             body = await self._get_json(client, url)
 
             if body.get("result") != "0000":
-                return []
+                return {}
 
-            return body.get("data", {}).get("t7dayList", [])
+            return body.get("data", {})
 
-    async def fetch_hrv(self) -> list[dict]:
-        """Fetch recent HRV data from dashboard."""
+    async def fetch_dashboard(self) -> dict:
+        """Fetch the live Training Hub dashboard, including recovery."""
         url = f"{self.base_url}/dashboard/query"
 
         async with httpx.AsyncClient(timeout=30) as client:
             body = await self._get_json(client, url)
 
             if body.get("result") != "0000":
-                return []
+                return {}
 
-            return (
-                body.get("data", {})
-                .get("summaryInfo", {})
-                .get("sleepHrvData", {})
-                .get("sleepHrvList", [])
-            )
+            return body.get("data", {})
 
     def _mobile_encrypt(self, plaintext: str, app_key: str) -> str:
         key = app_key.encode("ascii")

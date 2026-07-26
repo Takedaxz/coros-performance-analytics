@@ -51,6 +51,7 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
       createSSEConnection(
         `/api/sync/stream?job_id=${job_id}`,
         (event, data) => {
+          if (event === "ping") return;
           try {
             const parsed = JSON.parse(data);
             if (event === "progress") {
@@ -79,11 +80,30 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
             // Non-JSON event data, ignore
           }
         },
-        () => {
+        async () => {
+          // Verify via backend status before declaring connection lost
+          try {
+            const res = await fetch(`${apiBase}/api/sync/status`);
+            if (res.ok) {
+              const statusData = await res.json();
+              if (statusData.last_sync_status === "completed") {
+                setSyncState({
+                  isSyncing: false,
+                  stage: "complete",
+                  message: "Sync complete",
+                  error: null,
+                  lastSyncAt: statusData.last_sync_at || new Date().toISOString(),
+                });
+                if (onSyncComplete) onSyncComplete();
+                return;
+              }
+            }
+          } catch {}
+
           setSyncState((prev) => ({
             ...prev,
             isSyncing: false,
-            error: "Connection lost",
+            error: null,
           }));
         }
       );

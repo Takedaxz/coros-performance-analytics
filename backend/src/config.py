@@ -1,7 +1,12 @@
 """Application configuration loaded from environment variables."""
 
-from pydantic import Field
+import uuid
+
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Stable UUID5 namespace for deriving per-installation user IDs.
+_USER_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # uuid.NAMESPACE_URL
 
 
 class Settings(BaseSettings):
@@ -17,8 +22,13 @@ class Settings(BaseSettings):
     # --- App ---
     app_env: str = "development"
     app_secret_key: str = "change-me-in-production"
-    allowed_user_email: str = "you@example.com"
     raw_file_store_path: str = "./data/raw_files"
+
+    # --- Owner (single-user installation) ---
+    # Set OWNER_EMAIL in your .env file.  All other owner fields are optional.
+    owner_email: str = "you@example.com"
+    owner_timezone: str = "UTC"
+    owner_units: str = "metric"  # "metric" | "imperial"
 
     # --- Database ---
     database_url: str = "postgresql+asyncpg://coros:coros_dev@localhost:5432/coros_analytics"
@@ -26,7 +36,7 @@ class Settings(BaseSettings):
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"
 
-    # Coros API
+    # --- COROS API ---
     coros_email: str | None = None
     coros_password: str | None = None
     sync_interval_minutes: int = Field(default=15, ge=1, le=1440)
@@ -46,9 +56,24 @@ class Settings(BaseSettings):
     openai_compat_base_url: str = "https://gen.ai.kku.ac.th/okmd/api/v1"
     openai_compat_model: str = "gemini-2.5-flash-lite"
 
+    @computed_field  # type: ignore[misc]
+    @property
+    def owner_user_id(self) -> str:
+        """Stable UUID5 (UUID แบบ deterministic จาก namespace + email) derived from owner_email.
+
+        Different email → different ID automatically.
+        Override with OWNER_USER_ID env var if you need a specific value.
+        """
+        return str(uuid.uuid5(_USER_NS, self.owner_email))
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    # Back-compat alias used in older code paths.
+    @property
+    def allowed_user_email(self) -> str:
+        return self.owner_email
 
 
 def get_settings() -> Settings:

@@ -142,6 +142,23 @@ def parse_mcp_sleep_prose(text: str) -> list[dict[str, Any]]:
                 "wakeTime": wake_time,
             }
         })
+
+        for nap_start, nap_end in re.findall(
+            r"Nap Window:\s*\d{4}-\d{2}-\d{2}\s+(\d{2}:\d{2})\s*-\s*\d{4}-\d{2}-\d{2}\s+(\d{2}:\d{2})",
+            section,
+            re.I,
+        ):
+            start_dt = datetime.datetime.fromisoformat(f"{y}-{m}-{d}T{nap_start}")
+            end_dt = datetime.datetime.fromisoformat(f"{y}-{m}-{d}T{nap_end}")
+            if end_dt <= start_dt:
+                end_dt += datetime.timedelta(days=1)
+            records.append({
+                "happenDay": happen_day,
+                "isNap": True,
+                "sleepStart": start_dt.isoformat(),
+                "sleepEnd": end_dt.isoformat(),
+                "sleepData": {"totalSleepTime": round((end_dt - start_dt).total_seconds() / 60)},
+            })
         
     return records
 
@@ -222,6 +239,9 @@ def _normalize_sleep_record(raw: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "happenDay": happen_day,
+        "isNap": bool(raw.get("isNap") or raw.get("is_nap")),
+        "sleepStart": raw.get("sleepStart") or raw.get("sleep_start"),
+        "sleepEnd": raw.get("sleepEnd") or raw.get("sleep_end"),
         "performance": raw.get("performance") or raw.get("score") or raw.get("sleepScore"),
         "sleepData": {
             "totalSleepTime": mins("totalSleepTime", "totalMinutes"),
