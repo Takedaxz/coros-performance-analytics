@@ -196,7 +196,7 @@ def compute_daily_strain(
     active_calories: int | None = None,
 ) -> float:
     """Compute 0-21 daily strain, dominated by training load with a small movement bonus."""
-    training_strain = 20.0 * (1.0 - math.exp(-0.0013 * max(0.0, daily_load)))
+    training_strain = 20.0 * (1.0 - math.exp(-0.006 * max(0.0, daily_load)))
     steps_signal = 1.0 - math.exp(-max(0, steps or 0) / 12_000)
     calories_signal = 1.0 - math.exp(-max(0, active_calories or 0) / 1_000)
     movement_strain = max(steps_signal, calories_signal)
@@ -233,7 +233,7 @@ def compute_cardio_fitness_age(
     vo2max: float,
     sex: Literal["female", "male"],
 ) -> int:
-    """Map VO2 max to the matching age in the sex-specific HUNT3 reference population."""
+    """Map VO2 max to a fitness age using sex-specific HUNT3 reference values."""
     reference = _HUNT_MEAN_VO2MAX[sex]
     younger, older = next(
         (
@@ -250,4 +250,8 @@ def compute_cardio_fitness_age(
         / (younger_vo2 - older_vo2)
         * (older_age - younger_age)
     )
-    return math.floor(max(18.0, min(90.0, estimated_age)) + 0.5)
+    if estimated_age < 18.0:
+        estimated_age = 18.0 + (estimated_age - 18.0) * 0.25
+    elif estimated_age > 90.0:
+        estimated_age = 90.0 + (estimated_age - 90.0) * 0.25
+    return math.floor(max(10.0, min(100.0, estimated_age)) + 0.5)

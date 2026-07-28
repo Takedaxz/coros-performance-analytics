@@ -1,13 +1,74 @@
 """Activity routes: list, detail, and time-series data for activities."""
 
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, select, func
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete, extract, func, select
 
 from src.db.engine import get_db_session
 from src.db.models import Activity, ActivityLap, ActivityRecord
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.elements import ColumnElement
+
 router = APIRouter()
+
+DatePeriod = Literal["day", "week", "month", "year"]
+ActivitySort = Literal[
+    "newest",
+    "oldest",
+    "duration_desc",
+    "duration_asc",
+    "load_desc",
+    "load_asc",
+    "distance_desc",
+    "distance_asc",
+]
+
+
+def _period_bounds(
+    period: DatePeriod | None,
+    value: str | None,
+) -> tuple[datetime, datetime] | None:
+    if period is None:
+        if value:
+            raise HTTPException(status_code=422, detail="period is required with period_value")
+        return None
+    if not value:
+        raise HTTPException(status_code=422, detail="period_value is required with period")
+
+    try:
+        if period == "day":
+            start = datetime.strptime(value, "%Y-%m-%d")
+            return start, start + timedelta(days=1)
+        if period == "week":
+            start = datetime.strptime(f"{value}-1", "%G-W%V-%u")
+            return start, start + timedelta(days=7)
+        if period == "month":
+            start = datetime.strptime(value, "%Y-%m")
+            end = (
+                start.replace(year=start.year + 1, month=1)
+                if start.month == 12
+                else start.replace(month=start.month + 1)
+            )
+            return start, end
+        start = datetime.strptime(value, "%Y")
+        return start, start.replace(year=start.year + 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid {period} value: {value}") from exc
+
+
+def _validate_range(
+    label: str,
+    minimum: float | None,
+    maximum: float | None,
+) -> None:
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise HTTPException(status_code=422, detail=f"{label} minimum cannot exceed maximum")
 
 
 def _is_recovery_lap(laps: list[ActivityLap], index: int) -> bool:
@@ -140,23 +201,74 @@ def _distance_splits(
 @router.get("/")
 async def list_activities(
     sport: str | None = None,
+    period: DatePeriod | None = None,
+    period_value: str | None = None,
+    weekday: int | None = Query(default=None, ge=1, le=7),
+    min_duration_s: float | None = Query(default=None, ge=0),
+    max_duration_s: float | None = Query(default=None, ge=0),
+    min_training_load: float | None = Query(default=None, ge=0),
+    max_training_load: float | None = Query(default=None, ge=0),
+    min_distance_m: float | None = Query(default=None, ge=0),
+    max_distance_m: float | None = Query(default=None, ge=0),
+    sort: ActivitySort = "newest",
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """List activities with optional sport filter, pagination."""
-    query = select(Activity).order_by(Activity.start_time.desc())
-    count_query = select(func.count()).select_from(Activity)
+    """List activities with filters, sorting, and pagination."""
+    _validate_range("Duration", min_duration_s, max_duration_s)
+    _validate_range("Training load", min_training_load, max_training_load)
+    _validate_range("Distance", min_distance_m, max_distance_m)
 
+    conditions: list[ColumnElement[bool]] = []
     if sport:
-        query = query.where(Activity.sport == sport)
-        count_query = count_query.where(Activity.sport == sport)
+        conditions.append(Activity.sport == sport)
+
+    bounds = _period_bounds(period, period_value)
+    if bounds:
+        conditions.extend((Activity.start_time >= bounds[0], Activity.start_time < bounds[1]))
+    if weekday is not None:
+        conditions.append(extract("isodow", Activity.start_time) == weekday)
+    if min_duration_s is not None:
+        conditions.append(Activity.elapsed_time_s >= min_duration_s)
+    if max_duration_s is not None:
+        conditions.append(Activity.elapsed_time_s <= max_duration_s)
+    if min_training_load is not None:
+        conditions.append(Activity.training_load_vendor >= min_training_load)
+    if max_training_load is not None:
+        conditions.append(Activity.training_load_vendor <= max_training_load)
+    if min_distance_m is not None:
+        conditions.append(Activity.distance_m >= min_distance_m)
+    if max_distance_m is not None:
+        conditions.append(Activity.distance_m <= max_distance_m)
+
+    if sort == "oldest":
+        order = (Activity.start_time.asc(),)
+    elif sort == "duration_desc":
+        order = (Activity.elapsed_time_s.desc().nulls_last(), Activity.start_time.desc())
+    elif sort == "duration_asc":
+        order = (Activity.elapsed_time_s.asc().nulls_last(), Activity.start_time.desc())
+    elif sort == "load_desc":
+        order = (Activity.training_load_vendor.desc().nulls_last(), Activity.start_time.desc())
+    elif sort == "load_asc":
+        order = (Activity.training_load_vendor.asc().nulls_last(), Activity.start_time.desc())
+    elif sort == "distance_desc":
+        order = (Activity.distance_m.desc().nulls_last(), Activity.start_time.desc())
+    elif sort == "distance_asc":
+        order = (Activity.distance_m.asc().nulls_last(), Activity.start_time.desc())
+    else:
+        order = (Activity.start_time.desc(),)
+
+    query = select(Activity).where(*conditions).order_by(*order)
+    count_query = select(func.count()).select_from(Activity)
+    if conditions:
+        count_query = count_query.where(*conditions)
 
     query = query.limit(limit).offset(offset)
 
     result = await db.execute(query)
     activities = result.scalars().all()
-    
+
     count_result = await db.execute(count_query)
     total_count = count_result.scalar() or 0
 

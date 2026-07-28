@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
+import PageTitle from "@/components/PageTitle";
 import MetricCard from "@/components/MetricCard";
 import FitnessScoresPanel from "@/components/FitnessScoresPanel";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
@@ -115,7 +116,7 @@ export default function FitnessPage() {
       <Sidebar />
       <main className="main-content">
         <header className="page-header">
-          <h2 className="page-title">Fitness Capabilities & Estimates</h2>
+          <PageTitle>Fitness Capabilities & Estimates</PageTitle>
         </header>
 
         <div className="page-body">
@@ -146,19 +147,13 @@ export default function FitnessPage() {
             />
             <MetricCard
               label="Cardio Fitness Age"
-              value={
-                latestCardioFitnessAge === null
-                  ? "--"
-                  : latestCardioFitnessAge <= 18
-                    ? "<18"
-                    : latestCardioFitnessAge
-              }
+              value={latestCardioFitnessAge ?? "--"}
               unit={latestCardioFitnessAge === null ? undefined : "years"}
               accentColor="var(--color-accent-exertion)"
               subtext={
                 latestCardioFitnessAge === null
                   ? "Select sex in Settings"
-                  : "30-day VO₂ max vs HUNT3"
+                  : "Based on your 30-day average VO₂ max"
               }
             />
           </div>
@@ -188,10 +183,10 @@ export default function FitnessPage() {
                   <ResponsiveContainer width="100%" height={210}>
                     <AreaChart data={vo2Readings}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" vertical={false} />
-                      <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(val) => val.substring(5)} axisLine={false} interval="preserveStartEnd" />
+                      <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(val) => val.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                       <YAxis stroke="var(--color-text-muted)" fontSize={11} domain={['dataMin - 0.5', 'dataMax + 0.5']} axisLine={false} />
                       <Tooltip />
-                      <Area type="monotone" dataKey="vo2max" name="VO2 Max" stroke="var(--color-accent-primary)" fill="none" strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-primary)" }} />
+                      <Area type="monotone" dataKey="vo2max" name="VO2 Max" stroke="var(--color-accent-primary)" fill="none" strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
                     </AreaChart>
                   </ResponsiveContainer>
                 )}

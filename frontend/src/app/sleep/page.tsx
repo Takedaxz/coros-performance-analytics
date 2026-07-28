@@ -14,6 +14,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import Sidebar from "@/components/Sidebar";
+import PageTitle from "@/components/PageTitle";
 import MetricCard from "@/components/MetricCard";
 import SingleSelect from "@/components/SingleSelect";
 import type { HealthDay, SleepSummary } from "@/lib/types";
@@ -23,6 +24,13 @@ interface SleepTooltipEntry {
   value?: number | string;
   color?: string;
   payload?: { total: number };
+}
+
+function formatHoursMinutes(hours: number): string {
+  const totalMinutes = Math.round(hours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return wholeHours > 0 ? `${wholeHours}h ${minutes}m` : `${minutes}m`;
 }
 
 function SleepStageTooltip({
@@ -43,12 +51,12 @@ function SleepStageTooltip({
       {payload.map((entry) => (
         <div key={entry.name} style={{ display: "flex", justifyContent: "space-between", gap: "18px", marginTop: "5px" }}>
           <span>{entry.name}</span>
-          <strong>{Number(entry.value).toFixed(1)}h</strong>
+          <strong>{formatHoursMinutes(Number(entry.value))}</strong>
         </div>
       ))}
       <div style={{ display: "flex", justifyContent: "space-between", gap: "18px", marginTop: "10px", paddingTop: "9px", borderTop: "1px solid var(--border-color)" }}>
         <strong>Total</strong>
-        <strong>{total.toFixed(1)}h</strong>
+        <strong>{formatHoursMinutes(total)}</strong>
       </div>
     </div>
   );
@@ -181,13 +189,14 @@ export default function SleepPage() {
   )));
   const sleepBaseline = average(priorMainSleep.map((sleep) => sleep.duration_s / 3600));
   const restorativeBaseline = average(priorMainSleep.map(restorativeRatio));
+  const sleepDelta = sleepBaseline === null ? null : latestSleepHours - sleepBaseline;
 
   return (
     <div className="app-layout">
       <Sidebar />
       <main className="main-content">
         <header className="page-header">
-          <h2 className="page-title">Sleep & Autonomic Recovery</h2>
+          <PageTitle>Sleep & Autonomic Recovery</PageTitle>
           <SingleSelect
             ariaLabel="Sleep history period"
             id="period-selector"
@@ -225,10 +234,11 @@ export default function SleepPage() {
             />
             <MetricCard
               label="Sleep Duration"
-              value={latestSleepHours.toFixed(1)}
-              unit="hrs"
+              value={formatHoursMinutes(latestSleepHours)}
               accentColor="var(--color-accent-sleep)"
-              baselineDelta={comparison(latestSleepHours, sleepBaseline, "hrs", 1)}
+              baselineDelta={sleepDelta === null
+                ? "No prior data"
+                : `${sleepDelta >= 0 ? "+" : "-"}${formatHoursMinutes(Math.abs(sleepDelta))} vs prior 7-day avg`}
               icon={(
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
@@ -245,8 +255,7 @@ export default function SleepPage() {
           {/* HRV Trend */}
           <div className="card" style={{ marginBottom: "var(--space-6)" }} id="chart-hrv-trend">
             <div className="card-header">
-              <span className="card-title">Autonomic HRV Baseline Trend</span>
-              <span style={{ fontSize: "12px", color: "var(--color-accent-primary)" }}>7-day SMA Reference</span>
+              <span className="card-title">Heart Rate Variability</span>
             </div>
             <ResponsiveContainer width="100%" height={240}>
               <AreaChart data={hrvData}>
@@ -257,11 +266,11 @@ export default function SleepPage() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
-                <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} />
+                <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
                 <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="ms" />
-                <Tooltip />
-                <Area type="monotone" dataKey="hrv" stroke="var(--color-accent-primary)" fill="url(#sleepHrvGrad)" strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-primary)" }} />
-                <Area type="monotone" dataKey="sma" stroke="var(--color-text-secondary)" strokeDasharray="4 4" fill="none" strokeWidth={1.5} />
+                <Tooltip formatter={(value) => `${Math.round(Number(value))} ms`} />
+                <Area type="monotone" dataKey="hrv" name="Overnight HRV" stroke="var(--color-accent-primary)" fill="url(#sleepHrvGrad)" strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-primary)" }} />
+                <Area type="monotone" dataKey="sma" name="7-day average" stroke="var(--color-text-secondary)" strokeDasharray="4 4" fill="none" strokeWidth={1.5} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -275,7 +284,7 @@ export default function SleepPage() {
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={sleepData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
-                  <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} />
+                  <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
                   <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="h" />
                   <Tooltip cursor={{ fill: "rgba(255, 255, 255, 0.04)" }} content={<SleepStageTooltip />} />
                   <Bar dataKey="deep" name="Deep" stackId="s" fill="#21E6A5" />
@@ -304,7 +313,7 @@ export default function SleepPage() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
-                  <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} />
+                  <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
                   <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={[0, 100]} unit="%" />
                   <Tooltip />
                   <Area type="monotone" dataKey="readiness" name="Readiness" stroke="var(--color-accent-exertion)" fill="url(#recGrad)" strokeWidth={2} dot={{ r: 3 }} />
@@ -317,16 +326,15 @@ export default function SleepPage() {
           <div className="card" id="chart-rhr">
             <div className="card-header">
               <span className="card-title">Resting Heart Rate History</span>
-              <span style={{ fontSize: "12px", color: "var(--color-text-muted)" }}>7-day SMA</span>
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={rhrData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
-                <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} />
+                <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
                 <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={["dataMin - 3", "dataMax + 3"]} unit="bpm" />
-                <Tooltip />
-                <Area type="monotone" dataKey="rhr" stroke="var(--color-status-critical)" fill="rgba(255, 77, 98, 0.08)" strokeWidth={2} dot={{ r: 3 }} />
-                <Area type="monotone" dataKey="sma" stroke="var(--color-text-secondary)" strokeDasharray="4 4" fill="none" strokeWidth={1.5} />
+                <Tooltip formatter={(value) => `${Math.round(Number(value))} bpm`} />
+                <Area type="monotone" dataKey="rhr" name="Resting HR" stroke="var(--color-status-critical)" fill="rgba(255, 77, 98, 0.08)" strokeWidth={2} dot={{ r: 3 }} />
+                <Area type="monotone" dataKey="sma" name="7-day average" stroke="var(--color-text-secondary)" strokeDasharray="4 4" fill="none" strokeWidth={1.5} />
               </AreaChart>
             </ResponsiveContainer>
           </div>

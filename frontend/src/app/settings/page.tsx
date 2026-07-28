@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
+import PageTitle from "@/components/PageTitle";
 import SingleSelect from "@/components/SingleSelect";
+import NumberStepper from "@/components/NumberStepper";
 import type { SyncStatus } from "@/lib/types";
 
 interface UserGoal {
@@ -62,6 +64,23 @@ function goalRaceState(dateStr: string): "upcoming" | "recovery" | "expired" | "
   if (days >= 0) return "upcoming";
   if (days >= -30) return "recovery";  // 0–30 days after race
   return "expired";                    // 30+ days after race
+}
+
+function targetTimeParts(value: string): [string, string, string] {
+  const [hours = "", minutes = "", seconds = ""] = value.split(":");
+  return [hours, minutes, seconds];
+}
+
+function updateTargetTime(value: string, index: 0 | 1 | 2, nextValue: string): string {
+  const parts = targetTimeParts(value);
+  parts[index] = nextValue;
+  return parts.join(":");
+}
+
+function normalizedTargetTime(value: string): string | null {
+  const [hours, minutes, seconds] = targetTimeParts(value);
+  if (!hours && !minutes && !seconds) return null;
+  return `${Number(hours) || 0}:${String(Number(minutes) || 0).padStart(2, "0")}:${String(Number(seconds) || 0).padStart(2, "0")}`;
 }
 
 export default function SettingsPage() {
@@ -264,7 +283,7 @@ export default function SettingsPage() {
       goal_description: goalForm.goal_description || null,
       goal_race_name: goalForm.goal_race_name || null,
       goal_race_date: goalForm.goal_race_date || null,
-      goal_target_time: goalForm.goal_target_time || null,
+      goal_target_time: normalizedTargetTime(goalForm.goal_target_time),
       weekly_training_hours: goalForm.weekly_training_hours
         ? parseFloat(goalForm.weekly_training_hours)
         : null,
@@ -386,12 +405,26 @@ export default function SettingsPage() {
     }
   }
 
+  const [targetHours, targetMinutes, targetSeconds] = targetTimeParts(goalForm.goal_target_time);
+  const savedMessage = corosSaved
+    ? "Credentials saved securely."
+    : goalSaved
+      ? "Goal saved."
+      : profileSaved
+        ? "Changes saved."
+        : "";
+
   return (
     <div className="app-layout">
       <Sidebar />
       <main className="main-content">
+        {savedMessage && (
+          <div className="sync-toast" role="status" aria-live="polite">
+            {savedMessage}
+          </div>
+        )}
         <header className="page-header">
-          <h2 className="page-title">Settings</h2>
+          <PageTitle>Settings</PageTitle>
         </header>
         <div className="page-body settings-page">
           <div className="settings-sections">
@@ -399,7 +432,7 @@ export default function SettingsPage() {
                 <div className="settings-section-heading">
                   <div>
                     <h2>Connections</h2>
-                    <p>Two separate COROS connections keep activity metrics and detailed sleep stages current.</p>
+                    <p>COROS connections keep activity metrics and detailed sleep stages current.</p>
                   </div>
                 </div>
 
@@ -452,7 +485,6 @@ export default function SettingsPage() {
                         <button type="submit" className="btn btn-primary" disabled={corosSaving}>
                           {corosSaving ? "Saving…" : "Connect account"}
                         </button>
-                        {corosSaved && <span className="settings-feedback is-success">Credentials saved securely.</span>}
                         {corosError && <span className="settings-feedback is-error">{corosError}</span>}
                       </div>
                     </form>
@@ -462,7 +494,7 @@ export default function SettingsPage() {
                 <div className="settings-connection-row" id="settings-coros-mcp">
                   <div className="settings-connection-main">
                     <div className="settings-title-line">
-                      <h3>Detailed sleep stages</h3>
+                      <h3>COROS MCP</h3>
                       <span className={`settings-state ${mcpStatus?.connected && !mcpStatus.expired ? "is-connected" : mcpStatus?.expired ? "is-warning" : ""}`}>
                         {mcpStatus?.connected ? (mcpStatus.expired ? "Authorization expired" : "Connected") : "Not connected"}
                       </span>
@@ -525,7 +557,7 @@ export default function SettingsPage() {
                         id="profile-sex"
                         value={profile.sex}
                         options={[
-                          { value: "", label: "Select sex" },
+                          ...(!profile.sex ? [{ value: "", label: "Select sex" }] : []),
                           { value: "female", label: "Female" },
                           { value: "male", label: "Male" },
                         ]}
@@ -534,22 +566,47 @@ export default function SettingsPage() {
                     </div>
                     <div className="settings-field">
                       <label htmlFor="profile-height">Height <span>cm</span></label>
-                      <input id="profile-height" type="number" min="50" max="300" placeholder="180" value={profile.height_cm} onChange={(e) => setProfile((p) => ({ ...p, height_cm: e.target.value }))} />
+                      <NumberStepper
+                        ariaLabel="Height in centimeters"
+                        id="profile-height"
+                        min={50}
+                        max={300}
+                        placeholder="180"
+                        value={profile.height_cm}
+                        onChange={(height_cm) => setProfile((profile) => ({ ...profile, height_cm }))}
+                      />
                     </div>
                     <div className="settings-field">
                       <label htmlFor="profile-weight">Weight <span>kg</span></label>
-                      <input id="profile-weight" type="number" min="20" max="300" step="0.1" placeholder="75.5" value={profile.weight_kg} onChange={(e) => setProfile((p) => ({ ...p, weight_kg: e.target.value }))} />
+                      <NumberStepper
+                        ariaLabel="Weight in kilograms"
+                        id="profile-weight"
+                        min={20}
+                        max={300}
+                        step={0.1}
+                        placeholder="75.5"
+                        value={profile.weight_kg}
+                        onChange={(weight_kg) => setProfile((profile) => ({ ...profile, weight_kg }))}
+                      />
                     </div>
                     <div className="settings-field">
                       <label htmlFor="profile-body-fat">Body fat <span>%</span></label>
-                      <input id="profile-body-fat" type="number" min="1" max="80" step="0.1" placeholder="15.0" value={profile.body_fat_pct} onChange={(e) => setProfile((p) => ({ ...p, body_fat_pct: e.target.value }))} />
+                      <NumberStepper
+                        ariaLabel="Body fat percentage"
+                        id="profile-body-fat"
+                        min={1}
+                        max={80}
+                        step={0.1}
+                        placeholder="15.0"
+                        value={profile.body_fat_pct}
+                        onChange={(body_fat_pct) => setProfile((profile) => ({ ...profile, body_fat_pct }))}
+                      />
                     </div>
                   </div>
                   <div className="settings-actions">
                     <button type="submit" className="btn btn-primary" disabled={profileSaving}>
                       {profileSaving ? "Saving…" : "Save profile"}
                     </button>
-                    {profileSaved && <span className="settings-feedback is-success">Profile saved.</span>}
                     {profileError && <span className="settings-feedback is-error">{profileError}</span>}
                   </div>
                 </form>
@@ -574,7 +631,100 @@ export default function SettingsPage() {
                     )}
                   </div>
 
-                  {!isAddingGoal && !editingGoalId && (
+                  {(isAddingGoal || editingGoalId) && (
+                    <form className="settings-goal-form" onSubmit={(e) => { e.preventDefault(); saveGoal(); }}>
+                      <div className="settings-subsection-heading">
+                        <h3>{editingGoalId ? "Edit training goal" : "New training goal"}</h3>
+                      </div>
+                      <div className="settings-form-grid">
+                        <div className="settings-field">
+                          <label htmlFor="goal-name">Race or event</label>
+                          <input id="goal-name" type="text" placeholder="Boston Marathon" value={goalForm.goal_race_name} onChange={(e) => setGoalForm((g) => ({ ...g, goal_race_name: e.target.value }))} required />
+                        </div>
+                        <div className="settings-field">
+                          <label htmlFor="goal-date">Race date</label>
+                          <input id="goal-date" type="date" value={goalForm.goal_race_date} onChange={(e) => setGoalForm((g) => ({ ...g, goal_race_date: e.target.value }))} />
+                        </div>
+                        <div className="settings-field">
+                          <label id="goal-time-label">Target time</label>
+                          <div className="settings-target-time" aria-labelledby="goal-time-label">
+                            <div className="settings-target-time-part">
+                              <span>Hours</span>
+                              <NumberStepper
+                                ariaLabel="Target hours"
+                                id="goal-time-hours"
+                                min={0}
+                                max={99}
+                                placeholder="0"
+                                value={targetHours}
+                                onChange={(value) => setGoalForm((goal) => ({ ...goal, goal_target_time: updateTargetTime(goal.goal_target_time, 0, value) }))}
+                              />
+                            </div>
+                            <div className="settings-target-time-part">
+                              <span>Minutes</span>
+                              <NumberStepper
+                                ariaLabel="Target minutes"
+                                id="goal-time-minutes"
+                                min={0}
+                                max={59}
+                                placeholder="00"
+                                value={targetMinutes}
+                                onChange={(value) => setGoalForm((goal) => ({ ...goal, goal_target_time: updateTargetTime(goal.goal_target_time, 1, value) }))}
+                              />
+                            </div>
+                            <div className="settings-target-time-part">
+                              <span>Seconds</span>
+                              <NumberStepper
+                                ariaLabel="Target seconds"
+                                id="goal-time-seconds"
+                                min={0}
+                                max={59}
+                                placeholder="00"
+                                value={targetSeconds}
+                                onChange={(value) => setGoalForm((goal) => ({ ...goal, goal_target_time: updateTargetTime(goal.goal_target_time, 2, value) }))}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="settings-field">
+                          <label htmlFor="goal-hours">Weekly training</label>
+                          <div className="settings-target-time-part">
+                            <span>Hours</span>
+                            <NumberStepper
+                              ariaLabel="Weekly training hours"
+                              id="goal-hours"
+                              min={0}
+                              max={40}
+                              step={0.5}
+                              placeholder="10"
+                              value={goalForm.weekly_training_hours}
+                              onChange={(weekly_training_hours) => setGoalForm((goal) => ({ ...goal, weekly_training_hours }))}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="settings-field">
+                        <label htmlFor="goal-notes">Goal notes</label>
+                        <textarea id="goal-notes" rows={3} placeholder="Experience, injury considerations, or pacing priorities." value={goalForm.goal_description} onChange={(e) => setGoalForm((g) => ({ ...g, goal_description: e.target.value }))} />
+                      </div>
+                      <label className="settings-check" htmlFor="goal-active-checkbox">
+                        <input id="goal-active-checkbox" type="checkbox" checked={goalForm.is_active} onChange={(e) => setGoalForm((g) => ({ ...g, is_active: e.target.checked }))} />
+                        <span className="settings-check-control" aria-hidden="true">
+                          <svg viewBox="0 0 16 16">
+                            <path d="m3.5 8.25 2.75 2.75 6.25-6.25" />
+                          </svg>
+                        </span>
+                        <span>Keep this goal active</span>
+                      </label>
+                      <div className="settings-actions">
+                        <button type="submit" className="btn btn-primary" disabled={goalSaving}>{goalSaving ? "Saving…" : "Save goal"}</button>
+                        <button type="button" className="btn btn-secondary" onClick={cancelGoalForm}>Cancel</button>
+                        {goalError && <span className="settings-feedback is-error">{goalError}</span>}
+                      </div>
+                    </form>
+                  )}
+
+                  {!editingGoalId && (!isAddingGoal || goals.length > 0) && (
                     <div className="settings-goal-list">
                       {goalsLoading ? (
                         <p className="settings-empty">Loading goals…</p>
@@ -640,50 +790,6 @@ export default function SettingsPage() {
                     </div>
                   )}
 
-                  {(isAddingGoal || editingGoalId) && (
-                    <form className="settings-goal-form" onSubmit={(e) => { e.preventDefault(); saveGoal(); }}>
-                      <div className="settings-subsection-heading">
-                        <h3>{editingGoalId ? "Edit training goal" : "New training goal"}</h3>
-                      </div>
-                      <div className="settings-form-grid">
-                        <div className="settings-field">
-                          <label htmlFor="goal-name">Race or event</label>
-                          <input id="goal-name" type="text" placeholder="Boston Marathon" value={goalForm.goal_race_name} onChange={(e) => setGoalForm((g) => ({ ...g, goal_race_name: e.target.value }))} required />
-                        </div>
-                        <div className="settings-field">
-                          <label htmlFor="goal-date">Race date</label>
-                          <input id="goal-date" type="date" value={goalForm.goal_race_date} onChange={(e) => setGoalForm((g) => ({ ...g, goal_race_date: e.target.value }))} />
-                        </div>
-                        <div className="settings-field">
-                          <label htmlFor="goal-time">Target time</label>
-                          <input id="goal-time" type="text" placeholder="3:59:00" value={goalForm.goal_target_time} onChange={(e) => setGoalForm((g) => ({ ...g, goal_target_time: e.target.value }))} />
-                        </div>
-                        <div className="settings-field">
-                          <label htmlFor="goal-hours">Weekly training <span>hours</span></label>
-                          <input id="goal-hours" type="number" min="0" max="40" step="0.5" placeholder="10" value={goalForm.weekly_training_hours} onChange={(e) => setGoalForm((g) => ({ ...g, weekly_training_hours: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="settings-field">
-                        <label htmlFor="goal-notes">Goal notes</label>
-                        <textarea id="goal-notes" rows={3} placeholder="Experience, injury considerations, or pacing priorities." value={goalForm.goal_description} onChange={(e) => setGoalForm((g) => ({ ...g, goal_description: e.target.value }))} />
-                      </div>
-                      <label className="settings-check" htmlFor="goal-active-checkbox">
-                        <input id="goal-active-checkbox" type="checkbox" checked={goalForm.is_active} onChange={(e) => setGoalForm((g) => ({ ...g, is_active: e.target.checked }))} />
-                        <span className="settings-check-control" aria-hidden="true">
-                          <svg viewBox="0 0 16 16">
-                            <path d="m3.5 8.25 2.75 2.75 6.25-6.25" />
-                          </svg>
-                        </span>
-                        <span>Keep this goal active</span>
-                      </label>
-                      <div className="settings-actions">
-                        <button type="submit" className="btn btn-primary" disabled={goalSaving}>{goalSaving ? "Saving…" : "Save goal"}</button>
-                        <button type="button" className="btn btn-secondary" onClick={cancelGoalForm}>Cancel</button>
-                        {goalSaved && <span className="settings-feedback is-success">Goal saved.</span>}
-                        {goalError && <span className="settings-feedback is-error">{goalError}</span>}
-                      </div>
-                    </form>
-                  )}
                 </div>
 
                 <div className="settings-subsection" id="settings-training-notes">
@@ -708,35 +814,11 @@ export default function SettingsPage() {
                     <button id="save-training-notes-btn" className="btn btn-primary" onClick={saveProfile} disabled={profileSaving}>
                       {profileSaving ? "Saving…" : "Save notes"}
                     </button>
-                    {profileSaved && <span className="settings-feedback is-success">Coaching context saved.</span>}
                     {profileError && <span className="settings-feedback is-error">{profileError}</span>}
                   </div>
                 </div>
               </section>
 
-              <section className="settings-section hover-card" id="settings-data">
-                <div className="settings-section-heading">
-                  <div>
-                    <h2>Data & storage</h2>
-                    <p>Review where your health data is stored and which management tools are available.</p>
-                  </div>
-                </div>
-                <div className="settings-storage">
-                  <div><span>Structured data</span><strong>Local PostgreSQL</strong></div>
-                  <div><span>Activity source files</span><strong>FIT / TCX file store</strong></div>
-                  <div><span>Credential protection</span><strong>AES-256-GCM encryption</strong></div>
-                </div>
-                <div className="settings-data-actions">
-                  <div>
-                    <h3>Account data controls</h3>
-                    <p>Export and permanent deletion are not available in this build.</p>
-                  </div>
-                  <div>
-                    <button className="btn btn-secondary" id="export-data-btn" disabled>Export all data</button>
-                    <button className="btn btn-secondary settings-danger-action" id="delete-data-btn" disabled>Delete all data</button>
-                  </div>
-                </div>
-              </section>
           </div>
         </div>
       </main>

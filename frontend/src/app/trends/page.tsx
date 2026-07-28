@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
+import PageTitle from "@/components/PageTitle";
 import SingleSelect from "@/components/SingleSelect";
 import {
   Area,
@@ -299,7 +300,7 @@ export default function TrendsPage() {
       <Sidebar />
       <main className="main-content">
         <header className="page-header">
-          <h2 className="page-title">Training Trends</h2>
+          <PageTitle>Training Trends</PageTitle>
           <SingleSelect
             ariaLabel="Training trend period"
             value={String(visibleTrendDays)}
@@ -430,7 +431,7 @@ export default function TrendsPage() {
                   <AreaChart data={loadChartData}>
                     <defs><linearGradient id="loadGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--color-accent-exertion)" stopOpacity={0.3} /><stop offset="95%" stopColor="var(--color-accent-exertion)" stopOpacity={0} /></linearGradient></defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
-                    <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} />
+                    <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                     <YAxis stroke="var(--color-text-muted)" fontSize={11} axisLine={false} />
                     <Tooltip contentStyle={{ background: "#192126", border: "1px solid var(--border-color)", borderRadius: 12 }} />
                     <Area type="monotone" dataKey="total_load" name="Training Load" stroke="var(--color-accent-exertion)" fill="url(#loadGrad)" strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-exertion)" }} />
@@ -465,7 +466,7 @@ export default function TrendsPage() {
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
-                        <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} />
+                        <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                         <YAxis stroke="#4fc3f3" fontSize={11} axisLine={false} tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`} />
                         <Tooltip
                           contentStyle={{ background: "#192126", border: "1px solid var(--border-color)", borderRadius: 12 }}
@@ -499,7 +500,7 @@ export default function TrendsPage() {
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
-                        <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} />
+                        <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                         <YAxis stroke="#ff9800" fontSize={11} axisLine={false} />
                         <Tooltip
                           contentStyle={{ background: "#192126", border: "1px solid var(--border-color)", borderRadius: 12 }}

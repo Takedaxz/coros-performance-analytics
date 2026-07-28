@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Sidebar from "@/components/Sidebar";
+import PageTitle from "@/components/PageTitle";
+import NumberStepper from "@/components/NumberStepper";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -462,15 +464,12 @@ export default function AiPage() {
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);
-                e.target.style.height = "56px";
-                e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
               }}
               onKeyDown={async (e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   if (!input.trim()) return;
                   const msg = input.trim();
-                  e.currentTarget.style.height = "56px";
                   if (!sessionId) {
                     const s = await createRealSession();
                     if (s) handleSend(msg, s.id);
@@ -494,8 +493,6 @@ export default function AiPage() {
               onClick={async () => {
                 if (!input.trim()) return;
                 const msg = input.trim();
-                const el = document.getElementById(inputId);
-                if (el) el.style.height = "56px";
                 if (!sessionId) {
                   const s = await createRealSession();
                   if (s) handleSend(msg, s.id);
@@ -505,7 +502,6 @@ export default function AiPage() {
               }}
               disabled={isLoading || !input.trim()}
               aria-label="Send message"
-              style={{ top: "auto", bottom: "8px", transform: "none" }}
             >
               <SendIcon />
             </button>
@@ -539,31 +535,35 @@ export default function AiPage() {
       <Sidebar />
       <main className="ai-link-main print-block">
         <header className="page-header print-hide">
-          <h2 className="page-title">AI Coach</h2>
-          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+          <PageTitle>AI Coach</PageTitle>
+          <div className="ai-link-header-actions">
             <div className="ai-link-context">
-              <span>Calendar Context:</span>
-              <input
-                type="number"
-                value={planDaysBack}
-                onChange={(event) => setPlanDaysBack(Number(event.target.value) || 0)}
-                aria-label="Calendar days back"
-              />
-              <span>days back,</span>
-              <input
-                type="number"
-                value={planDaysForward}
-                onChange={(event) => setPlanDaysForward(Number(event.target.value) || 0)}
-                aria-label="Calendar days forward"
-              />
-              <span>days forward</span>
+              <span className="ai-link-context-label">Calendar context</span>
+              <span className="ai-link-context-range">
+                <NumberStepper
+                  ariaLabel="Calendar days back"
+                  value={planDaysBack}
+                  onChange={(value) => setPlanDaysBack(Number(value) || 0)}
+                  compact
+                />
+                <span>days back</span>
+              </span>
+              <span className="ai-link-context-range">
+                <NumberStepper
+                  ariaLabel="Calendar days forward"
+                  value={planDaysForward}
+                  onChange={(value) => setPlanDaysForward(Number(value) || 0)}
+                  compact
+                />
+                <span>days forward</span>
+              </span>
             </div>
             {activeSessionId && !isEmpty && (
               <>
-                <button className="btn btn-ghost btn-sm" onClick={handleExportMarkdown} title="Export as Markdown" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                <button className="ai-link-tool-button" onClick={handleExportMarkdown} title="Export as Markdown">
                   <DownloadIcon /> Export MD
                 </button>
-                <button className="btn btn-ghost btn-sm" onClick={handlePrint} title="Print / Save as PDF" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                <button className="ai-link-tool-button" onClick={handlePrint} title="Print / Save as PDF">
                   <PrintIcon /> Print PDF
                 </button>
               </>
@@ -779,7 +779,7 @@ export default function AiPage() {
                                 </span>
                               ) : (
                                 <div className="markdown-body">
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content.replaceAll(" -- ", " — ")}</ReactMarkdown>
                                 </div>
                               )}
                               {isErrorMsg && (
@@ -821,15 +821,12 @@ export default function AiPage() {
                           value={input}
                           onChange={(e) => {
                             setInput(e.target.value);
-                            e.target.style.height = "56px";
-                            e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
                           }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.shiftKey) {
                               e.preventDefault();
                               if (!input.trim()) return;
                               handleSend();
-                              e.currentTarget.style.height = "56px";
                             }
                           }}
                           disabled={isLoading}
@@ -848,12 +845,9 @@ export default function AiPage() {
                           onClick={() => {
                             if (!input.trim()) return;
                             handleSend();
-                            const el = document.getElementById("chat-input");
-                            if (el) el.style.height = "56px";
                           }}
                           disabled={isLoading || !input.trim()}
                           aria-label="Send message"
-                          style={{ top: "auto", bottom: "8px", transform: "none" }}
                         >
                           <SendIcon />
                         </button>

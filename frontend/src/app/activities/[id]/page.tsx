@@ -14,6 +14,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import Sidebar from "@/components/Sidebar";
+import PageTitle from "@/components/PageTitle";
 import StrengthBodyMap from "@/components/StrengthBodyMap";
 import { getSportVisual, SportIcon } from "@/components/SportActivityIcon";
 import ReactMarkdown from "react-markdown";
@@ -280,8 +281,7 @@ export default function ActivityDetailPage() {
         <Sidebar />
         <main className="main-content">
           <header className="page-header">
-            <h2 className="page-title">Activity Detail</h2>
-            <Link href="/activities" className="btn btn-secondary btn-sm">Back</Link>
+            <PageTitle>Activity Detail</PageTitle>
           </header>
 
           <div className="page-body">
@@ -421,7 +421,7 @@ export default function ActivityDetailPage() {
       <div className="app-layout">
         <Sidebar />
         <main className="main-content">
-          <header className="page-header"><h2 className="page-title">Activity Not Found</h2></header>
+          <header className="page-header"><PageTitle>Activity Not Found</PageTitle></header>
           <div className="page-body" style={{ textAlign: "center", paddingTop: "var(--space-16)", color: "var(--color-text-muted)" }}>
             <p>Activity details could not be loaded.</p>
             <Link href="/activities" className="btn btn-secondary" style={{ marginTop: "var(--space-4)" }}>Back to Activities</Link>
@@ -435,7 +435,7 @@ export default function ActivityDetailPage() {
   const chartData = records
     .filter((_, i) => i % sampleRate === 0)
     .map((r) => ({
-      time: r.elapsed_s ? Math.round(r.elapsed_s / 60) : 0,
+      time: r.elapsed_s ? r.elapsed_s / 60 : 0,
       hr: r.heart_rate_bpm,
       speed: r.speed_mps ? Math.round(r.speed_mps * 3.6 * 10) / 10 : undefined,
       alt: r.altitude_m != null ? Math.round(r.altitude_m) : undefined,
@@ -521,6 +521,7 @@ export default function ActivityDetailPage() {
     : [];
   const sportVisual = getSportVisual(activity.sport);
   const activityTime = new Date(activity.start_time).toLocaleString(undefined, {
+    weekday: "short",
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -587,18 +588,18 @@ export default function ActivityDetailPage() {
           : []),
       ];
   const telemetryCard = hasTelemetryData && (
-    <div className={`card${strength ? "" : " telemetry-card-standalone"}`} id="chart-hr-speed" style={{ marginBottom: "var(--space-6)" }}>
+    <div className={`card${strength ? "" : " telemetry-card-standalone"}`} id="chart-hr-speed" style={{ marginBottom: strength ? 0 : "var(--space-6)" }}>
       <div className="card-header">
         <span className="card-title">Heart Rate & Speed Telemetry</span>
       </div>
       <div className="telemetry-chart">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <LineChart data={chartData} margin={{ top: 16, right: 8, bottom: 16, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
-            <XAxis dataKey="time" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" min" />
-            {hasHeartRateData && <YAxis yAxisId="hr" width={42} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={["dataMin - 10", "dataMax + 10"]} />}
-            {hasSpeedData && <YAxis yAxisId="speed" orientation="right" width={48} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" km/h" />}
-            <Tooltip />
+            <XAxis dataKey="time" type="number" domain={[0, "auto"]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
+            {hasHeartRateData && <YAxis yAxisId="hr" width={72} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} bpm`} axisLine={false} domain={["dataMin - 10", "dataMax + 10"]} />}
+            {hasSpeedData && <YAxis yAxisId="speed" orientation="right" width={64} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} km/h`} axisLine={false} />}
+            <Tooltip labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`} />
             {hasHeartRateData && <Line yAxisId="hr" type="monotone" dataKey="hr" stroke="var(--color-status-critical)" strokeWidth={2} dot={false} name="Heart Rate (bpm)" />}
             {hasSpeedData && <Line yAxisId="speed" type="monotone" dataKey="speed" stroke="var(--color-accent-primary)" strokeWidth={2} dot={false} name="Speed (km/h)" />}
           </LineChart>
@@ -612,8 +613,7 @@ export default function ActivityDetailPage() {
       <Sidebar />
       <main className="main-content">
         <header className="page-header">
-          <h2 className="page-title">Activity Detail</h2>
-          <Link href="/activities" className="btn btn-secondary btn-sm">Back</Link>
+          <PageTitle>Activity Detail</PageTitle>
         </header>
 
         <div className="page-body">
@@ -690,12 +690,15 @@ export default function ActivityDetailPage() {
                     <span className="card-title">Elevation Profile</span>
                   </div>
                   <ResponsiveContainer width="100%" height={260}>
-                    <LineChart data={chartData}>
+                    <LineChart data={chartData} margin={{ top: 16, right: 8, bottom: 16, left: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
-                      <XAxis dataKey="time" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit=" min" />
-                      <YAxis domain={[elevationBounds[0] - elevationPadding, elevationBounds[1] + elevationPadding]} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="m" />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="alt" stroke="var(--color-status-positive)" strokeWidth={2} dot={false} name="Elevation (m)" />
+                      <XAxis dataKey="time" type="number" domain={[0, "auto"]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
+                      <YAxis width={52} padding={{ top: 8, bottom: 8 }} domain={[elevationBounds[0] - elevationPadding, elevationBounds[1] + elevationPadding]} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} m`} axisLine={false} />
+                      <Tooltip
+                        labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`}
+                        formatter={(value) => `${Math.round(Number(value))} m`}
+                      />
+                      <Line type="monotone" dataKey="alt" stroke="var(--color-status-positive)" strokeWidth={2} dot={false} name="Elevation" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>

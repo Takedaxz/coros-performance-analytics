@@ -14,6 +14,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import Sidebar from "@/components/Sidebar";
+import PageTitle from "@/components/PageTitle";
 import SyncButton from "@/components/SyncButton";
 import ScoreRing from "@/components/ScoreRing";
 import SleepCard from "@/components/SleepCard";
@@ -134,7 +135,7 @@ export default function DashboardPage() {
         <Sidebar />
         <main className="main-content">
           <header className="page-header">
-            <h2 className="page-title">Dashboard</h2>
+            <PageTitle>Dashboard</PageTitle>
             {isLoading && <div className="skeleton" aria-hidden="true" style={{ width: 82, height: 32, borderRadius: 999 }} />}
           </header>
           <div className="page-body">
@@ -351,11 +352,7 @@ export default function DashboardPage() {
       <Sidebar />
       <main className="main-content">
         <header className="page-header">
-          <div>
-            <h2 className="page-title">
-              Dashboard
-            </h2>
-          </div>
+          <PageTitle>Dashboard</PageTitle>
           <SyncButton onSyncComplete={fetchData} />
         </header>
 
@@ -741,7 +738,7 @@ export default function DashboardPage() {
                 <ResponsiveContainer width="100%" height={230}>
                   <BarChart data={weeklyActivityData} margin={{ top: 6, right: 8, left: 0, bottom: 0 }} barGap={2}>
                     <CartesianGrid strokeDasharray="2 6" stroke="rgba(255, 255, 255, 0.055)" vertical={false} />
-                    <XAxis dataKey="day" tick={{ fill: "var(--color-text-muted)", fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} dy={4} height={22} />
+                    <XAxis dataKey="day" tick={{ fill: "var(--color-text-muted)", fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} dy={4} height={22} interval="equidistantPreserveStart" />
                     <YAxis
                       domain={isRelativeChart ? [0, 100] : [0, "auto"]}
                       allowDataOverflow={isRelativeChart}
@@ -859,7 +856,7 @@ export default function DashboardPage() {
                       </div>
                       <div style={{ textAlign: "right", color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums" }}>
                         <strong style={{ display: "block", color: "var(--color-text-primary)", fontSize: "12px" }}>
-                          {startedAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          {startedAt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
                         </strong>
                         <span style={{ display: "block", marginTop: "5px", fontSize: "11px" }}>
                           {startedAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
@@ -886,17 +883,9 @@ export default function DashboardPage() {
                       <button
                         key={group.type}
                         type="button"
+                        className="personal-record-group-button"
+                        aria-pressed={group.type === activeRecordGroup?.type}
                         onClick={() => setSelectedRecordGroup(group.type)}
-                        style={{
-                          border: `1px solid ${group.type === activeRecordGroup?.type ? "var(--color-accent-primary)" : "var(--border-color)"}`,
-                          borderRadius: "999px",
-                          padding: "5px 9px",
-                          background: group.type === activeRecordGroup?.type ? "rgba(33, 230, 165, 0.10)" : "transparent",
-                          color: group.type === activeRecordGroup?.type ? "var(--color-accent-primary)" : "var(--color-text-secondary)",
-                          cursor: "pointer",
-                          fontSize: "11px",
-                          fontWeight: 750,
-                        }}
                       >
                         {group.label}
                       </button>

@@ -43,7 +43,7 @@ function normalizeSportCategory(sportStr: string, titleStr: string = ""): SportC
   const t = (titleStr || "").toLowerCase();
   if (s.includes("strength") || s.includes("gym") || s.includes("weights") || t.includes("strength") || t.includes("gym")) return "strength";
   if (s.includes("trail") || s.includes("hike") || s.includes("climb") || t.includes("trail") || t.includes("hike")) return "trail";
-  if (s.includes("ride") || s.includes("cycle") || s.includes("bike") || t.includes("ride") || t.includes("cycle")) return "cycle";
+  if (s.includes("ride") || s.includes("cycle") || s.includes("bike") || /\b(?:ride|cycling|cycle|bike)\b/.test(t)) return "cycle";
   if (s.includes("swim") || s.includes("pool") || t.includes("swim")) return "swim";
   if (s.includes("run") || s.includes("track") || t.includes("run")) return "run";
   return "other";

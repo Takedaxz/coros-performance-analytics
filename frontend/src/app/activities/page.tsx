@@ -3,9 +3,48 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
+import PageTitle from "@/components/PageTitle";
 import SingleSelect from "@/components/SingleSelect";
+import NumberStepper from "@/components/NumberStepper";
 import { getSportVisual, SportIcon } from "@/components/SportActivityIcon";
 import type { ActivitySummary } from "@/lib/types";
+
+type DatePeriod = "" | "day" | "week" | "month" | "year";
+type ActivitySort =
+  | "newest"
+  | "oldest"
+  | "duration_desc"
+  | "duration_asc"
+  | "load_desc"
+  | "load_asc"
+  | "distance_desc"
+  | "distance_asc";
+
+interface ActivityFilters {
+  period: DatePeriod;
+  periodValue: string;
+  weekday: string;
+  minDurationMinutes: string;
+  maxDurationMinutes: string;
+  minTrainingLoad: string;
+  maxTrainingLoad: string;
+  minDistanceKm: string;
+  maxDistanceKm: string;
+  sort: ActivitySort;
+}
+
+const DEFAULT_FILTERS: ActivityFilters = {
+  period: "",
+  periodValue: "",
+  weekday: "",
+  minDurationMinutes: "",
+  maxDurationMinutes: "",
+  minTrainingLoad: "",
+  maxTrainingLoad: "",
+  minDistanceKm: "",
+  maxDistanceKm: "",
+  sort: "newest",
+};
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -67,10 +106,24 @@ function getActivityInsight(activity: { sport: string; training_load_vendor?: nu
 export default function ActivitiesPage() {
   const [activities, setActivities] = useState<ActivitySummary[]>([]);
   const [sportFilter, setSportFilter] = useState<string>("");
+  const [filters, setFilters] = useState<ActivityFilters>(DEFAULT_FILTERS);
+  const [draftFilters, setDraftFilters] = useState<ActivityFilters>(DEFAULT_FILTERS);
   const [isLoading, setIsLoading] = useState(true);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(() => {
+    if (typeof window === "undefined") return 1;
+    const requestedPage = Number(new URLSearchParams(window.location.search).get("page"));
+    return Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  });
   const [totalCount, setTotalCount] = useState(0);
   const limit = 25;
+
+  const updatePage = (nextPage: number) => {
+    setPage(nextPage);
+    const url = new URL(window.location.href);
+    if (nextPage === 1) url.searchParams.delete("page");
+    else url.searchParams.set("page", String(nextPage));
+    window.history.replaceState(null, "", url);
+  };
 
   const fetchActivities = useCallback(async () => {
     setIsLoading(true);
@@ -79,6 +132,18 @@ export default function ActivitiesPage() {
       const offset = (page - 1) * limit;
       const params = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
       if (sportFilter) params.set("sport", sportFilter);
+      if (filters.period && filters.periodValue) {
+        params.set("period", filters.period);
+        params.set("period_value", filters.periodValue);
+      }
+      if (filters.weekday) params.set("weekday", filters.weekday);
+      if (filters.minDurationMinutes) params.set("min_duration_s", String(Number(filters.minDurationMinutes) * 60));
+      if (filters.maxDurationMinutes) params.set("max_duration_s", String(Number(filters.maxDurationMinutes) * 60));
+      if (filters.minTrainingLoad) params.set("min_training_load", filters.minTrainingLoad);
+      if (filters.maxTrainingLoad) params.set("max_training_load", filters.maxTrainingLoad);
+      if (filters.minDistanceKm) params.set("min_distance_m", String(Number(filters.minDistanceKm) * 1000));
+      if (filters.maxDistanceKm) params.set("max_distance_m", String(Number(filters.maxDistanceKm) * 1000));
+      params.set("sort", filters.sort);
       const res = await fetch(`${apiBase}/api/activities/?${params}`);
       if (res.ok) {
         const data = await res.json();
@@ -93,7 +158,7 @@ export default function ActivitiesPage() {
       setTotalCount(0);
     }
     setIsLoading(false);
-  }, [sportFilter, page, limit]);
+  }, [sportFilter, filters, page, limit]);
 
   useEffect(() => {
     fetchActivities();
@@ -104,20 +169,32 @@ export default function ActivitiesPage() {
   const totalTrainingLoad = activities.reduce((sum, act) => sum + (act.training_load_vendor || 0), 0);
   const totalCalories = activities.reduce((sum, act) => sum + (act.calories_kcal || 0), 0);
   const avgLoad = activities.length > 0 ? Math.round(totalTrainingLoad / activities.length) : 0;
+  const activeFilterCount = [
+    Boolean(filters.period && filters.periodValue),
+    Boolean(filters.weekday),
+    Boolean(filters.minDurationMinutes || filters.maxDurationMinutes),
+    Boolean(filters.minTrainingLoad || filters.maxTrainingLoad),
+    Boolean(filters.minDistanceKm || filters.maxDistanceKm),
+    filters.sort !== "newest",
+  ].filter(Boolean).length;
+
+  const setDraftFilter = (key: keyof ActivityFilters, value: string) => {
+    setDraftFilters((current) => ({ ...current, [key]: value }));
+  };
 
   return (
     <div className="app-layout">
       <Sidebar />
       <main className="main-content">
         <header className="page-header">
-          <h2 className="page-title">Activities Log</h2>
-          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+          <PageTitle>Activities Log</PageTitle>
+          <div className="activity-header-controls">
             <SingleSelect
               ariaLabel="Sport filter"
               value={sportFilter}
               onChange={(value) => {
                 setSportFilter(value);
-                setPage(1);
+                updatePage(1);
               }}
               id="sport-filter"
               options={[
@@ -125,6 +202,145 @@ export default function ActivitiesPage() {
                 ...Object.entries(SPORT_LABELS).map(([value, label]) => ({ value, label })),
               ]}
             />
+            <details className="activity-filter">
+              <summary className="activity-filter-trigger">
+                Filters
+                {activeFilterCount > 0 && <span className="activity-filter-count">{activeFilterCount}</span>}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="m7 10 5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </summary>
+              <form
+                className="activity-filter-menu"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setFilters({ ...draftFilters });
+                  updatePage(1);
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                <div className="activity-filter-grid">
+                  <div className="activity-filter-field">
+                    <span>Date range</span>
+                    <SingleSelect
+                      ariaLabel="Date range"
+                      value={draftFilters.period}
+                      onChange={(value) => {
+                        setDraftFilter("period", value as DatePeriod);
+                        setDraftFilter("periodValue", "");
+                      }}
+                      options={[
+                        { value: "", label: "All dates" },
+                        { value: "day", label: "Day" },
+                        { value: "week", label: "Week" },
+                        { value: "month", label: "Month" },
+                        { value: "year", label: "Year" },
+                      ]}
+                    />
+                  </div>
+
+                  <label className="activity-filter-field">
+                    <span>{draftFilters.period ? `Choose ${draftFilters.period}` : "Date"}</span>
+                    {draftFilters.period === "year" ? (
+                      <input
+                        type="number"
+                        min="2000"
+                        max="2100"
+                        required
+                        placeholder="2026"
+                        value={draftFilters.periodValue}
+                        onChange={(event) => setDraftFilter("periodValue", event.target.value)}
+                      />
+                    ) : (
+                      <input
+                        type={draftFilters.period || "date"}
+                        required={Boolean(draftFilters.period)}
+                        disabled={!draftFilters.period}
+                        value={draftFilters.periodValue}
+                        onChange={(event) => setDraftFilter("periodValue", event.target.value)}
+                      />
+                    )}
+                  </label>
+
+                  <div className="activity-filter-field">
+                    <span>Day of week</span>
+                    <SingleSelect
+                      ariaLabel="Day of week"
+                      value={draftFilters.weekday}
+                      onChange={(value) => setDraftFilter("weekday", value)}
+                      options={[
+                        { value: "", label: "Any day" },
+                        ...["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day, index) => ({
+                          value: String(index + 1),
+                          label: day,
+                        })),
+                      ]}
+                    />
+                  </div>
+
+                  <div className="activity-filter-field">
+                    <span>Sort by</span>
+                    <SingleSelect
+                      ariaLabel="Sort by"
+                      value={draftFilters.sort}
+                      onChange={(value) => setDraftFilter("sort", value as ActivitySort)}
+                      options={[
+                        { value: "newest", label: "Newest first" },
+                        { value: "oldest", label: "Oldest first" },
+                        { value: "duration_desc", label: "Longest duration" },
+                        { value: "duration_asc", label: "Shortest duration" },
+                        { value: "load_desc", label: "Highest training load" },
+                        { value: "load_asc", label: "Lowest training load" },
+                        { value: "distance_desc", label: "Longest distance" },
+                        { value: "distance_asc", label: "Shortest distance" },
+                      ]}
+                    />
+                  </div>
+
+                  {[
+                    ["Duration (min)", "minDurationMinutes", "maxDurationMinutes"],
+                    ["Training load", "minTrainingLoad", "maxTrainingLoad"],
+                    ["Distance (km)", "minDistanceKm", "maxDistanceKm"],
+                  ].map(([label, minimum, maximum]) => (
+                    <fieldset className="activity-filter-field activity-filter-range-field" key={label}>
+                      <legend>{label}</legend>
+                      <div className="activity-filter-range">
+                        <NumberStepper
+                          ariaLabel={`Minimum ${label}`}
+                          placeholder="Min"
+                          step="any"
+                          value={draftFilters[minimum as keyof ActivityFilters]}
+                          onChange={(value) => setDraftFilter(minimum as keyof ActivityFilters, value)}
+                        />
+                        <span>to</span>
+                        <NumberStepper
+                          ariaLabel={`Maximum ${label}`}
+                          placeholder="Max"
+                          step="any"
+                          value={draftFilters[maximum as keyof ActivityFilters]}
+                          onChange={(value) => setDraftFilter(maximum as keyof ActivityFilters, value)}
+                        />
+                      </div>
+                    </fieldset>
+                  ))}
+                </div>
+                <div className="activity-filter-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={(event) => {
+                      setDraftFilters(DEFAULT_FILTERS);
+                      setFilters(DEFAULT_FILTERS);
+                      updatePage(1);
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
+                  >
+                    Clear
+                  </button>
+                  <button type="submit" className="btn btn-primary btn-sm">Apply filters</button>
+                </div>
+              </form>
+            </details>
           </div>
         </header>
 
@@ -237,7 +453,7 @@ export default function ActivitiesPage() {
                         </div>
                         <div style={{ textAlign: "right", color: "var(--color-text-secondary)", fontSize: "11px", fontVariantNumeric: "tabular-nums" }}>
                           <strong style={{ display: "block", color: "var(--color-text-primary)", fontSize: "12px" }}>
-                            {startedAt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            {startedAt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
                           </strong>
                           <span style={{ display: "block" }}>
                             {startedAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
@@ -257,14 +473,14 @@ export default function ActivitiesPage() {
                       <button
                         className="btn btn-secondary btn-sm"
                         disabled={page === 1}
-                        onClick={() => setPage(p => p - 1)}
+                        onClick={() => updatePage(page - 1)}
                       >
                         Previous
                       </button>
                       <button
                         className="btn btn-secondary btn-sm"
                         disabled={page >= Math.ceil(totalCount / limit)}
-                        onClick={() => setPage(p => p + 1)}
+                        onClick={() => updatePage(page + 1)}
                       >
                         Next
                       </button>

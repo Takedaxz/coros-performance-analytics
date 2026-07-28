@@ -408,22 +408,23 @@ async def build_plan_context(days_back: int = 7, days_forward: int = 14) -> str:
 
     for ev in events:
         event_date = datetime.date.fromisoformat(ev["date"])
+        date_label = f"{ev['date']} ({event_date.strftime('%A')})"
         if event_date < today:
             status = "Past"
         elif event_date == today:
             status = "TODAY"
         else:
             status = "Upcoming"
-        lines.append(f"| {ev['date']} | {ev['summary']} | {status} |")
-        
+        lines.append(f"| {date_label} | {ev['summary']} | {status} |")
+
         if ev.get("description"):
-            events_with_details.append((ev, status))
-            
+            events_with_details.append((ev, date_label, status))
+
     if events_with_details:
         lines.append("")
         lines.append("#### Session Details")
-        for ev, status in events_with_details:
-            lines.append(f"**{ev['date']} - {ev['summary']} ({status})**")
+        for ev, date_label, status in events_with_details:
+            lines.append(f"**{date_label} - {ev['summary']} ({status})**")
             for d in ev["description"].splitlines():
                 lines.append(f"> {d}")
             lines.append("")

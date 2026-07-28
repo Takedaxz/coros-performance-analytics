@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Sidebar from "@/components/Sidebar";
+import PageTitle from "@/components/PageTitle";
 import { getSportVisual } from "@/components/SportActivityIcon";
 
 interface TrainingEvent {
@@ -111,7 +112,7 @@ export default function TrainingPlanPage() {
       <Sidebar />
       <main className="main-content">
         <header className="page-header">
-          <h2 className="page-title">Training Calendar</h2>
+          <PageTitle>Training Calendar</PageTitle>
           <div className="plan-calendar-controls">
             <button className="btn btn-secondary btn-sm" type="button" onClick={returnToToday}>Today</button>
             <button className="btn btn-secondary btn-sm" type="button" onClick={() => moveMonth(-1)} aria-label="Previous month">‹</button>
