@@ -46,7 +46,7 @@ export interface FitnessSummary {
   vo2max_30d_avg?: number | null;
   ftp?: number;
   running_fitness?: number;
-  biological_age?: number;
+  cardio_fitness_age?: number;
   date?: string;
 }
 

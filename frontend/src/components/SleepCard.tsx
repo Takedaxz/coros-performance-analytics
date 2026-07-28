@@ -65,6 +65,7 @@ export default function SleepCard({
 
   return (
     <div
+      className="hover-card"
       style={{
         background: "var(--color-bg-card)",
         border: "1px solid var(--border-color)",

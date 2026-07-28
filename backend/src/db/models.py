@@ -7,6 +7,7 @@ overwritten by app-derived estimates.
 
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Literal
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -87,6 +88,7 @@ class User(Base):
     last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     nickname: Mapped[str | None] = mapped_column(String(100), nullable=True)
     birthdate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    sex: Mapped[Literal["female", "male"] | None] = mapped_column(String(10), nullable=True)
     height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     body_fat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)

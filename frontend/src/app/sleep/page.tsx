@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import Sidebar from "@/components/Sidebar";
 import MetricCard from "@/components/MetricCard";
+import SingleSelect from "@/components/SingleSelect";
 import type { HealthDay, SleepSummary } from "@/lib/types";
 
 interface SleepTooltipEntry {
@@ -187,27 +188,13 @@ export default function SleepPage() {
       <main className="main-content">
         <header className="page-header">
           <h2 className="page-title">Sleep & Autonomic Recovery</h2>
-          <select
-            style={{
-              background: "var(--color-surface-secondary)",
-              color: "var(--color-text-primary)",
-              border: "1px solid var(--border-color)",
-              borderRadius: "var(--radius-md)",
-              padding: "6px 12px",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
+          <SingleSelect
+            ariaLabel="Sleep history period"
             id="period-selector"
-          >
-            <option value={7}>7 days</option>
-            <option value={14}>14 days</option>
-            <option value={30}>30 days</option>
-            <option value={60}>60 days</option>
-            <option value={90}>90 days</option>
-          </select>
+            value={String(days)}
+            options={[7, 14, 30, 60, 90].map((period) => ({ value: String(period), label: `${period} days` }))}
+            onChange={(value) => setDays(Number(value))}
+          />
         </header>
 
         <div className="page-body">

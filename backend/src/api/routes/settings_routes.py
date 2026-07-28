@@ -1,6 +1,7 @@
 """Settings routes: user preferences, API config, data management."""
 
 import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -79,6 +80,7 @@ class UserProfile(BaseModel):
     last_name: str | None = None
     nickname: str | None = None
     birthdate: str | None = None
+    sex: Literal["female", "male"] | None = None
     height_cm: float | None = None
     weight_kg: float | None = None
     body_fat_pct: float | None = None
@@ -159,6 +161,7 @@ async def get_profile(db: AsyncSession = Depends(get_db_session)) -> UserProfile
         last_name=user.last_name,
         nickname=user.nickname,
         birthdate=user.birthdate.isoformat() if user.birthdate else None,
+        sex=user.sex,
         height_cm=user.height_cm,
         weight_kg=user.weight_kg,
         body_fat_pct=user.body_fat_pct,
@@ -185,6 +188,7 @@ async def update_profile(
         if payload.birthdate
         else None
     )
+    user.sex = payload.sex
     user.height_cm = payload.height_cm
     user.weight_kg = payload.weight_kg
     user.body_fat_pct = payload.body_fat_pct
@@ -199,6 +203,7 @@ async def update_profile(
         last_name=user.last_name,
         nickname=user.nickname,
         birthdate=user.birthdate.isoformat() if user.birthdate else None,
+        sex=user.sex,
         height_cm=user.height_cm,
         weight_kg=user.weight_kg,
         body_fat_pct=user.body_fat_pct,

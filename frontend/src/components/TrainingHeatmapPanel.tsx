@@ -197,6 +197,7 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
 
   return (
     <div
+      className="hover-card"
       style={{
         background: "var(--color-bg-card)",
         border: "1px solid var(--border-color)",
@@ -225,7 +226,7 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
       </div>
 
       {/* Heatmap 7x52 Grid Container */}
-      <div style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "8px" }}>
+      <div style={{ display: "flex", gap: "6px", overflowX: "auto", padding: "8px 0" }}>
         {/* Weekday Labels Column */}
         <div style={{ display: "flex", flexDirection: "column", gap: "3px", justifyContent: "space-around", fontSize: "10px", fontWeight: 700, color: "var(--color-text-muted)", width: "16px", flexShrink: 0 }}>
           {WEEKDAYS.map((w, idx) => (

@@ -1,13 +1,15 @@
 """Dashboard routes: aggregated data for the home dashboard."""
 
 from datetime import date, timedelta
+from statistics import fmean, median
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import cast, String, func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.engine import get_db_session
 from src.db.models import Activity, DailyHealth, FitnessEstimate, SleepSession, User
+from src.metrics.derived import compute_cardio_fitness_age
 
 router = APIRouter()
 
@@ -56,11 +58,21 @@ async def dashboard_summary(
         select(FitnessEstimate).order_by(FitnessEstimate.date.desc()).limit(1)
     )
     latest_fitness = fitness_result.scalar_one_or_none()
-    vo2max_30d_avg = await db.scalar(
-        select(func.avg(FitnessEstimate.vo2max_vendor)).where(
-            FitnessEstimate.date >= date.today() - timedelta(days=30),
-            FitnessEstimate.vo2max_vendor.is_not(None),
+    vo2max_30d_values = list(
+        await db.scalars(
+            select(FitnessEstimate.vo2max_vendor).where(
+                FitnessEstimate.date >= date.today() - timedelta(days=30),
+                FitnessEstimate.vo2max_vendor.is_not(None),
+            )
         )
+    )
+    vo2max_30d_avg = fmean(vo2max_30d_values) if vo2max_30d_values else None
+    user = await db.scalar(select(User).limit(1))
+    sex = user.sex if user and user.sex in {"female", "male"} else None
+    cardio_fitness_age = (
+        compute_cardio_fitness_age(median(vo2max_30d_values), sex)
+        if vo2max_30d_values and sex in {"female", "male"}
+        else None
     )
 
     return {
@@ -124,7 +136,7 @@ async def dashboard_summary(
             "ftp": latest_fitness.ftp_vendor if latest_fitness else None,
             "running_fitness": latest_fitness.running_fitness_score if latest_fitness else None,
             "threshold_pace": latest_fitness.lactate_threshold_pace_s_per_km if latest_fitness else None,
-            "biological_age": latest_fitness.biological_age_app if latest_fitness else None,
+            "cardio_fitness_age": cardio_fitness_age,
             "date": latest_fitness.date.isoformat() if latest_fitness else None,
         },
     }
@@ -173,17 +185,33 @@ async def fitness_trend(
         .order_by(FitnessEstimate.date.asc())
     )
     rows = result.scalars().all()
-    return [
-        {
-            "date": str(r.date),
-            "vo2max": r.vo2max_vendor,
-            "running_fitness": r.running_fitness_score,
-            "ftp": r.ftp_vendor,
-            "threshold_pace": r.lactate_threshold_pace_s_per_km,
-            "biological_age": r.biological_age_app,
-        }
-        for r in rows
-    ]
+    user = await db.scalar(select(User).limit(1))
+    sex = user.sex if user and user.sex in {"female", "male"} else None
+    response: list[dict[str, object]] = []
+    for row in rows:
+        # ponytail: at most 365 rows; replace with a window query only if this endpoint grows.
+        recent_vo2max = [
+            item.vo2max_vendor
+            for item in rows
+            if row.date - timedelta(days=29) <= item.date <= row.date
+            and item.vo2max_vendor is not None
+        ]
+        cardio_fitness_age = (
+            compute_cardio_fitness_age(median(recent_vo2max), sex)
+            if recent_vo2max and sex in {"female", "male"}
+            else None
+        )
+        response.append(
+            {
+                "date": str(row.date),
+                "vo2max": row.vo2max_vendor,
+                "running_fitness": row.running_fitness_score,
+                "ftp": row.ftp_vendor,
+                "threshold_pace": row.lactate_threshold_pace_s_per_km,
+                "cardio_fitness_age": cardio_fitness_age,
+            }
+        )
+    return response
 
 
 @router.get("/running-fitness")

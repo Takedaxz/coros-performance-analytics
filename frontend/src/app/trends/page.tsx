@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
+import SingleSelect from "@/components/SingleSelect";
 import {
   Area,
   AreaChart,
@@ -158,14 +159,12 @@ function DistributionPanel({
           <span className="card-title" style={{ display: "block", marginTop: "4px" }}>{title} <span style={{ color: "var(--color-text-muted)" }}>(4 Weeks)</span></span>
           {coverage && <span style={{ display: "block", marginTop: "5px", fontSize: "12px", color: "var(--color-text-secondary)" }}>{coverage}</span>}
         </div>
-        <select
-          aria-label={`${eyebrow} metric`}
+        <SingleSelect
+          ariaLabel={`${eyebrow} metric`}
           value={value}
-          onChange={(event) => onChange(event.target.value)}
-          style={{ padding: "7px 10px", color: "var(--color-text-primary)", background: "var(--color-surface-secondary)", border: "1px solid var(--border-color)", borderRadius: "999px", fontSize: "12px", fontWeight: 700 }}
-        >
-          {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
+          onChange={onChange}
+          options={options}
+        />
       </div>
 
       {segments.length === 0 ? (
@@ -301,27 +300,13 @@ export default function TrendsPage() {
       <main className="main-content">
         <header className="page-header">
           <h2 className="page-title">Training Trends</h2>
-          <select
-            style={{
-              background: "var(--color-surface-secondary)",
-              color: "var(--color-text-primary)",
-              border: "1px solid var(--border-color)",
-              borderRadius: "var(--radius-md)",
-              padding: "6px 12px",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-            value={visibleTrendDays}
-            onChange={(event) => setVisibleTrendDays(Number(event.target.value))}
+          <SingleSelect
+            ariaLabel="Training trend period"
+            value={String(visibleTrendDays)}
+            onChange={(value) => setVisibleTrendDays(Number(value))}
             id="period-selector"
-          >
-            <option value={7}>7 days</option>
-            <option value={14}>14 days</option>
-            <option value={30}>30 days</option>
-            <option value={60}>60 days</option>
-            <option value={90}>90 days</option>
-          </select>
+            options={[7, 14, 30, 60, 90].map((period) => ({ value: String(period), label: `${period} days` }))}
+          />
         </header>
         <div className="page-body">
           {/* Training Load History */}

@@ -11,7 +11,7 @@ interface FitnessTrendDay {
   vo2max: number | null;
   running_fitness: number | null;
   threshold_pace: number | null;
-  biological_age: number | null;
+  cardio_fitness_age: number | null;
 }
 
 interface RunningFitness {
@@ -74,7 +74,9 @@ export default function FitnessPage() {
   const latestVo2 = [...data].reverse().find((d) => d.vo2max != null)?.vo2max || 54.2;
   const latestFitness = [...data].reverse().find((d) => d.running_fitness != null)?.running_fitness || 81;
   const latestThreshold = [...data].reverse().find((d) => d.threshold_pace != null)?.threshold_pace || null;
-  const latestBioAge = [...data].reverse().find((d) => d.biological_age != null)?.biological_age || 18;
+  const latestCardioFitnessAge = [...data]
+    .reverse()
+    .find((day) => day.cardio_fitness_age != null)?.cardio_fitness_age ?? null;
   const vo2Readings = data.filter((d): d is FitnessTrendDay & { vo2max: number } => d.vo2max !== null);
   const vo2Change = vo2Readings.length > 1 ? latestVo2 - vo2Readings[0].vo2max : null;
 
@@ -143,11 +145,21 @@ export default function FitnessPage() {
               )}
             />
             <MetricCard
-              label="Biological Fitness Age"
-              value={latestBioAge || "--"}
-              unit="years"
+              label="Cardio Fitness Age"
+              value={
+                latestCardioFitnessAge === null
+                  ? "--"
+                  : latestCardioFitnessAge <= 18
+                    ? "<18"
+                    : latestCardioFitnessAge
+              }
+              unit={latestCardioFitnessAge === null ? undefined : "years"}
               accentColor="var(--color-accent-exertion)"
-              subtext="Cardiovascular age"
+              subtext={
+                latestCardioFitnessAge === null
+                  ? "Select sex in Settings"
+                  : "30-day VO₂ max vs HUNT3"
+              }
             />
           </div>
 

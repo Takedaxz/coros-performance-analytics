@@ -140,7 +140,7 @@ export default function TrainingPlanPage() {
                   ))}
                 </div>
               </section>
-              <aside className="plan-day-detail">
+              <aside className="plan-day-detail hover-card">
                 <div className="skeleton plan-calendar-skeleton-label" />
                 <div className="skeleton plan-calendar-skeleton-title" />
                 <div className="skeleton plan-calendar-skeleton-line" />

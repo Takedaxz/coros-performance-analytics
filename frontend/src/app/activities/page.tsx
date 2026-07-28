@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
+import SingleSelect from "@/components/SingleSelect";
 import { getSportVisual, SportIcon } from "@/components/SportActivityIcon";
 import type { ActivitySummary } from "@/lib/types";
 
@@ -111,29 +112,19 @@ export default function ActivitiesPage() {
         <header className="page-header">
           <h2 className="page-title">Activities Log</h2>
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-            <select
-              style={{
-                background: "var(--color-surface-secondary)",
-                color: "var(--color-text-primary)",
-                border: "1px solid var(--border-color)",
-                borderRadius: "var(--radius-md)",
-                padding: "6px 12px",
-                fontSize: "13px",
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
+            <SingleSelect
+              ariaLabel="Sport filter"
               value={sportFilter}
-              onChange={(e) => {
-                setSportFilter(e.target.value);
+              onChange={(value) => {
+                setSportFilter(value);
                 setPage(1);
               }}
               id="sport-filter"
-            >
-              <option value="">All Sports</option>
-              {Object.entries(SPORT_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
+              options={[
+                { value: "", label: "All Sports" },
+                ...Object.entries(SPORT_LABELS).map(([value, label]) => ({ value, label })),
+              ]}
+            />
           </div>
         </header>
 

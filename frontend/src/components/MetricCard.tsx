@@ -47,7 +47,7 @@ export default function MetricCard({
 
   return (
     <div
-      className="metric-card"
+      className="metric-card hover-card"
       style={{
         background: "var(--color-bg-card)",
         border: "1px solid var(--border-color)",

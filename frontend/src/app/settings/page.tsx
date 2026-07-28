@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
+import SingleSelect from "@/components/SingleSelect";
 import type { SyncStatus } from "@/lib/types";
 
 interface UserGoal {
@@ -19,6 +20,7 @@ interface UserProfile {
   last_name: string;
   nickname: string;
   birthdate: string;
+  sex: string;
   height_cm: string;
   weight_kg: string;
   body_fat_pct: string;
@@ -39,6 +41,7 @@ const EMPTY_PROFILE: UserProfile = {
   last_name: "",
   nickname: "",
   birthdate: "",
+  sex: "",
   height_cm: "",
   weight_kg: "",
   body_fat_pct: "",
@@ -136,6 +139,7 @@ export default function SettingsPage() {
             last_name: data.last_name ?? "",
             nickname: data.nickname ?? "",
             birthdate: data.birthdate ?? "",
+            sex: data.sex ?? "",
             height_cm: data.height_cm?.toString() ?? "",
             weight_kg: data.weight_kg?.toString() ?? "",
             body_fat_pct: data.body_fat_pct?.toString() ?? "",
@@ -365,6 +369,7 @@ export default function SettingsPage() {
           last_name: profile.last_name || null,
           nickname: profile.nickname || null,
           birthdate: profile.birthdate || null,
+          sex: profile.sex || null,
           height_cm: profile.height_cm ? parseFloat(profile.height_cm) : null,
           weight_kg: profile.weight_kg ? parseFloat(profile.weight_kg) : null,
           body_fat_pct: profile.body_fat_pct ? parseFloat(profile.body_fat_pct) : null,
@@ -390,7 +395,7 @@ export default function SettingsPage() {
         </header>
         <div className="page-body settings-page">
           <div className="settings-sections">
-              <section className="settings-section" id="settings-connections">
+              <section className="settings-section hover-card" id="settings-connections">
                 <div className="settings-section-heading">
                   <div>
                     <h2>Connections</h2>
@@ -487,7 +492,7 @@ export default function SettingsPage() {
                 </div>
               </section>
 
-              <section className="settings-section" id="settings-profile">
+              <section className="settings-section hover-card" id="settings-profile">
                 <div className="settings-section-heading">
                   <div>
                     <h2>Athlete profile</h2>
@@ -514,6 +519,20 @@ export default function SettingsPage() {
                       <input id="profile-birthdate" type="date" value={profile.birthdate} onChange={(e) => setProfile((p) => ({ ...p, birthdate: e.target.value }))} />
                     </div>
                     <div className="settings-field">
+                      <label id="profile-sex-label">Sex</label>
+                      <SingleSelect
+                        ariaLabel="Sex"
+                        id="profile-sex"
+                        value={profile.sex}
+                        options={[
+                          { value: "", label: "Select sex" },
+                          { value: "female", label: "Female" },
+                          { value: "male", label: "Male" },
+                        ]}
+                        onChange={(sex) => setProfile((profile) => ({ ...profile, sex }))}
+                      />
+                    </div>
+                    <div className="settings-field">
                       <label htmlFor="profile-height">Height <span>cm</span></label>
                       <input id="profile-height" type="number" min="50" max="300" placeholder="180" value={profile.height_cm} onChange={(e) => setProfile((p) => ({ ...p, height_cm: e.target.value }))} />
                     </div>
@@ -536,7 +555,7 @@ export default function SettingsPage() {
                 </form>
               </section>
 
-              <section className="settings-section" id="settings-coaching">
+              <section className="settings-section hover-card" id="settings-coaching">
                 <div className="settings-section-heading">
                   <div>
                     <h2>Coaching context</h2>
@@ -695,7 +714,7 @@ export default function SettingsPage() {
                 </div>
               </section>
 
-              <section className="settings-section" id="settings-data">
+              <section className="settings-section hover-card" id="settings-data">
                 <div className="settings-section-heading">
                   <div>
                     <h2>Data & storage</h2>

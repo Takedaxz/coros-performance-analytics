@@ -365,6 +365,7 @@ export default function DashboardPage() {
           <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 360px) 1fr", gap: "var(--space-5)", marginBottom: "var(--space-6)" }}>
             {/* Left Panel: Recovery and Strain Rings + 2x2 Bento Grid */}
             <div
+              className="hover-card"
               style={{
                 background: "var(--color-bg-card)",
                 border: "1px solid var(--border-color)",
@@ -418,6 +419,7 @@ export default function DashboardPage() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                 {/* Load */}
                 <div
+                  className="hover-card"
                   style={{
                     background: "radial-gradient(circle at top left, rgba(240, 211, 72, 0.22) 0%, rgba(12, 17, 20, 0.95) 75%)",
                     border: "1px solid rgba(240, 211, 72, 0.25)",
@@ -452,6 +454,7 @@ export default function DashboardPage() {
 
                 {/* Resting HR */}
                 <div
+                  className="hover-card"
                   style={{
                     background: "radial-gradient(circle at top left, rgba(255, 77, 98, 0.22) 0%, rgba(12, 17, 20, 0.95) 75%)",
                     border: "1px solid rgba(255, 77, 98, 0.25)",
@@ -488,6 +491,7 @@ export default function DashboardPage() {
 
                 {/* Steps */}
                 <div
+                  className="hover-card"
                   style={{
                     background: "radial-gradient(circle at top left, rgba(33, 230, 165, 0.22) 0%, rgba(12, 17, 20, 0.95) 75%)",
                     border: "1px solid rgba(33, 230, 165, 0.25)",
@@ -527,6 +531,7 @@ export default function DashboardPage() {
 
                 {/* Calories */}
                 <div
+                  className="hover-card"
                   style={{
                     background: "radial-gradient(circle at top left, rgba(45, 155, 240, 0.22) 0%, rgba(12, 17, 20, 0.95) 75%)",
                     border: "1px solid rgba(45, 155, 240, 0.25)",
@@ -592,6 +597,7 @@ export default function DashboardPage() {
 
               {/* Bottom: Weekly Activity Bar Chart */}
               <div
+                className="hover-card"
                 style={{
                   background: "var(--color-bg-card)",
                   border: "1px solid var(--border-color)",
@@ -667,14 +673,16 @@ export default function DashboardPage() {
                         top: "calc(100% + 8px)",
                         right: 0,
                         width: 225,
-                        padding: "10px",
+                        display: "grid",
+                        gap: "4px",
+                        padding: "8px",
                         background: "#151c20",
                         border: "1px solid var(--border-color)",
                         borderRadius: "18px",
                         boxShadow: "var(--shadow-md)",
                       }}
                     >
-                      <div style={{ padding: "2px 6px 8px", color: "var(--color-text-muted)", fontSize: "10px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                      <div style={{ padding: "4px 8px 6px", color: "var(--color-text-muted)", fontSize: "10px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
                         Metrics
                       </div>
                       {WEEKLY_ACTIVITY_METRICS.map((metric) => {
@@ -683,20 +691,22 @@ export default function DashboardPage() {
                           <button
                             key={metric}
                             type="button"
+                            className="dropdown-option"
                             aria-pressed={isSelected}
+                            aria-disabled={isSelected && selectedMetrics.length === 1}
                             onClick={() => toggleWeeklyMetric(metric)}
                             style={{
                               width: "100%",
                               display: "flex",
                               alignItems: "center",
                               gap: "10px",
-                              padding: "10px",
+                              minHeight: "38px",
+                              padding: "8px 10px",
                               color: "var(--color-text-primary)",
-                              background: isSelected ? "rgba(255, 255, 255, 0.06)" : "transparent",
-                              border: 0,
-                              borderRadius: "12px",
+                              borderRadius: "10px",
                               fontSize: "12px",
                               fontWeight: 650,
+                              lineHeight: 1.2,
                               textAlign: "left",
                               cursor: isSelected && selectedMetrics.length === 1 ? "not-allowed" : "pointer",
                             }}
@@ -711,10 +721,13 @@ export default function DashboardPage() {
                                 borderRadius: 8,
                                 color: "#08110e",
                                 background: isSelected ? WEEKLY_ACTIVITY_CONFIG[metric].color : "rgba(255, 255, 255, 0.08)",
-                                fontSize: "11px",
                               }}
                             >
-                              {isSelected ? "✓" : ""}
+                              {isSelected && (
+                                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                                  <path d="M2 5.2 4.1 7.3 8.2 2.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              )}
                             </span>
                             {WEEKLY_ACTIVITY_CONFIG[metric].label}
                           </button>

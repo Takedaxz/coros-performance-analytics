@@ -31,7 +31,7 @@ from src.db.models import (
 )
 from src.sync.api_client import CorosApiClient, CorosApiClientError
 from src.metrics.baselines import compute_rolling_baseline, compute_zscore
-from src.metrics.derived import compute_daily_strain, compute_recovery_score, compute_biological_age
+from src.metrics.derived import compute_daily_strain, compute_recovery_score
 
 logger = logging.getLogger(__name__)
 
@@ -663,9 +663,6 @@ async def run_sync(
         raw_dashboard = await client.fetch_dashboard()
         raw_hrv = raw_dashboard.get("summaryInfo", {}).get("sleepHrvData", {}).get("sleepHrvList", [])
 
-        health_count = await _upsert_daily_health(db, user_id, raw_health, raw_hrv)
-        total_upserted += health_count
-
         # --- Steps and active calories via COROS MCP (no Mobile API) ---
         try:
             from src.mcp.daily_health_client import fetch_daily_health_via_mcp
@@ -677,6 +674,9 @@ async def run_sync(
             logger.info("coros_mcp_daily_health: skipped — %s", exc)
         except Exception as exc:
             logger.warning("coros_mcp_daily_health: unexpected error — %s", exc)
+
+        health_count = await _upsert_daily_health(db, user_id, raw_health, raw_hrv)
+        total_upserted += health_count
 
         recovery_count = await _upsert_coros_recovery(db, user_id, raw_dashboard)
         total_upserted += recovery_count
@@ -964,7 +964,11 @@ async def _upsert_daily_health(
         )
         day_activities = activities_res.scalars().all()
         daily_load = sum(a.training_load_vendor or 0 for a in day_activities)
-        strain = compute_daily_strain(daily_load)
+        strain = compute_daily_strain(
+            daily_load,
+            steps=health.steps if health else None,
+            active_calories=health.active_calories_kcal if health else None,
+        )
 
         if health is None:
             health = DailyHealth(
@@ -1073,14 +1077,6 @@ async def _upsert_fitness(db: AsyncSession, user_id: str, analyse_data: list[dic
         )
         fitness = existing.scalar_one_or_none()
 
-        # Compute biological age if birthdate is known
-        bio_age = None
-        user_res = await db.execute(select(User).where(User.id == user_id))
-        user = user_res.scalar_one_or_none()
-        if user and user.birthdate and vo2max:
-            age = (date_type.today() - user.birthdate).days // 365
-            bio_age = compute_biological_age(vo2max, age)
-
         if fitness is None:
             fitness = FitnessEstimate(
                 user_id=user_id,
@@ -1089,7 +1085,6 @@ async def _upsert_fitness(db: AsyncSession, user_id: str, analyse_data: list[dic
                 lactate_threshold_hr=item.get("lthr"),
                 lactate_threshold_pace_s_per_km=item.get("ltsp"),
                 running_fitness_score=stamina,
-                biological_age_app=bio_age,
                 source_type=SourceType.API_OFFICIAL,
             )
             db.add(fitness)
@@ -1099,7 +1094,6 @@ async def _upsert_fitness(db: AsyncSession, user_id: str, analyse_data: list[dic
             fitness.lactate_threshold_hr = item.get("lthr") or fitness.lactate_threshold_hr
             fitness.lactate_threshold_pace_s_per_km = item.get("ltsp") or fitness.lactate_threshold_pace_s_per_km
             fitness.running_fitness_score = stamina or fitness.running_fitness_score
-            fitness.biological_age_app = bio_age or fitness.biological_age_app
 
     await db.flush()
     return count

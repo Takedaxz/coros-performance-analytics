@@ -6,6 +6,8 @@ These are app-derived metrics, clearly distinct from vendor metrics.
 
 import math
 from dataclasses import dataclass
+from itertools import pairwise
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -188,16 +190,17 @@ def compute_hr_zone_distribution(
     return {zone: round((count / total) * 100, 1) for zone, count in zones.items()}
 
 
-def compute_daily_strain(daily_load: float) -> float:
-    """Compute daily cardiovascular strain on a 0-21 logarithmic scale.
-    
-    Formula: Strain = 21 * (1 - e^(-0.0025 * load))
-    This maps a training load of 0 to 0, 100 to ~4.6, 500 to ~15, and 1000 to ~19.3.
-    """
-    if daily_load <= 0:
-        return 0.0
-    strain = 21.0 * (1.0 - math.exp(-0.0025 * daily_load))
-    return round(max(0.0, min(21.0, strain)), 1)
+def compute_daily_strain(
+    daily_load: float,
+    steps: int | None = None,
+    active_calories: int | None = None,
+) -> float:
+    """Compute 0-21 daily strain, dominated by training load with a small movement bonus."""
+    training_strain = 20.0 * (1.0 - math.exp(-0.0013 * max(0.0, daily_load)))
+    steps_signal = 1.0 - math.exp(-max(0, steps or 0) / 12_000)
+    calories_signal = 1.0 - math.exp(-max(0, active_calories or 0) / 1_000)
+    movement_strain = max(steps_signal, calories_signal)
+    return round(min(21.0, training_strain + movement_strain), 1)
 
 
 def compute_recovery_score(hrv_zscore: float | None, rhr_zscore: float | None) -> float | None:
@@ -220,19 +223,31 @@ def compute_recovery_score(hrv_zscore: float | None, rhr_zscore: float | None) -
     return round(max(0.0, min(100.0, avg_score)), 1)
 
 
-def compute_biological_age(vo2max: float, actual_age: int) -> int:
-    """Estimate biological age using VO2 Max and chronological age.
-    
-    Uses a simplified unisex baseline: Expected VO2 = 55 - (0.45 * Age)
-    """
-    if actual_age <= 0 or vo2max <= 0:
-        return actual_age
-        
-    expected_vo2 = 55.0 - (0.45 * actual_age)
-    vo2_difference = expected_vo2 - vo2max
-    
-    # 1.5 years penalty/reward for every 1 point difference in VO2 Max
-    bio_age = actual_age + (vo2_difference * 1.5)
-    
-    # Bound to somewhat realistic numbers (not less than 18, not more than 100)
-    return int(max(18, min(100, round(bio_age))))
+_HUNT_MEAN_VO2MAX: dict[Literal["female", "male"], tuple[tuple[float, float], ...]] = {
+    "female": ((24.5, 43), (34.5, 40), (44.5, 38), (54.5, 34), (64.5, 31), (74.5, 27)),
+    "male": ((24.5, 54), (34.5, 49), (44.5, 47), (54.5, 42), (64.5, 39), (74.5, 34)),
+}
+
+
+def compute_cardio_fitness_age(
+    vo2max: float,
+    sex: Literal["female", "male"],
+) -> int:
+    """Map VO2 max to the matching age in the sex-specific HUNT3 reference population."""
+    reference = _HUNT_MEAN_VO2MAX[sex]
+    younger, older = next(
+        (
+            (younger, older)
+            for younger, older in pairwise(reference)
+            if vo2max >= older[1]
+        ),
+        (reference[-2], reference[-1]),
+    )
+    younger_age, younger_vo2 = younger
+    older_age, older_vo2 = older
+    estimated_age = younger_age + (
+        (younger_vo2 - vo2max)
+        / (younger_vo2 - older_vo2)
+        * (older_age - younger_age)
+    )
+    return math.floor(max(18.0, min(90.0, estimated_age)) + 0.5)

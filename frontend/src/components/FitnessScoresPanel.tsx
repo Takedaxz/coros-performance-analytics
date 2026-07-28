@@ -35,7 +35,7 @@ export default function FitnessScoresPanel({ fitness }: FitnessScoresPanelProps)
 
   return (
     <div
-      className="fitness-scores-panel"
+      className="fitness-scores-panel hover-card"
       style={{
         background: "var(--color-bg-card)",
         border: "1px solid var(--border-color)",
