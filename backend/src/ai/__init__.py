@@ -1,12 +1,14 @@
 """AI package — dynamic unified dispatch layer.
 
-Import public functions from here; the active backend (OpenAI-compatible / OKMD gateway or Gemini native SDK)
-is selected dynamically on every request based on current settings.
+Import public functions from here; the active backend
+(OpenAI-compatible / OKMD gateway or Gemini native SDK) is selected dynamically
+on every request based on current settings.
 
 Priority: OpenAI-compat (OKMD) > Gemini native.
 """
 
 from collections.abc import Iterator
+
 from src.ai import gemini_client, openai_compat_client
 from src.config import get_settings
 
@@ -30,11 +32,19 @@ def ask_coach_stream(
     question: str,
     context: str,
     history: list[dict[str, str]] | None = None,
+    model: str | None = None,
 ) -> Iterator[str]:
     if _use_openai_compat():
-        yield from openai_compat_client.ask_coach_stream(question, context, history)
+        yield from openai_compat_client.ask_coach_stream(question, context, history, model)
     else:
         yield from gemini_client.ask_coach_stream(question, context, history)
+
+
+def list_models() -> list[str]:
+    settings = get_settings()
+    if _use_openai_compat():
+        return openai_compat_client.list_models()
+    return [settings.gemini_model]
 
 
 def generate_briefing(context: str) -> str:
@@ -62,4 +72,5 @@ __all__ = [
     "generate_briefing",
     "generate_postmortem",
     "generate_postmortem_stream",
+    "list_models",
 ]

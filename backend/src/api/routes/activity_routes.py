@@ -6,8 +6,13 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, extract, func, select
+from sqlalchemy import delete, extract, func, or_, select
 
+from src.activity_laps import (
+    distance_splits as _distance_splits,
+    hyrox_lap_detail as _hyrox_lap_detail,
+    lap_type as _lap_type,
+)
 from src.db.engine import get_db_session
 from src.db.models import Activity, ActivityLap, ActivityRecord
 
@@ -71,131 +76,8 @@ def _validate_range(
         raise HTTPException(status_code=422, detail=f"{label} minimum cannot exceed maximum")
 
 
-def _is_recovery_lap(laps: list[ActivityLap], index: int) -> bool:
-    """Identify a short recovery interval between two hard running reps."""
-    if index == 0 or index == len(laps) - 1:
-        return False
-    previous, current, following = laps[index - 1], laps[index], laps[index + 1]
-    if (
-        current.distance_m is None
-        or current.avg_speed_mps is None
-        or previous.distance_m is None
-        or previous.avg_speed_mps is None
-        or following.distance_m is None
-        or following.avg_speed_mps is None
-    ):
-        return False
-    is_between_hard_reps = following.distance_m >= 400
-    is_before_cooldown = following.elapsed_s >= 240 and following.avg_speed_mps <= previous.avg_speed_mps * 0.75
-    return (
-        60 <= current.elapsed_s <= 300
-        and current.distance_m < 500
-        and previous.distance_m >= 400
-        and (is_between_hard_reps or is_before_cooldown)
-        and current.avg_speed_mps <= previous.avg_speed_mps * 0.75
-    )
-
-
-def _distance_splits(
-    records: list[ActivityRecord],
-    chunk_distance_m: float,
-    source_lap_distances: list[float] | None = None,
-    source_lap_start_elapsed: list[float] | None = None,
-) -> list[dict[str, float | int | None]]:
-    """Build fixed-distance splits from raw records, retaining COROS lap boundaries."""
-    distance_records = [
-        record
-        for record in records
-        if record.distance_m is not None and record.elapsed_s is not None
-    ]
-    if len(distance_records) < 2:
-        return []
-
-    start_distance = distance_records[0].distance_m
-    start_elapsed = distance_records[0].elapsed_s
-    end_distance = distance_records[-1].distance_m
-    end_elapsed = distance_records[-1].elapsed_s
-    if start_distance is None or start_elapsed is None or end_distance is None or end_elapsed is None:
-        return []
-
-    splits: list[dict[str, float | int | None]] = []
-    source_distance_total = sum(source_lap_distances or [])
-    source_origin = end_distance - source_distance_total if source_distance_total else start_distance
-    segment_start_distance = source_origin
-    segment_start_elapsed = records[0].elapsed_s if records[0].elapsed_s is not None else start_elapsed
-    segment_start_index = 0
-    lap_end_distances: list[float] = []
-    lap_end_distance = source_origin
-    for lap_distance in source_lap_distances or []:
-        if lap_distance > 0:
-            lap_end_distance += lap_distance
-            lap_end_distances.append(lap_end_distance)
-    lap_end_index = 0
-    next_split_distance = min(
-        source_origin + chunk_distance_m,
-        lap_end_distances[lap_end_index] if lap_end_distances else float("inf"),
-    )
-
-    def append_split(
-        segment_end_distance: float,
-        segment_end_elapsed: float,
-        segment_end_index: int,
-    ) -> None:
-        segment_records = distance_records[segment_start_index : segment_end_index + 1]
-        hr_values = [record.heart_rate_bpm for record in segment_records if record.heart_rate_bpm is not None]
-        power_values = [record.power_w for record in segment_records if record.power_w is not None]
-        cadence_values = [record.cadence for record in segment_records if record.cadence is not None]
-        elapsed_s = max(0.0, segment_end_elapsed - segment_start_elapsed)
-        distance_m = max(0.0, segment_end_distance - segment_start_distance)
-        splits.append(
-            {
-                "lap_index": len(splits),
-                "source_lap_index": lap_end_index if lap_end_distances else None,
-                "elapsed_s": elapsed_s,
-                "distance_m": distance_m,
-                "avg_hr_bpm": round(sum(hr_values) / len(hr_values)) if hr_values else None,
-                "max_hr_bpm": max(hr_values) if hr_values else None,
-                "avg_speed_mps": distance_m / elapsed_s if elapsed_s > 0 else None,
-                "avg_power_w": round(sum(power_values) / len(power_values)) if power_values else None,
-                "avg_cadence": round(sum(cadence_values) / len(cadence_values)) if cadence_values else None,
-            }
-        )
-
-    previous_distance = source_origin
-    previous_elapsed = segment_start_elapsed
-    for index, current in enumerate(distance_records):
-        if current.distance_m is None or current.elapsed_s is None:
-            continue
-        if current.distance_m <= previous_distance:
-            continue
-
-        while current.distance_m >= next_split_distance:
-            fraction = (next_split_distance - previous_distance) / (current.distance_m - previous_distance)
-            crossing_elapsed = previous_elapsed + fraction * (current.elapsed_s - previous_elapsed)
-            append_split(next_split_distance, crossing_elapsed, index)
-            segment_start_distance = next_split_distance
-            segment_start_elapsed = crossing_elapsed
-            segment_start_index = index
-            if (
-                lap_end_index < len(lap_end_distances)
-                and next_split_distance >= lap_end_distances[lap_end_index]
-            ):
-                lap_end_index += 1
-                if source_lap_start_elapsed and lap_end_index < len(source_lap_start_elapsed):
-                    segment_start_elapsed = source_lap_start_elapsed[lap_end_index]
-            next_split_distance = min(
-                segment_start_distance + chunk_distance_m,
-                lap_end_distances[lap_end_index]
-                if lap_end_index < len(lap_end_distances)
-                else float("inf"),
-            )
-        previous_distance = current.distance_m
-        previous_elapsed = current.elapsed_s
-
-    if end_distance > segment_start_distance:
-        append_split(end_distance, end_elapsed, len(distance_records) - 1)
-
-    return splits
+def _lap_start_elapsed(lap_start: datetime, first_lap_start: datetime) -> float:
+    return max(0.0, (lap_start - first_lap_start).total_seconds())
 
 
 @router.get("/")
@@ -304,7 +186,8 @@ from io import BytesIO
 from zipfile import ZipFile, is_zipfile
 from src.config import get_settings
 from src.db.credential_store import load_coros_credentials
-from src.sync.api_client import CorosApiClient
+from src.sync.api_client import CorosApiClient, CorosApiClientError
+from src.sync.sync_manager import _detail_activity_laps
 from src.parsers.fit_parser import parse_fit_file
 
 logger = logging.getLogger(__name__)
@@ -318,6 +201,12 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
     lap_count = await db.scalar(
         select(func.count(ActivityLap.id)).where(ActivityLap.activity_id == activity.id)
     )
+    unlabeled_lap_count = await db.scalar(
+        select(func.count(ActivityLap.id)).where(
+            ActivityLap.activity_id == activity.id,
+            or_(ActivityLap.lap_trigger.is_(None), ActivityLap.lap_trigger == "None"),
+        )
+    )
     rebuild_multisport = False
     if activity.sport == "multisport" and records_count:
         unique_laps = await db.scalar(
@@ -327,7 +216,13 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
             select(func.count(func.distinct(ActivityRecord.timestamp))).where(ActivityRecord.activity_id == activity.id)
         )
         rebuild_multisport = lap_count != unique_laps or records_count != unique_records
-    if (records_count > 0 and not rebuild_multisport) or not activity.label_id:
+    needs_step_labels = (
+        activity.sport in {"run", "trail_run"}
+        and bool(lap_count)
+        and bool(unlabeled_lap_count)
+    )
+    has_complete_fit_data = records_count > 0 and not rebuild_multisport
+    if (has_complete_fit_data and not needs_step_labels) or not activity.label_id:
         return
 
     settings = get_settings()
@@ -343,6 +238,25 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
         await client.login()
 
         sport_type = int(activity.subsport or 0)
+        detail_laps: list[ActivityLap] = []
+        if activity.sport in {"run", "trail_run"}:
+            try:
+                detail = await client.fetch_activity_detail(activity.label_id, sport_type)
+                detail_laps = _detail_activity_laps(activity, detail)
+            except CorosApiClientError as exc:
+                logger.warning(
+                    "coros_lap_labels_fetch_failed: activity=%s error=%s",
+                    activity.id,
+                    exc,
+                )
+
+        if records_count > 0 and needs_step_labels:
+            if detail_laps:
+                await db.execute(delete(ActivityLap).where(ActivityLap.activity_id == activity.id))
+                db.add_all(detail_laps)
+                await db.commit()
+            return
+
         fit_url = await client.fetch_activity_fit_url(activity.label_id, sport_type)
         fit_bytes = await client.download_file(fit_url)
 
@@ -393,7 +307,7 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
             await db.execute(delete(ActivityLap).where(ActivityLap.activity_id == activity.id))
             await db.execute(delete(ActivityRecord).where(ActivityRecord.activity_id == activity.id))
         if not lap_count or rebuild_multisport:
-            db.add_all(db_laps)
+            db.add_all(detail_laps or db_laps)
 
         fit_records.sort(key=lambda record: record.timestamp)
         first_ts = fit_records[0].timestamp if fit_records else None
@@ -441,32 +355,30 @@ async def get_activity(
         .order_by(ActivityLap.lap_index)
     )
     laps = lap_result.scalars().all()
-    lap_payload = [
-        {
-            "lap_index": lap.lap_index,
-            "start_time": lap.start_time.isoformat(),
-            "leg": lap.lap_trigger.removeprefix("triathlon_") if lap.lap_trigger and lap.lap_trigger.startswith("triathlon_") else None,
-            "elapsed_s": lap.elapsed_s,
-            "distance_m": lap.distance_m,
-            "avg_hr_bpm": lap.avg_hr_bpm,
-            "max_hr_bpm": lap.max_hr_bpm,
-            "avg_speed_mps": lap.avg_speed_mps,
-            "avg_power_w": lap.avg_power_w,
-            "avg_cadence": lap.avg_cadence,
-            "lap_type": (
-                "rest"
-                if lap.lap_trigger == "coros_rest"
-                else "run"
-                if lap.lap_trigger == "coros_run"
-                else "functional"
-                if lap.lap_trigger == "coros_functional"
-                else "recovery"
-                if activity.sport in {"run", "trail_run"} and _is_recovery_lap(laps, index)
-                else None
-            ),
-        }
-        for index, lap in enumerate(laps)
-    ]
+    lap_origin = laps[0].start_time if laps else activity.start_time
+    lap_payload = []
+    for lap in laps:
+        lap_name, load_unit = _hyrox_lap_detail(lap.lap_trigger)
+        lap_payload.append(
+            {
+                "lap_index": lap.lap_index,
+                "start_time": lap.start_time.isoformat(),
+                "start_elapsed_s": _lap_start_elapsed(lap.start_time, lap_origin),
+                "leg": lap.lap_trigger.removeprefix("triathlon_")
+                if lap.lap_trigger and lap.lap_trigger.startswith("triathlon_")
+                else None,
+                "lap_name": lap_name,
+                "load_unit": load_unit,
+                "elapsed_s": lap.elapsed_s,
+                "distance_m": lap.distance_m,
+                "avg_hr_bpm": lap.avg_hr_bpm,
+                "max_hr_bpm": lap.max_hr_bpm,
+                "avg_speed_mps": lap.avg_speed_mps,
+                "avg_power_w": lap.avg_power_w,
+                "avg_cadence": lap.avg_cadence,
+                "lap_type": _lap_type(lap.lap_trigger),
+            }
+        )
 
     lap_splits: dict[str, list[dict[str, float | int | None]]] = {}
     split_distance_m = (

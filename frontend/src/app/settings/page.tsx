@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import SingleSelect from "@/components/SingleSelect";
@@ -104,6 +104,9 @@ export default function SettingsPage() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const profileLoaded = useRef(false);
+  const profileDirty = useRef(false);
+  const profileSavedTimer = useRef<number | null>(null);
 
   // COROS Account Credentials state
   const [corosCredStatus, setCorosCredStatus] = useState<{ configured: boolean; email?: string | null; source?: string | null } | null>(null);
@@ -164,6 +167,7 @@ export default function SettingsPage() {
             body_fat_pct: data.body_fat_pct?.toString() ?? "",
             training_notes: data.training_notes ?? "",
           });
+          profileLoaded.current = true;
         }
       } catch {}
     }
@@ -196,6 +200,46 @@ export default function SettingsPage() {
     fetchMcpStatus();
     fetchCorosCreds();
   }, [apiBase]);
+
+  useEffect(() => {
+    if (!profileLoaded.current || !profileDirty.current) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setProfileSaving(true);
+      try {
+        const res = await fetch(`${apiBase}/api/settings/profile`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            first_name: profile.first_name || null,
+            last_name: profile.last_name || null,
+            nickname: profile.nickname || null,
+            birthdate: profile.birthdate || null,
+            sex: profile.sex || null,
+            height_cm: profile.height_cm ? parseFloat(profile.height_cm) : null,
+            weight_kg: profile.weight_kg ? parseFloat(profile.weight_kg) : null,
+            body_fat_pct: profile.body_fat_pct ? parseFloat(profile.body_fat_pct) : null,
+            training_notes: profile.training_notes || null,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setProfileSaved(true);
+        profileSavedTimer.current = window.setTimeout(() => setProfileSaved(false), 3000);
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") return;
+        setProfileError(err instanceof Error ? err.message : "Failed to save");
+      } finally {
+        if (!controller.signal.aborted) setProfileSaving(false);
+      }
+    }, 600);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [apiBase, profile]);
 
   async function saveCorosCreds() {
     if (!corosEmailInput.trim() || !corosPasswordInput) {
@@ -375,38 +419,18 @@ export default function SettingsPage() {
     setGoalForm(EMPTY_GOAL);
   }
 
-  async function saveProfile() {
-    setProfileSaving(true);
+  function updateProfileField<Key extends keyof UserProfile>(key: Key, value: UserProfile[Key]) {
+    if (profileSavedTimer.current !== null) window.clearTimeout(profileSavedTimer.current);
+    profileDirty.current = true;
     setProfileError("");
     setProfileSaved(false);
-    try {
-      const res = await fetch(`${apiBase}/api/settings/profile`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          first_name: profile.first_name || null,
-          last_name: profile.last_name || null,
-          nickname: profile.nickname || null,
-          birthdate: profile.birthdate || null,
-          sex: profile.sex || null,
-          height_cm: profile.height_cm ? parseFloat(profile.height_cm) : null,
-          weight_kg: profile.weight_kg ? parseFloat(profile.weight_kg) : null,
-          body_fat_pct: profile.body_fat_pct ? parseFloat(profile.body_fat_pct) : null,
-          training_notes: profile.training_notes || null,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setProfileSaved(true);
-      setTimeout(() => setProfileSaved(false), 3000);
-    } catch (err) {
-      setProfileError(err instanceof Error ? err.message : "Failed to save");
-    } finally {
-      setProfileSaving(false);
-    }
+    setProfile((current) => ({ ...current, [key]: value }));
   }
 
   const [targetHours, targetMinutes, targetSeconds] = targetTimeParts(goalForm.goal_target_time);
-  const savedMessage = corosSaved
+  const savedMessage = profileSaving
+    ? "Saving changes…"
+    : corosSaved
     ? "Credentials saved securely."
     : goalSaved
       ? "Goal saved."
@@ -528,27 +552,27 @@ export default function SettingsPage() {
                 <div className="settings-section-heading">
                   <div>
                     <h2>Athlete profile</h2>
-                    <p>Biometrics improve training zones, energy estimates, and recovery analysis.</p>
+                    <p>Biometrics improve training zones, energy estimates, and recovery analysis. Changes save automatically.</p>
                   </div>
                 </div>
 
-                <form onSubmit={(e) => { e.preventDefault(); saveProfile(); }}>
+                <div>
                   <div className="settings-form-grid is-three-column">
                     <div className="settings-field">
                       <label htmlFor="profile-first-name">First name</label>
-                      <input id="profile-first-name" type="text" placeholder="John" value={profile.first_name} onChange={(e) => setProfile((p) => ({ ...p, first_name: e.target.value }))} />
+                      <input id="profile-first-name" type="text" placeholder="John" value={profile.first_name} onChange={(e) => updateProfileField("first_name", e.target.value)} />
                     </div>
                     <div className="settings-field">
                       <label htmlFor="profile-last-name">Last name</label>
-                      <input id="profile-last-name" type="text" placeholder="Doe" value={profile.last_name} onChange={(e) => setProfile((p) => ({ ...p, last_name: e.target.value }))} />
+                      <input id="profile-last-name" type="text" placeholder="Doe" value={profile.last_name} onChange={(e) => updateProfileField("last_name", e.target.value)} />
                     </div>
                     <div className="settings-field">
                       <label htmlFor="profile-nickname">Display name</label>
-                      <input id="profile-nickname" type="text" placeholder="Johnny" value={profile.nickname} onChange={(e) => setProfile((p) => ({ ...p, nickname: e.target.value }))} />
+                      <input id="profile-nickname" type="text" placeholder="Johnny" value={profile.nickname} onChange={(e) => updateProfileField("nickname", e.target.value)} />
                     </div>
                     <div className="settings-field">
                       <label htmlFor="profile-birthdate">Birthdate</label>
-                      <input id="profile-birthdate" type="date" value={profile.birthdate} onChange={(e) => setProfile((p) => ({ ...p, birthdate: e.target.value }))} />
+                      <input id="profile-birthdate" type="date" value={profile.birthdate} onChange={(e) => updateProfileField("birthdate", e.target.value)} />
                     </div>
                     <div className="settings-field">
                       <label id="profile-sex-label">Sex</label>
@@ -561,7 +585,7 @@ export default function SettingsPage() {
                           { value: "female", label: "Female" },
                           { value: "male", label: "Male" },
                         ]}
-                        onChange={(sex) => setProfile((profile) => ({ ...profile, sex }))}
+                        onChange={(sex) => updateProfileField("sex", sex)}
                       />
                     </div>
                     <div className="settings-field">
@@ -573,7 +597,7 @@ export default function SettingsPage() {
                         max={300}
                         placeholder="180"
                         value={profile.height_cm}
-                        onChange={(height_cm) => setProfile((profile) => ({ ...profile, height_cm }))}
+                        onChange={(heightCm) => updateProfileField("height_cm", heightCm)}
                       />
                     </div>
                     <div className="settings-field">
@@ -586,7 +610,7 @@ export default function SettingsPage() {
                         step={0.1}
                         placeholder="75.5"
                         value={profile.weight_kg}
-                        onChange={(weight_kg) => setProfile((profile) => ({ ...profile, weight_kg }))}
+                        onChange={(weightKg) => updateProfileField("weight_kg", weightKg)}
                       />
                     </div>
                     <div className="settings-field">
@@ -599,17 +623,12 @@ export default function SettingsPage() {
                         step={0.1}
                         placeholder="15.0"
                         value={profile.body_fat_pct}
-                        onChange={(body_fat_pct) => setProfile((profile) => ({ ...profile, body_fat_pct }))}
+                        onChange={(bodyFatPct) => updateProfileField("body_fat_pct", bodyFatPct)}
                       />
                     </div>
                   </div>
-                  <div className="settings-actions">
-                    <button type="submit" className="btn btn-primary" disabled={profileSaving}>
-                      {profileSaving ? "Saving…" : "Save profile"}
-                    </button>
-                    {profileError && <span className="settings-feedback is-error">{profileError}</span>}
-                  </div>
-                </form>
+                  {profileError && <p className="settings-feedback is-error">{profileError}</p>}
+                </div>
               </section>
 
               <section className="settings-section hover-card" id="settings-coaching">
@@ -796,7 +815,7 @@ export default function SettingsPage() {
                   <div className="settings-subsection-heading">
                     <div>
                       <h3>Training notes</h3>
-                      <p>Persistent constraints such as injury history, rest days, and schedule limits.</p>
+                      <p>Persistent constraints such as injury history, rest days, and schedule limits. Changes save automatically.</p>
                     </div>
                   </div>
                   <div className="settings-field">
@@ -806,16 +825,11 @@ export default function SettingsPage() {
                       rows={5}
                       placeholder={"- Rest every Sunday\n- Avoid steep downhill running\n- Maximum 10 hours per week"}
                       value={profile.training_notes}
-                      onChange={(e) => setProfile((p) => ({ ...p, training_notes: e.target.value }))}
+                      onChange={(e) => updateProfileField("training_notes", e.target.value)}
                     />
                     <span className="settings-help">Use short, factual notes. Do not include information the coach does not need.</span>
                   </div>
-                  <div className="settings-actions">
-                    <button id="save-training-notes-btn" className="btn btn-primary" onClick={saveProfile} disabled={profileSaving}>
-                      {profileSaving ? "Saving…" : "Save notes"}
-                    </button>
-                    {profileError && <span className="settings-feedback is-error">{profileError}</span>}
-                  </div>
+                  {profileError && <p className="settings-feedback is-error">{profileError}</p>}
                 </div>
               </section>
 

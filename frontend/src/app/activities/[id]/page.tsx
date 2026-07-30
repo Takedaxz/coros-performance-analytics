@@ -42,6 +42,7 @@ function LoadingGlyph() {
 interface ActivityDetail {
   id: string;
   sport: string;
+  subsport?: string;
   title?: string;
   start_time: string;
   elapsed_time_s?: number;
@@ -68,7 +69,10 @@ interface ActivityDetail {
 interface ActivityLap {
   lap_index: number;
   start_time?: string;
+  start_elapsed_s?: number;
   leg?: "swim" | "ride" | "run";
+  lap_name?: string;
+  load_unit?: "m" | "reps";
   elapsed_s: number;
   distance_m?: number;
   avg_hr_bpm?: number;
@@ -76,7 +80,79 @@ interface ActivityLap {
   avg_speed_mps?: number;
   avg_power_w?: number;
   avg_cadence?: number;
-  lap_type?: "recovery" | "rest" | "run" | "functional";
+  lap_type?: "warmup" | "training" | "cooldown" | "rest" | "run" | "functional";
+}
+
+const LAP_TYPE_LABELS: Record<NonNullable<ActivityLap["lap_type"]>, string> = {
+  warmup: "Warm-up",
+  training: "Training",
+  cooldown: "Cool-down",
+  rest: "Rest",
+  run: "Run",
+  functional: "Functional",
+};
+
+interface ActivityLapGroup {
+  lapType?: ActivityLap["lap_type"];
+  laps: ActivityLap[];
+  summary: ActivityLap;
+}
+
+type WeightedLapMetric = "avg_hr_bpm" | "avg_power_w" | "avg_cadence";
+
+function weightedLapAverage(
+  laps: ActivityLap[],
+  metric: WeightedLapMetric,
+): number | undefined {
+  const measured = laps.filter((lap) => lap[metric] != null && lap.elapsed_s > 0);
+  const duration = measured.reduce((total, lap) => total + lap.elapsed_s, 0);
+  if (duration <= 0) return undefined;
+  return Math.round(
+    measured.reduce((total, lap) => total + (lap[metric] ?? 0) * lap.elapsed_s, 0) /
+      duration,
+  );
+}
+
+function summarizeLapGroup(laps: ActivityLap[]): ActivityLap {
+  const first = laps[0];
+  const elapsed = laps.reduce((total, lap) => total + lap.elapsed_s, 0);
+  const distances = laps.flatMap((lap) => lap.distance_m != null ? [lap.distance_m] : []);
+  const distance = distances.length
+    ? distances.reduce((total, value) => total + value, 0)
+    : undefined;
+  const maxHeartRates = laps.flatMap((lap) =>
+    lap.max_hr_bpm != null ? [lap.max_hr_bpm] : [],
+  );
+
+  return {
+    ...first,
+    elapsed_s: elapsed,
+    distance_m: distance,
+    avg_hr_bpm: weightedLapAverage(laps, "avg_hr_bpm"),
+    max_hr_bpm: maxHeartRates.length ? Math.max(...maxHeartRates) : undefined,
+    avg_speed_mps: distance != null && elapsed > 0 ? distance / elapsed : undefined,
+    avg_power_w: weightedLapAverage(laps, "avg_power_w"),
+    avg_cadence: weightedLapAverage(laps, "avg_cadence"),
+  };
+}
+
+function groupConsecutiveLaps(
+  laps: ActivityLap[],
+  shouldGroup: boolean,
+): ActivityLapGroup[] {
+  const groups: Array<{ lapType?: ActivityLap["lap_type"]; laps: ActivityLap[] }> = [];
+  for (const lap of laps) {
+    const previous = groups[groups.length - 1];
+    if (shouldGroup && lap.lap_type != null && previous?.lapType === lap.lap_type) {
+      previous.laps.push(lap);
+    } else {
+      groups.push({ lapType: lap.lap_type, laps: [lap] });
+    }
+  }
+  return groups.map((group) => ({
+    ...group,
+    summary: summarizeLapGroup(group.laps),
+  }));
 }
 
 interface StrengthDetail {
@@ -130,6 +206,72 @@ interface RecordPoint {
   position_long?: number;
 }
 
+interface SegmentDetailProps {
+  lap: ActivityLap;
+  records: RecordPoint[];
+  sport: string;
+}
+
+interface BreakdownHeaderProps {
+  title: string;
+  description: string;
+  count: number;
+  itemLabel: string;
+}
+
+interface PhaseRowProps {
+  badge: string;
+  title: string;
+  description: string;
+  duration: string;
+  avgHr?: number;
+}
+
+function BreakdownHeader({ title, description, count, itemLabel }: BreakdownHeaderProps) {
+  return (
+    <div className="breakdown-header">
+      <div>
+        <span className="breakdown-kicker">Performance detail</span>
+        <h2 className="card-title">{title}</h2>
+        <p>{description}</p>
+      </div>
+      <span className="breakdown-count">
+        {count} {itemLabel}{count === 1 ? "" : "s"}
+      </span>
+    </div>
+  );
+}
+
+function PhaseRow({ badge, title, description, duration, avgHr }: PhaseRowProps) {
+  return (
+    <tr className="breakdown-phase-row">
+      <td colSpan={6}>
+        <div className="breakdown-phase">
+          <div className="breakdown-phase-identity">
+            <span className="breakdown-phase-badge">{badge}</span>
+            <span className="breakdown-phase-copy">
+              <strong>{title}</strong>
+              <span>{description}</span>
+            </span>
+          </div>
+          <div className="breakdown-phase-metrics">
+            {avgHr != null && (
+              <span className="breakdown-phase-stat">
+                <span>Avg HR</span>
+                <strong>{avgHr} bpm</strong>
+              </span>
+            )}
+            <span className="breakdown-phase-stat">
+              <span>Duration</span>
+              <strong>{duration}</strong>
+            </span>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function formatPace(speedMps: number): string {
   if (speedMps <= 0) return "--";
   const paceSecsPerKm = 1000 / speedMps;
@@ -161,6 +303,208 @@ function formatSplitDuration(seconds: number): string {
 
 function formatLegDuration(seconds: number): string {
   return seconds >= 3600 ? formatDuration(seconds) : formatSplitDuration(seconds);
+}
+
+type SegmentSignal = "pace" | "swim_pace" | "stroke" | "power" | "speed" | "cadence";
+
+function SegmentDetail({ lap, records, sport }: SegmentDetailProps) {
+  const startElapsed = lap.start_elapsed_s ?? 0;
+  const endElapsed = startElapsed + lap.elapsed_s;
+  const segmentRecords = records.filter(
+    (record) =>
+      record.elapsed_s != null &&
+      record.elapsed_s >= startElapsed &&
+      record.elapsed_s < endElapsed,
+  );
+  const sampleRate = Math.max(1, Math.ceil(segmentRecords.length / 240));
+  const isPaceSport =
+    lap.lap_type === "run" || ["run", "trail_run", "walk", "hike"].includes(sport);
+  const isSwim = sport === "swim";
+  const isRide = sport === "ride";
+  const hasSpeed = segmentRecords.some((record) => (record.speed_mps ?? 0) > 0);
+  const hasPower = segmentRecords.some((record) => (record.power_w ?? 0) > 0);
+  const hasCadence = segmentRecords.some((record) => (record.cadence ?? 0) > 0);
+  const signal: SegmentSignal | null = isPaceSport && hasSpeed
+    ? "pace"
+    : isSwim
+      ? hasCadence ? "stroke" : hasSpeed ? "swim_pace" : null
+      : isRide
+        ? hasPower ? "power" : hasCadence ? "cadence" : hasSpeed ? "speed" : null
+        : hasCadence
+          ? ["Ski Erg", "Indoor Rower"].includes(lap.lap_name ?? "") ? "stroke" : "cadence"
+          : hasPower ? "power" : hasSpeed ? "speed" : null;
+  const signalLabel = signal === "pace" || signal === "swim_pace"
+    ? "Pace"
+    : signal === "stroke"
+      ? "Stroke Rate"
+      : signal === "power"
+        ? "Power"
+        : signal === "speed"
+          ? "Speed"
+          : "Cadence";
+  const signalUnit = signal === "pace"
+    ? "/km"
+    : signal === "swim_pace"
+      ? "/100m"
+      : signal === "power"
+        ? "W"
+        : signal === "speed"
+          ? "km/h"
+          : "spm";
+  const signalValue = (record: RecordPoint): number | undefined => {
+    if (signal === "pace" || signal === "swim_pace" || signal === "speed") {
+      return record.speed_mps;
+    }
+    if (signal === "power") return record.power_w;
+    if (signal === "stroke" || signal === "cadence") return record.cadence;
+    return undefined;
+  };
+  const formatSignal = (value: number): string => {
+    if (signal === "pace") return formatPace(value);
+    if (signal === "swim_pace") return formatSwimPace(value);
+    if (signal === "speed") return (value * 3.6).toFixed(1);
+    return String(Math.round(value));
+  };
+  const chartData = segmentRecords
+    .filter((_, index) => index % sampleRate === 0 || index === segmentRecords.length - 1)
+    .map((record) => ({
+      time: (record.elapsed_s ?? startElapsed) - startElapsed,
+      heartRate: record.heart_rate_bpm,
+      rate: signalValue(record),
+    }));
+  const heartRates = segmentRecords.flatMap((record) =>
+    record.heart_rate_bpm != null ? [record.heart_rate_bpm] : [],
+  );
+  const signalValues = segmentRecords.flatMap((record) => {
+    const value = signalValue(record);
+    return value != null && value > 0 ? [value] : [];
+  });
+  const averageSignal = signal === "pace" || signal === "swim_pace" || signal === "speed"
+    ? lap.avg_speed_mps
+    : signal === "power"
+      ? lap.avg_power_w
+      : lap.avg_cadence;
+  const maxSignal = signalValues.length ? Math.max(...signalValues) : undefined;
+  const maxHeartRate = lap.max_hr_bpm ?? (
+    heartRates.length ? Math.max(...heartRates) : undefined
+  );
+  const load = lap.distance_m
+    ? lap.load_unit === "reps"
+      ? `${Math.round(lap.distance_m)} reps`
+      : lap.lap_type === "functional" || isSwim
+        ? `${Math.round(lap.distance_m)} m`
+        : `${(lap.distance_m / 1000).toFixed(2)} km`
+    : "--";
+  const metrics: ActivityMetric[] = [
+    ["Event time", formatSplitDuration(lap.elapsed_s)],
+    ["Max HR", maxHeartRate ?? "--", "bpm"],
+    ["Average HR", lap.avg_hr_bpm ?? "--", "bpm"],
+    [lap.lap_type === "functional" ? "Load" : "Distance", load],
+    ...(signal
+      ? [
+          [
+            signal === "pace" || signal === "swim_pace"
+              ? "Best pace"
+              : `Max ${signalLabel.toLowerCase()}`,
+            maxSignal ? formatSignal(maxSignal) : "--",
+            signalUnit,
+          ] as ActivityMetric,
+          [
+            signal === "pace" || signal === "swim_pace"
+              ? "Average pace"
+              : `Average ${signalLabel.toLowerCase()}`,
+            averageSignal ? formatSignal(averageSignal) : "--",
+            signalUnit,
+          ] as ActivityMetric,
+        ]
+      : []),
+  ];
+  const hasHeartRate = chartData.some((point) => point.heartRate != null);
+  const hasRate = chartData.some((point) => point.rate != null);
+
+  return (
+    <div className="segment-detail">
+      {(hasHeartRate || hasRate) && (
+        <div className="segment-chart">
+          <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 260 }}>
+            <LineChart data={chartData} margin={{ top: 16, right: 12, bottom: 8, left: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+              <XAxis
+                dataKey="time"
+                type="number"
+                domain={[0, lap.elapsed_s]}
+                tickCount={4}
+                tick={{ fill: "var(--color-text-muted)", fontSize: 11 }}
+                tickFormatter={(value: number) => formatSplitDuration(value)}
+                axisLine={false}
+              />
+              {hasHeartRate && (
+                <YAxis
+                  yAxisId="hr"
+                  width={58}
+                  tick={{ fill: "var(--color-text-muted)", fontSize: 11 }}
+                  domain={["dataMin - 10", "dataMax + 10"]}
+                  axisLine={false}
+                />
+              )}
+              {hasRate && (
+                <YAxis
+                  yAxisId="rate"
+                  orientation="right"
+                  width={64}
+                  tick={{ fill: "var(--color-text-muted)", fontSize: 11 }}
+                  tickFormatter={(value: number) => formatSignal(value)}
+                  domain={["auto", "auto"]}
+                  axisLine={false}
+                />
+              )}
+              <Tooltip
+                labelFormatter={(value) => `${formatSplitDuration(Number(value))} elapsed`}
+                formatter={(value, name) =>
+                  name === "Heart Rate"
+                    ? `${Math.round(Number(value))} bpm`
+                    : `${formatSignal(Number(value))} ${signalUnit}`
+                }
+              />
+              {hasHeartRate && (
+                <Line
+                  yAxisId="hr"
+                  type="monotone"
+                  dataKey="heartRate"
+                  stroke="var(--color-status-critical)"
+                  strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                  name="Heart Rate"
+                />
+              )}
+              {hasRate && (
+                <Line
+                  yAxisId="rate"
+                  type="monotone"
+                  dataKey="rate"
+                  stroke="var(--color-accent-primary)"
+                  strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                  name={signalLabel}
+                />
+              )}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+      <div className="segment-metrics">
+        {metrics.map(([label, value, unit]) => (
+          <div className="segment-metric" key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+            {unit && <em>{unit}</em>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function ActivityDetailPage() {
@@ -433,7 +777,7 @@ export default function ActivityDetailPage() {
 
   const sampleRate = Math.max(1, Math.floor(records.length / 300));
   const chartData = records
-    .filter((_, i) => i % sampleRate === 0)
+    .filter((_, i) => i % sampleRate === 0 || i === records.length - 1)
     .map((r) => ({
       time: r.elapsed_s ? r.elapsed_s / 60 : 0,
       hr: r.heart_rate_bpm,
@@ -441,6 +785,10 @@ export default function ActivityDetailPage() {
       alt: r.altitude_m != null ? Math.round(r.altitude_m) : undefined,
       power: r.power_w,
     }));
+  const chartDurationMinutes = Math.max(
+    activity.elapsed_time_s ?? 0,
+    records[records.length - 1]?.elapsed_s ?? 0,
+  ) / 60;
   const elevationValues = chartData
     .map((point) => point.alt)
     .filter((altitude): altitude is number => altitude != null);
@@ -510,6 +858,22 @@ export default function ActivityDetailPage() {
     return { ...leg, distance, duration, avgHr, avgPower, avgCadence, transition };
   });
   const isTriathlon = activity.sport === "multisport" && triathlonLegDetails.length > 1;
+  const isHyrox = activity.subsport === "1200";
+  const hasStructuredLapPhases = (
+    isRun &&
+    !isHyrox &&
+    activity.laps.some((lap) =>
+      ["warmup", "training", "cooldown", "rest"].includes(lap.lap_type ?? ""),
+    )
+  );
+  const lapGroups = groupConsecutiveLaps(activity.laps, hasStructuredLapPhases);
+  const lapTotal = summarizeLapGroup(activity.laps);
+  const totalDistance = activity.distance_m ?? lapTotal.distance_m;
+  const totalDuration = activity.elapsed_time_s ?? lapTotal.elapsed_s;
+  const totalAvgHr = activity.avg_hr_bpm ?? lapTotal.avg_hr_bpm;
+  const totalAvgSpeed = activity.avg_speed_mps ?? lapTotal.avg_speed_mps;
+  const totalAvgPower = activity.avg_power_w ?? lapTotal.avg_power_w;
+  const totalAvgCadence = activity.avg_cadence ?? lapTotal.avg_cadence;
   const triathlonSpeedMetrics: ActivityMetric[] = isTriathlon
     ? triathlonLegDetails.flatMap((leg) => {
         const speed = leg.distance / leg.duration;
@@ -531,7 +895,7 @@ export default function ActivityDetailPage() {
   const activeSwimDistance = activeSwimLaps.reduce((total, lap) => total + (lap.distance_m ?? 0), 0);
   const activeSwimDuration = activeSwimLaps.reduce((total, lap) => total + lap.elapsed_s, 0);
   const activeRunLaps = isRun
-    ? activity.laps.filter((lap) => (lap.distance_m ?? 0) > 0 && lap.lap_type !== "recovery")
+    ? activity.laps.filter((lap) => (lap.distance_m ?? 0) > 0 && lap.lap_type !== "rest")
     : [];
   const activeRunDistance = activeRunLaps.reduce((total, lap) => total + (lap.distance_m ?? 0), 0);
   const activeRunDuration = activeRunLaps.reduce((total, lap) => total + lap.elapsed_s, 0);
@@ -593,10 +957,10 @@ export default function ActivityDetailPage() {
         <span className="card-title">Heart Rate & Speed Telemetry</span>
       </div>
       <div className="telemetry-chart">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 360 }}>
           <LineChart data={chartData} margin={{ top: 16, right: 8, bottom: 16, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
-            <XAxis dataKey="time" type="number" domain={[0, "auto"]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
+            <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
             {hasHeartRateData && <YAxis yAxisId="hr" width={72} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} bpm`} axisLine={false} domain={["dataMin - 10", "dataMax + 10"]} />}
             {hasSpeedData && <YAxis yAxisId="speed" orientation="right" width={64} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} km/h`} axisLine={false} />}
             <Tooltip labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`} />
@@ -647,25 +1011,61 @@ export default function ActivityDetailPage() {
           )}
 
           {strength && (
-            <div className="card" style={{ marginTop: "var(--space-6)", marginBottom: "var(--space-6)" }}>
-              <div className="card-header"><span className="card-title">Strength Breakdown</span></div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
-                {strength.exercises_detail.map((exercise, exerciseIndex) => (
-                  <div key={`${exercise.name_key}-${exerciseIndex}`}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "var(--space-2)" }}>
-                      <strong>{exerciseIndex + 1}. {strengthExerciseName(exercise.name_key, exercise.name)}</strong>
-                      <span style={{ color: "var(--color-text-secondary)", fontSize: "13px" }}>{exercise.sets} sets · {exercise.total_reps} reps</span>
-                    </div>
-                    <div className="table-responsive">
-                      <table className="data-table">
-                        <thead><tr><th>Set</th><th>Reps</th><th>Weight</th><th>Time</th><th>Rest</th><th>Calories</th></tr></thead>
-                        <tbody>{exercise.entries.map((entry, setIndex) => (
-                          <tr key={setIndex}><td>{setIndex + 1}</td><td>{entry.reps}</td><td>{entry.weight_kg > 0 ? `${entry.weight_kg} kg` : "--"}</td><td>{formatDuration(entry.work_s)}</td><td>{entry.rest_s > 0 ? formatDuration(entry.rest_s) : "--"}</td><td>{entry.calories}</td></tr>
-                        ))}</tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))}
+            <div className="card no-hover breakdown-card" style={{ marginTop: "var(--space-6)", marginBottom: "var(--space-6)" }}>
+              <BreakdownHeader
+                title="Strength Breakdown"
+                description="Exercise volume and set execution"
+                count={strength.exercises_detail.length}
+                itemLabel="exercise"
+              />
+              <div className="strength-exercise-list">
+                {strength.exercises_detail.map((exercise, exerciseIndex) => {
+                  const totals = exercise.entries.reduce(
+                    (sum, entry) => ({
+                      volume: sum.volume + entry.reps * entry.weight_kg,
+                      work: sum.work + entry.work_s,
+                      rest: sum.rest + entry.rest_s,
+                      calories: sum.calories + entry.calories,
+                    }),
+                    { volume: 0, work: 0, rest: 0, calories: 0 },
+                  );
+                  return (
+                    <section className="strength-exercise" key={`${exercise.name_key}-${exerciseIndex}`}>
+                      <div className="strength-exercise-header">
+                        <div className="breakdown-row-identity">
+                          <span className="breakdown-index">{exerciseIndex + 1}</span>
+                          <h3>{strengthExerciseName(exercise.name_key, exercise.name)}</h3>
+                        </div>
+                        <span>{exercise.sets} sets · {exercise.total_reps} reps</span>
+                      </div>
+                      <div className="table-responsive breakdown-table-wrap">
+                        <table className="data-table breakdown-table breakdown-nested-table">
+                          <thead><tr><th>Set</th><th>Reps</th><th>Weight</th><th>Time</th><th>Rest</th><th>Calories</th></tr></thead>
+                          <tbody>
+                            {exercise.entries.map((entry, setIndex) => (
+                              <tr key={setIndex}>
+                                <td data-label="Set"><span className="lap-split-index">{setIndex + 1}</span></td>
+                                <td data-label="Reps" className="mono">{entry.reps}</td>
+                                <td data-label="Weight" className="mono">{entry.weight_kg > 0 ? `${entry.weight_kg} kg` : "--"}</td>
+                                <td data-label="Time" className="mono">{formatDuration(entry.work_s)}</td>
+                                <td data-label="Rest" className="mono">{entry.rest_s > 0 ? formatDuration(entry.rest_s) : "--"}</td>
+                                <td data-label="Calories" className="mono">{entry.calories}</td>
+                              </tr>
+                            ))}
+                            <tr className="breakdown-total-row">
+                              <td data-label="Summary"><span className="breakdown-total-label">Total</span></td>
+                              <td data-label="Reps" className="mono">{exercise.total_reps}</td>
+                              <td data-label="Volume" className="mono">{totals.volume > 0 ? `${Math.round(totals.volume * 10) / 10} kg` : "—"}</td>
+                              <td data-label="Time" className="mono">{formatDuration(totals.work)}</td>
+                              <td data-label="Rest" className="mono">{formatDuration(totals.rest)}</td>
+                              <td data-label="Calories" className="mono">{totals.calories}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -692,7 +1092,7 @@ export default function ActivityDetailPage() {
                   <ResponsiveContainer width="100%" height={260}>
                     <LineChart data={chartData} margin={{ top: 16, right: 8, bottom: 16, left: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
-                      <XAxis dataKey="time" type="number" domain={[0, "auto"]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
+                      <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
                       <YAxis width={52} padding={{ top: 8, bottom: 8 }} domain={[elevationBounds[0] - elevationPadding, elevationBounds[1] + elevationPadding]} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} m`} axisLine={false} />
                       <Tooltip
                         labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`}
@@ -708,12 +1108,15 @@ export default function ActivityDetailPage() {
 
           {/* Laps Table */}
           {isTriathlon && (
-            <div className="card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
-              <div className="card-header">
-                <span className="card-title">Triathlon Breakdown</span>
-              </div>
-              <div className="table-responsive">
-                <table className="data-table">
+            <div className="card no-hover breakdown-card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
+              <BreakdownHeader
+                title="Triathlon Breakdown"
+                description="Leg performance with transition timing"
+                count={triathlonLegDetails.length}
+                itemLabel="leg"
+              />
+              <div className="table-responsive breakdown-table-wrap">
+                <table className="data-table breakdown-table">
                   <thead>
                     <tr><th>Leg</th><th>Distance</th><th>Duration</th><th>Avg HR</th><th>Pace / Speed</th><th>Power / Cadence</th></tr>
                   </thead>
@@ -727,54 +1130,103 @@ export default function ActivityDetailPage() {
                           ? `${formatPace(speed)}/km`
                           : `${(speed * 3.6).toFixed(1)} km/h`;
                       const isExpanded = expandedTriathlonLeg === leg.sport;
+                      const nextLeg = triathlonLegDetails[index + 1];
+                      const nextLabel = nextLeg
+                        ? nextLeg.sport === "ride"
+                          ? "Bike"
+                          : nextLeg.sport[0].toUpperCase() + nextLeg.sport.slice(1)
+                        : "";
+                      const toggleLeg = (): void =>
+                        setExpandedTriathlonLeg(isExpanded ? null : leg.sport);
+                      const legHeartRates = leg.laps.flatMap((lap) =>
+                        lap.max_hr_bpm != null ? [lap.max_hr_bpm] : [],
+                      );
+                      const legSummary: ActivityLap = {
+                        ...leg.laps[0],
+                        elapsed_s: leg.duration,
+                        distance_m: leg.distance,
+                        avg_hr_bpm: leg.avgHr ?? undefined,
+                        max_hr_bpm: legHeartRates.length
+                          ? Math.max(...legHeartRates)
+                          : undefined,
+                        avg_speed_mps: speed,
+                        avg_power_w: leg.avgPower ?? undefined,
+                        avg_cadence: leg.avgCadence ?? undefined,
+                        lap_type: leg.sport === "run" ? "run" : undefined,
+                      };
 
                       return (
                         <Fragment key={leg.sport}>
-                          <tr>
-                            <td className="mono">
+                          <tr
+                            className={`lap-summary-row is-clickable${isExpanded ? " is-expanded" : ""}`}
+                            onClick={toggleLeg}
+                          >
+                            <td data-label="Leg">
                               <button
                                 type="button"
-                                className="lap-expand-button"
+                                className="lap-expand-button lap-expand-button-plain breakdown-identity-button"
                                 aria-expanded={isExpanded}
-                                onClick={() => setExpandedTriathlonLeg(isExpanded ? null : leg.sport)}
+                                aria-label={`Toggle ${label} lap breakdown`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleLeg();
+                                }}
                               >
-                                {label}
+                                <span className="breakdown-row-identity">
+                                  <span className="breakdown-index">{index + 1}</span>
+                                  <span className="breakdown-row-label">{label}</span>
+                                </span>
+                                <svg viewBox="0 0 16 16" aria-hidden="true">
+                                  <path d="m4 6 4 4 4-4" />
+                                </svg>
                               </button>
                             </td>
-                            <td className="mono">{(leg.distance / 1000).toFixed(2)} km</td>
-                            <td className="mono">{formatLegDuration(leg.duration)}</td>
-                            <td className="mono">{leg.avgHr ? `${leg.avgHr} bpm` : "--"}</td>
-                            <td className="mono">{paceOrSpeed}</td>
-                            <td className="mono">{leg.sport === "swim" ? leg.avgCadence ? `${leg.avgCadence} spm` : "--" : leg.avgPower ? `${leg.avgPower} W` : "--"}</td>
+                            <td data-label="Distance" className="mono">{(leg.distance / 1000).toFixed(2)} km</td>
+                            <td data-label="Duration" className="mono">{formatLegDuration(leg.duration)}</td>
+                            <td data-label="Avg HR" className="mono">{leg.avgHr ? `${leg.avgHr} bpm` : "--"}</td>
+                            <td data-label="Pace / Speed" className="mono breakdown-primary-metric">{paceOrSpeed}</td>
+                            <td data-label="Power / Cadence" className="mono">{leg.sport === "swim" ? leg.avgCadence ? `${leg.avgCadence} spm` : "--" : leg.avgPower ? `${leg.avgPower} W` : "--"}</td>
                           </tr>
                           {isExpanded && (
                             <tr className="lap-split-row">
                               <td colSpan={6}>
-                                <div className="lap-split-label">{label} lap breakdown</div>
-                                <table className="lap-split-table">
-                                  <thead><tr><th>Lap</th><th>Distance</th><th>Duration</th><th>Avg HR</th><th>Pace / Speed</th><th>Power / Cadence</th></tr></thead>
-                                  <tbody>{leg.laps.map((lap, lapIndex) => (
-                                    <tr key={lap.lap_index}>
-                                      <td>{lapIndex + 1}</td>
-                                      <td>{lap.distance_m ? leg.sport === "swim" ? `${Math.round(lap.distance_m)} m` : `${(lap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
-                                      <td>{formatSplitDuration(lap.elapsed_s)}</td>
-                                      <td>{lap.avg_hr_bpm ? `${lap.avg_hr_bpm} bpm` : "--"}</td>
-                                      <td>{lap.avg_speed_mps ? leg.sport === "swim" ? formatSwimPace(lap.avg_speed_mps) : leg.sport === "run" ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : "--"}</td>
-                                      <td>{leg.sport === "swim" ? lap.avg_cadence ? `${lap.avg_cadence} spm` : "--" : lap.avg_power_w ? `${lap.avg_power_w} W` : "--"}</td>
-                                    </tr>
-                                  ))}</tbody>
-                                </table>
+                                <SegmentDetail
+                                  lap={legSummary}
+                                  records={records}
+                                  sport={leg.sport}
+                                />
+                                <div className="segment-splits">
+                                  <div className="lap-split-header">
+                                    <div>
+                                      <div className="lap-split-label">{label} lap breakdown</div>
+                                      <div className="lap-split-description">Pacing and output inside this race leg</div>
+                                    </div>
+                                    <span className="lap-split-count">{leg.laps.length} laps</span>
+                                  </div>
+                                  <table className="lap-split-table breakdown-nested-table">
+                                    <thead><tr><th>Lap</th><th>Distance</th><th>Duration</th><th>Avg HR</th><th>Pace / Speed</th><th>Power / Cadence</th></tr></thead>
+                                    <tbody>{leg.laps.map((lap, lapIndex) => (
+                                      <tr key={lap.lap_index}>
+                                        <td data-label="Lap"><span className="lap-split-index">{lapIndex + 1}</span></td>
+                                        <td data-label="Distance">{lap.distance_m ? leg.sport === "swim" ? `${Math.round(lap.distance_m)} m` : `${(lap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
+                                        <td data-label="Duration">{formatSplitDuration(lap.elapsed_s)}</td>
+                                        <td data-label="Avg HR">{lap.avg_hr_bpm ? `${lap.avg_hr_bpm} bpm` : "--"}</td>
+                                        <td data-label="Pace / Speed" className="lap-split-pace">{lap.avg_speed_mps ? leg.sport === "swim" ? formatSwimPace(lap.avg_speed_mps) : leg.sport === "run" ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : "--"}</td>
+                                        <td data-label="Power / Cadence">{leg.sport === "swim" ? lap.avg_cadence ? `${lap.avg_cadence} spm` : "--" : lap.avg_power_w ? `${lap.avg_power_w} W` : "--"}</td>
+                                      </tr>
+                                    ))}</tbody>
+                                  </table>
+                                </div>
                               </td>
                             </tr>
                           )}
                           {leg.transition > 0 && (
-                            <tr>
-                              <td className="mono">T{index + 1}</td>
-                              <td className="mono">--</td>
-                              <td className="mono">{formatSplitDuration(leg.transition)}</td>
-                              <td className="mono">--</td>
-                              <td className="mono" colSpan={2}>Transition</td>
-                            </tr>
+                            <PhaseRow
+                              badge={`T${index + 1}`}
+                              title="Transition"
+                              description={`${label} to ${nextLabel}`}
+                              duration={formatSplitDuration(leg.transition)}
+                            />
                           )}
                         </Fragment>
                       );
@@ -786,99 +1238,214 @@ export default function ActivityDetailPage() {
           )}
 
           {activity.sport !== "strength" && !isTriathlon && activity.laps.length > 0 && (
-            <div className="card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
-              <div className="card-header">
-                <span className="card-title">Split Breakdown</span>
-              </div>
-              <div className="table-responsive">
-                <table className="data-table">
+            <div className="card no-hover breakdown-card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
+              <BreakdownHeader
+                title={isHyrox ? "Station Breakdown" : "Split Breakdown"}
+                description={
+                  isHyrox
+                    ? "Run and station performance across the full workout"
+                    : hasStructuredLapPhases
+                      ? "Workout phases with lap-level execution"
+                    : isSwim
+                      ? "Interval pacing with length-level execution"
+                      : "Lap pacing and output consistency"
+                }
+                count={lapGroups.length}
+                itemLabel={isHyrox ? "station" : hasStructuredLapPhases ? "phase" : "lap"}
+              />
+              <div className="table-responsive breakdown-table-wrap">
+                <table className="data-table breakdown-table">
                   <thead>
                     <tr>
-                      <th>Lap</th>
-                      <th>Distance</th>
+                      <th>{hasStructuredLapPhases ? "Phase" : "Lap"}</th>
+                      <th>{isHyrox ? "Load" : "Distance"}</th>
                       <th>Duration</th>
                       <th>Avg HR</th>
                       <th>{isTriathlon ? "Pace / Speed" : isSwim ? "Pace /100m" : "Pace"}</th>
-                      <th>{isTriathlon ? "Power / Cadence" : isSwim ? "Stroke rate" : "Power"}</th>
+                      <th>{isHyrox ? "Cadence" : isTriathlon ? "Power / Cadence" : isSwim ? "Stroke rate" : "Power"}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {activity.laps.map((lap) => {
-                      const kilometerSplits = activity.lap_splits?.[String(lap.lap_index)] ?? [];
+                    {lapGroups.map((group, groupIndex) => {
+                      const lap = group.summary;
+                      const sourceLaps = group.laps;
+                      const kilometerSplits = sourceLaps.length === 1
+                        ? activity.lap_splits?.[String(lap.lap_index)] ?? []
+                        : [];
                       const isExpanded = expandedLapIndex === lap.lap_index;
                       const lapSport = lap.leg ?? activity.sport;
                       const isLapSwim = lapSport === "swim";
-                      const isLapPaceSport = ["run", "trail_run", "walk", "hike"].includes(lapSport);
-                      const lapNumber = lap.lap_index === 0 ? 1 : lap.lap_index;
+                      const isLapPaceSport = lap.lap_type === "run" || ["run", "trail_run", "walk", "hike"].includes(lapSport);
+                      const lapNumber = hasStructuredLapPhases
+                        ? groupIndex + 1
+                        : lap.lap_index === 0 ? 1 : lap.lap_index;
                       const legLapNumber = isTriathlon && lap.leg
                         ? activity.laps.filter((candidate) => candidate.leg === lap.leg).indexOf(lap) + 1
                         : lapNumber;
                       const isRest = isLapSwim
                         ? !lap.distance_m || lap.distance_m <= 0
-                        : lap.lap_type === "rest" || lap.lap_type === "recovery";
-                      const canExpand = kilometerSplits.length > 1;
+                        : lap.lap_type === "rest";
+                      const isRestPhase = isRest && (!lap.distance_m || lap.distance_m <= 0);
+
+                      if (isRestPhase) {
+                        return (
+                          <PhaseRow
+                            key={lap.lap_index}
+                            badge={`R${lapNumber}`}
+                            title="Rest"
+                            description="Recovery between intervals"
+                            duration={formatSplitDuration(lap.elapsed_s)}
+                            avgHr={lap.avg_hr_bpm}
+                          />
+                        );
+                      }
+
+                      const canExpand = (
+                        records.length > 0 ||
+                        kilometerSplits.length > 1 ||
+                        sourceLaps.length > 1
+                      );
                       const toggleLap = (): void => setExpandedLapIndex(isExpanded ? null : lap.lap_index);
+                      const stepLabel = lap.lap_type
+                        ? LAP_TYPE_LABELS[lap.lap_type]
+                        : undefined;
+                      const lapLabel = lap.lap_name ?? stepLabel ?? (isTriathlon && lap.leg ? `${lap.leg === "ride" ? "Bike" : lap.leg[0].toUpperCase() + lap.leg.slice(1)} ${legLapNumber}` : String(lapNumber));
+                      const rowLabel = isHyrox ? lapLabel : stepLabel ?? "Lap";
 
                       return (
                         <Fragment key={lap.lap_index}>
                           <tr
-                            className={`lap-summary-row${isExpanded ? " is-expanded" : ""}${canExpand ? " is-clickable" : ""}`}
+                            className={`lap-summary-row${isRest ? " is-rest" : ""}${isExpanded ? " is-expanded" : ""}${canExpand ? " is-clickable" : ""}`}
                             onClick={canExpand ? toggleLap : undefined}
                           >
-                            <td className="mono">
+                            <td data-label="Lap">
                               {canExpand ? (
                                 <button
                                   type="button"
-                                  className="lap-expand-button lap-expand-button-plain"
+                                  className="lap-expand-button lap-expand-button-plain breakdown-identity-button"
                                   aria-expanded={isExpanded}
-                                  aria-label={`Toggle kilometre breakdown for lap ${lapNumber}`}
+                                  aria-label={
+                                    isHyrox
+                                      ? `Toggle details for ${lapLabel}`
+                                      : hasStructuredLapPhases
+                                        ? `Toggle ${rowLabel} breakdown`
+                                      : `Toggle details for lap ${lapNumber}`
+                                  }
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     toggleLap();
                                   }}
                                 >
-                                  <span>{lapNumber}</span>
+                                  <span className="breakdown-row-identity">
+                                    <span className="breakdown-index">{lapNumber}</span>
+                                    <span className="breakdown-row-label">{rowLabel}</span>
+                                  </span>
                                   <svg viewBox="0 0 16 16" aria-hidden="true">
                                     <path d="m4 6 4 4 4-4" />
                                   </svg>
                                 </button>
-                              ) : isRest ? "Rest" : lap.lap_type === "run" ? "Run" : lap.lap_type === "functional" ? "Functional" : isTriathlon && lap.leg ? `${lap.leg === "ride" ? "Bike" : lap.leg[0].toUpperCase() + lap.leg.slice(1)} ${legLapNumber}` : lapNumber}
+                              ) : (
+                                <span className="breakdown-row-identity">
+                                  <span className="breakdown-index">{lapNumber}</span>
+                                  <span className="breakdown-row-label">{rowLabel}</span>
+                                </span>
+                              )}
                             </td>
-                            <td className="mono">{lap.distance_m ? isLapSwim ? `${Math.round(lap.distance_m)} m` : `${(lap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
-                            <td className="mono">{Math.floor(lap.elapsed_s / 60)}:{String(Math.round(lap.elapsed_s % 60)).padStart(2, "0")}</td>
-                            <td className="mono">{lap.avg_hr_bpm ? `${lap.avg_hr_bpm} bpm` : "--"}</td>
-                            <td className="mono">{lap.avg_speed_mps ? isLapSwim ? formatSwimPace(lap.avg_speed_mps) : isLapPaceSport ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : "--"}</td>
-                            <td className="mono">{isLapSwim ? lap.avg_cadence ? `${lap.avg_cadence} spm` : "--" : lap.avg_power_w ? `${lap.avg_power_w} W` : "--"}</td>
+                            <td data-label={isHyrox ? "Load" : "Distance"} className="mono">{lap.distance_m ? lap.load_unit === "reps" ? `${Math.round(lap.distance_m)} reps` : lap.lap_type === "functional" || isLapSwim ? `${Math.round(lap.distance_m)} m` : `${(lap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
+                            <td data-label="Duration" className="mono">{Math.floor(lap.elapsed_s / 60)}:{String(Math.round(lap.elapsed_s % 60)).padStart(2, "0")}</td>
+                            <td data-label="Avg HR" className="mono">{lap.avg_hr_bpm ? `${lap.avg_hr_bpm} bpm` : "--"}</td>
+                            <td data-label={isSwim ? "Pace /100m" : "Pace"} className="mono breakdown-primary-metric">{lap.avg_speed_mps ? isLapSwim ? formatSwimPace(lap.avg_speed_mps) : isLapPaceSport ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : "--"}</td>
+                            <td data-label={isHyrox ? "Cadence" : isSwim ? "Stroke rate" : "Power"} className="mono">{isHyrox || isLapSwim ? lap.avg_cadence ? `${lap.avg_cadence} spm` : "--" : lap.avg_power_w ? `${lap.avg_power_w} W` : "--"}</td>
                           </tr>
                           {isExpanded && (
                             <tr className="lap-split-row">
                               <td colSpan={6}>
-                                <div className="lap-split-header">
-                                  <div>
-                                    <div className="lap-split-label">{isSwim ? "Length breakdown" : "Kilometre breakdown"}</div>
-                                    <div className="lap-split-description">{isSwim ? "Pace and heart rate by pool length" : "Pace and heart rate by kilometre"}</div>
+                                <SegmentDetail
+                                  lap={lap}
+                                  records={records}
+                                  sport={lapSport}
+                                />
+                                {!isHyrox && sourceLaps.length > 1 ? (
+                                  <div className="segment-splits">
+                                    <div className="lap-split-header">
+                                      <div>
+                                        <div className="lap-split-label">{rowLabel} lap breakdown</div>
+                                        <div className="lap-split-description">Every recorded lap inside this workout phase</div>
+                                      </div>
+                                      <span className="lap-split-count">{sourceLaps.length} laps</span>
+                                    </div>
+                                    <table className="lap-split-table breakdown-nested-table mono">
+                                      <thead><tr><th>Lap</th><th>Distance</th><th>Duration</th><th>Pace</th><th>Avg HR</th><th>Power</th></tr></thead>
+                                      <tbody>{sourceLaps.map((sourceLap) => (
+                                        <tr key={sourceLap.lap_index}>
+                                          <td data-label="Lap"><span className="lap-split-index">{sourceLap.lap_index}</span></td>
+                                          <td data-label="Distance">{sourceLap.distance_m ? `${(sourceLap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
+                                          <td data-label="Duration">{formatSplitDuration(sourceLap.elapsed_s)}</td>
+                                          <td data-label="Pace" className="lap-split-pace">{sourceLap.avg_speed_mps ? `${formatPace(sourceLap.avg_speed_mps)}/km` : "--"}</td>
+                                          <td data-label="Avg HR">{sourceLap.avg_hr_bpm ? `${sourceLap.avg_hr_bpm} bpm` : "--"}</td>
+                                          <td data-label="Power">{sourceLap.avg_power_w ? `${sourceLap.avg_power_w} W` : "--"}</td>
+                                        </tr>
+                                      ))}</tbody>
+                                    </table>
                                   </div>
-                                  <span className="lap-split-count">{kilometerSplits.length} splits</span>
-                                </div>
-                                <table className="lap-split-table mono">
-                                  <thead><tr><th>{isSwim ? "Length" : "Km"}</th><th>Distance</th><th>Duration</th><th>{isSwim ? "Pace /100m" : "Pace"}</th><th>Avg HR</th><th>Max HR</th></tr></thead>
-                                  <tbody>{kilometerSplits.map((split, index) => (
-                                    <tr key={`${lap.lap_index}-${index}`}>
-                                      <td><span className="lap-split-index">{index + 1}</span></td>
-                                      <td>{split.distance_m ? isSwim ? `${Math.round(split.distance_m)} m` : `${(split.distance_m / 1000).toFixed(2)} km` : "--"}</td>
-                                      <td>{formatSplitDuration(split.elapsed_s)}</td>
-                                      <td className="lap-split-pace">{split.avg_speed_mps ? isSwim ? formatSwimPace(split.avg_speed_mps) : `${formatPace(split.avg_speed_mps)}/km` : "--"}</td>
-                                      <td>{split.avg_hr_bpm ? `${split.avg_hr_bpm} bpm` : "--"}</td>
-                                      <td>{split.max_hr_bpm ? `${split.max_hr_bpm} bpm` : "--"}</td>
-                                    </tr>
-                                  ))}</tbody>
-                                </table>
+                                ) : !isHyrox && kilometerSplits.length > 1 ? (
+                                  <div className="segment-splits">
+                                    <div className="lap-split-header">
+                                      <div>
+                                        <div className="lap-split-label">{isSwim ? "Length breakdown" : "Kilometre breakdown"}</div>
+                                        <div className="lap-split-description">{isSwim ? "Pace and heart rate by pool length" : "Pace and heart rate by kilometre"}</div>
+                                      </div>
+                                      <span className="lap-split-count">{kilometerSplits.length} splits</span>
+                                    </div>
+                                    <table className="lap-split-table breakdown-nested-table mono">
+                                      <thead><tr><th>{isSwim ? "Length" : "Km"}</th><th>Distance</th><th>Duration</th><th>{isSwim ? "Pace /100m" : "Pace"}</th><th>Avg HR</th><th>Max HR</th></tr></thead>
+                                      <tbody>{kilometerSplits.map((split, index) => (
+                                        <tr key={`${lap.lap_index}-${index}`}>
+                                          <td data-label={isSwim ? "Length" : "Km"}><span className="lap-split-index">{index + 1}</span></td>
+                                          <td data-label="Distance">{split.distance_m ? isSwim ? `${Math.round(split.distance_m)} m` : `${(split.distance_m / 1000).toFixed(2)} km` : "--"}</td>
+                                          <td data-label="Duration">{formatSplitDuration(split.elapsed_s)}</td>
+                                          <td data-label={isSwim ? "Pace /100m" : "Pace"} className="lap-split-pace">{split.avg_speed_mps ? isSwim ? formatSwimPace(split.avg_speed_mps) : `${formatPace(split.avg_speed_mps)}/km` : "--"}</td>
+                                          <td data-label="Avg HR">{split.avg_hr_bpm ? `${split.avg_hr_bpm} bpm` : "--"}</td>
+                                          <td data-label="Max HR">{split.max_hr_bpm ? `${split.max_hr_bpm} bpm` : "--"}</td>
+                                        </tr>
+                                      ))}</tbody>
+                                    </table>
+                                  </div>
+                                ) : null}
                               </td>
                             </tr>
                           )}
                         </Fragment>
                       );
                     })}
+                    <tr className="breakdown-total-row">
+                      <td data-label="Summary">
+                        <span className="breakdown-total-label">Total</span>
+                      </td>
+                      <td data-label={isHyrox ? "Load" : "Distance"} className="mono">
+                        {totalDistance != null
+                          ? isSwim
+                            ? `${Math.round(totalDistance)} m`
+                            : `${(totalDistance / 1000).toFixed(2)} km`
+                          : "—"}
+                      </td>
+                      <td data-label="Duration" className="mono">{formatSplitDuration(totalDuration)}</td>
+                      <td data-label="Avg HR" className="mono">{totalAvgHr ? `${totalAvgHr} bpm` : "—"}</td>
+                      <td data-label={isSwim ? "Pace /100m" : "Pace"} className="mono">
+                        {totalAvgSpeed
+                          ? isSwim
+                            ? formatSwimPace(totalAvgSpeed)
+                            : isRun
+                              ? formatPace(totalAvgSpeed)
+                              : `${(totalAvgSpeed * 3.6).toFixed(1)} km/h`
+                          : "—"}
+                      </td>
+                      <td data-label={isHyrox ? "Cadence" : isSwim ? "Stroke rate" : "Power"} className="mono">
+                        {isHyrox || isSwim
+                          ? totalAvgCadence ? `${totalAvgCadence} spm` : "—"
+                          : totalAvgPower ? `${totalAvgPower} W` : "—"}
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>

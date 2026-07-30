@@ -517,6 +517,7 @@ class ChatSession(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False, default="New Chat")
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -573,4 +574,3 @@ class CorosMcpToken(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, server_default=text("now()"), onupdate=datetime.utcnow
     )
-

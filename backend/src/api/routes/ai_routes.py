@@ -1,9 +1,10 @@
 """AI routes: ask questions, get briefings, activity postmortems."""
 import asyncio
+import datetime
 import json
 import logging
-import datetime
 from collections.abc import AsyncIterator, Iterator
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -16,6 +17,7 @@ from src.ai import (
     generate_briefing,
     generate_postmortem,
     generate_postmortem_stream,
+    list_models,
 )
 from src.ai.context_builder import build_plan_context, build_training_context
 from src.config import get_settings
@@ -24,7 +26,6 @@ from src.db.models import Activity, ActivityLap, ActivityRecord
 from src.db.models import ChatMessage as DBChatMessage
 from src.db.models import ChatSession as DBChatSession
 from src.db.owner import get_owner_id
-
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +83,15 @@ async def ask_ai(
 
     # 1. Build context from DB + training plan
     context = await build_training_context(
-        db, user_id=get_owner_id(), days=req.context_days
+        db,
+        user_id=get_owner_id(),
+        days=req.context_days,
+        include_activity_details=True,
     )
-    plan_context = await build_plan_context(days_back=req.plan_days_back, days_forward=req.plan_days_forward)
+    plan_context = await build_plan_context(
+        days_back=req.plan_days_back,
+        days_forward=req.plan_days_forward,
+    )
     context = context + "\n\n" + plan_context
 
     # 2. Ask AI coach
@@ -113,9 +120,15 @@ async def ask_ai_stream(
 
     # 1. Build context from DB + training plan
     context: str = await build_training_context(
-        db, user_id=get_owner_id(), days=req.context_days
+        db,
+        user_id=get_owner_id(),
+        days=req.context_days,
+        include_activity_details=True,
     )
-    plan_context: str = await build_plan_context(days_back=req.plan_days_back, days_forward=req.plan_days_forward)
+    plan_context: str = await build_plan_context(
+        days_back=req.plan_days_back,
+        days_forward=req.plan_days_forward,
+    )
     context = context + "\n\n" + plan_context
 
     # 2. Stream AI coach response
@@ -435,6 +448,7 @@ class SessionCreateResponse(BaseModel):
     id: str
     title: str
     is_pinned: bool
+    model_name: str
     created_at: str
     updated_at: str
 
@@ -443,13 +457,24 @@ class SessionListItem(BaseModel):
     id: str
     title: str
     is_pinned: bool
+    model_name: str
     created_at: str
     updated_at: str
+
+
+class SessionCreateRequest(BaseModel):
+    model_name: str | None = None
 
 
 class SessionUpdateRequest(BaseModel):
     title: str | None = None
     is_pinned: bool | None = None
+    model_name: str | None = None
+
+
+class ModelsResponse(BaseModel):
+    models: list[str]
+    default_model: str
 
 
 class MessageItem(BaseModel):
@@ -457,6 +482,22 @@ class MessageItem(BaseModel):
     role: str
     content: str
     created_at: str
+
+
+async def _validated_model(model_name: str | None) -> str:
+    model = model_name or _active_model()
+    if model not in await asyncio.to_thread(list_models):
+        raise HTTPException(status_code=400, detail="Model is not available from the AI provider.")
+    return model
+
+
+@router.get("/models", response_model=ModelsResponse)
+async def get_models() -> ModelsResponse:
+    """Return models available from the active AI provider."""
+    return ModelsResponse(
+        models=await asyncio.to_thread(list_models),
+        default_model=_active_model(),
+    )
 
 
 @router.get("/sessions", response_model=list[SessionListItem])
@@ -473,6 +514,7 @@ async def list_sessions(db: AsyncSession = Depends(get_db_session)) -> list[Sess
             id=s.id,
             title=s.title,
             is_pinned=s.is_pinned,
+            model_name=s.model_name or _active_model(),
             created_at=s.created_at.isoformat(),
             updated_at=s.updated_at.isoformat(),
         )
@@ -481,15 +523,20 @@ async def list_sessions(db: AsyncSession = Depends(get_db_session)) -> list[Sess
 
 
 @router.post("/sessions", response_model=SessionCreateResponse, status_code=201)
-async def create_session(db: AsyncSession = Depends(get_db_session)) -> SessionCreateResponse:
+async def create_session(
+    req: SessionCreateRequest | None = None,
+    db: AsyncSession = Depends(get_db_session),
+) -> SessionCreateResponse:
     """Create a new empty chat session."""
-    session = DBChatSession(user_id=get_owner_id())
+    model_name = await _validated_model(req.model_name if req else None)
+    session = DBChatSession(user_id=get_owner_id(), model_name=model_name)
     db.add(session)
     await db.flush()
     return SessionCreateResponse(
         id=session.id,
         title=session.title,
         is_pinned=session.is_pinned,
+        model_name=model_name,
         created_at=session.created_at.isoformat(),
         updated_at=session.updated_at.isoformat(),
     )
@@ -510,17 +557,20 @@ async def update_session(
     session = res.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
-    
+
     if req.title is not None:
         session.title = req.title
     if req.is_pinned is not None:
         session.is_pinned = req.is_pinned
-        
+    if req.model_name is not None:
+        session.model_name = await _validated_model(req.model_name)
+
     await db.commit()
     return SessionListItem(
         id=session.id,
         title=session.title,
         is_pinned=session.is_pinned,
+        model_name=session.model_name or _active_model(),
         created_at=session.created_at.isoformat(),
         updated_at=session.updated_at.isoformat(),
     )
@@ -587,8 +637,16 @@ async def session_ask_stream(
     await db.commit()
 
     # Build context
-    context: str = await build_training_context(db, user_id=get_owner_id(), days=req.context_days)
-    plan_context: str = await build_plan_context(days_back=req.plan_days_back, days_forward=req.plan_days_forward)
+    context: str = await build_training_context(
+        db,
+        user_id=get_owner_id(),
+        days=req.context_days,
+        include_activity_details=True,
+    )
+    plan_context: str = await build_plan_context(
+        days_back=req.plan_days_back,
+        days_forward=req.plan_days_forward,
+    )
     context = context + "\n\n" + plan_context
 
     history_dicts: list[dict[str, str]] = [
@@ -611,7 +669,12 @@ async def session_ask_stream(
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
-        sync_stream = ask_coach_stream(req.question, context, history_dicts)
+        sync_stream = ask_coach_stream(
+            req.question,
+            context,
+            history_dicts,
+            model=session.model_name or _active_model(),
+        )
         producer = asyncio.create_task(asyncio.to_thread(_produce, sync_stream))
 
         try:

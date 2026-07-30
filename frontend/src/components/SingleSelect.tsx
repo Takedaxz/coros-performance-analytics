@@ -7,6 +7,7 @@ interface SingleSelectOption {
 
 interface SingleSelectProps {
   ariaLabel: string;
+  detailsName?: string;
   id?: string;
   onChange: (value: string) => void;
   options: readonly SingleSelectOption[];
@@ -15,6 +16,7 @@ interface SingleSelectProps {
 
 export default function SingleSelect({
   ariaLabel,
+  detailsName,
   id,
   onChange,
   options,
@@ -23,7 +25,7 @@ export default function SingleSelect({
   const selectedLabel = options.find((option) => option.value === value)?.label ?? value;
 
   return (
-    <details className="single-select" id={id}>
+    <details className="single-select" id={id} name={detailsName}>
       <summary className="single-select-trigger" aria-label={ariaLabel}>
         {selectedLabel}
         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none">

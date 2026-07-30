@@ -198,7 +198,12 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
                             avg_power_w=_get_field_value(frame, "avg_power"),
                             calories_kcal=_get_field_value(frame, "total_calories"),
                             avg_cadence=_get_field_value(frame, "avg_cadence"),
-                            lap_trigger=str(_get_field_value(frame, "lap_trigger")),
+                            lap_trigger=(
+                                str(lap_trigger)
+                                if (lap_trigger := _get_field_value(frame, "lap_trigger"))
+                                is not None
+                                else None
+                            ),
                         )
                     )
                     lap_index += 1

@@ -9,6 +9,8 @@ e.g. the KKU OKMD gateway, vLLM, LM Studio, Ollama (OpenAI-compat mode), etc.
 
 import logging
 from collections.abc import Iterator
+from functools import lru_cache
+from time import monotonic
 
 from openai import OpenAI
 
@@ -17,6 +19,7 @@ from src.config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+_MODEL_CACHE_SECONDS = 300
 
 
 def _get_client() -> OpenAI | None:
@@ -27,6 +30,25 @@ def _get_client() -> OpenAI | None:
         api_key=settings.openai_compat_api_key,
         base_url=settings.openai_compat_base_url,
     )
+
+
+@lru_cache(maxsize=1)
+def _discover_models(_cache_bucket: int) -> tuple[str, ...]:
+    client = _get_client()
+    if not client:
+        return (settings.openai_compat_model,)
+    try:
+        models = tuple(sorted(model.id for model in client.models.list().data))
+        return models or (settings.openai_compat_model,)
+    except Exception:
+        logger.exception("OpenAI-compatible model discovery failed")
+        return (settings.openai_compat_model,)
+
+
+def list_models() -> list[str]:
+    """Return discovered model IDs with a five-minute in-process cache."""
+    cache_bucket = int(monotonic() // _MODEL_CACHE_SECONDS)
+    return list(_discover_models(cache_bucket))
 
 
 def _build_history_messages(history: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -73,6 +95,7 @@ def ask_coach_stream(
     question: str,
     context: str,
     history: list[dict[str, str]] | None = None,
+    model: str | None = None,
 ) -> Iterator[str]:
     """Stream the AI coach response chunk by chunk."""
     client = _get_client()
@@ -86,7 +109,7 @@ def ask_coach_stream(
 
     try:
         stream = client.chat.completions.create(
-            model=settings.openai_compat_model,
+            model=model or settings.openai_compat_model,
             messages=messages,  # type: ignore[arg-type]
             stream=True,
         )

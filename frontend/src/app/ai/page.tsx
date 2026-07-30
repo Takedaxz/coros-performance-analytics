@@ -43,17 +43,6 @@ function RetryIcon() {
   );
 }
 
-function TrashIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6l-1 14H6L5 6" />
-      <path d="M10 11v6M14 11v6" />
-      <path d="M9 6V4h6v2" />
-    </svg>
-  );
-}
-
 function PlusIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -83,33 +72,6 @@ function PrintIcon() {
   );
 }
 
-function PinIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="12" y1="17" x2="12" y2="22" />
-      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.68V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3v4.68a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
-    </svg>
-  );
-}
-
-function PinnedIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="12" y1="17" x2="12" y2="22" />
-      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.68V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3v4.68a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
-    </svg>
-  );
-}
-
-function EditIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-    </svg>
-  );
-}
-
 function CheckIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -131,8 +93,14 @@ type Session = {
   id: string;
   title: string;
   is_pinned: boolean;
+  model_name: string;
   created_at: string;
   updated_at: string;
+};
+
+type ModelsResponse = {
+  models: string[];
+  default_model: string;
 };
 
 type Message = {
@@ -176,9 +144,14 @@ export default function AiPage() {
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [sessionPendingDelete, setSessionPendingDelete] = useState<Session | null>(null);
   const [planDaysBack, setPlanDaysBack] = useState(7);
   const [planDaysForward, setPlanDaysForward] = useState(14);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [defaultModel, setDefaultModel] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const aiResponseRef = useRef("");
   // Prevents the activeSessionId effect from fetching + overwriting messages while a send is in progress
   const isStreamingRef = useRef(false);
@@ -186,6 +159,13 @@ export default function AiPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    const dialog = deleteDialogRef.current;
+    if (!dialog) return;
+    if (sessionPendingDelete && !dialog.open) dialog.showModal();
+    if (!sessionPendingDelete && dialog.open) dialog.close();
+  }, [sessionPendingDelete]);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -196,12 +176,10 @@ export default function AiPage() {
         // Auto-restore the exact session the user had open before navigation.
         // Only restore if that session still exists — never auto-select data[0]
         // to avoid silently landing on an empty ghost session.
-        setActiveSessionId((current) => {
-          if (current) return current; // already selected, leave it
-          const saved = sessionStorage.getItem("ai_active_session");
-          const match = saved && data.find((s) => s.id === saved);
-          return match ? match.id : null;
-        });
+        const saved = sessionStorage.getItem("ai_active_session");
+        const match = saved && data.find((session) => session.id === saved);
+        setActiveSessionId((current) => current || (match ? match.id : null));
+        if (match) setSelectedModel(match.model_name);
       }
     } finally {
       setSessionsLoading(false);
@@ -209,6 +187,19 @@ export default function AiPage() {
   }, []);
 
   useEffect(() => { fetchSessions(); }, [fetchSessions]);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/ai/models`)
+      .then((res) => res.ok ? res.json() : Promise.reject())
+      .then((data: ModelsResponse) => {
+        setAvailableModels(data.models);
+        setDefaultModel(data.default_model);
+        setSelectedModel((current) => current || data.default_model);
+      })
+      .catch(() => {
+        setAvailableModels([]);
+      });
+  }, []);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/settings/goals`)
@@ -249,11 +240,16 @@ export default function AiPage() {
 
 
   async function createRealSession(): Promise<Session | null> {
-    const res = await fetch(`${API_BASE}/api/ai/sessions`, { method: "POST" });
+    const res = await fetch(`${API_BASE}/api/ai/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_name: selectedModel || defaultModel || null }),
+    });
     if (!res.ok) return null;
     const session: Session = await res.json();
     setSessions((prev) => [session, ...prev]);
     setActiveSessionId(session.id);
+    setSelectedModel(session.model_name);
     return session;
   }
 
@@ -262,16 +258,18 @@ export default function AiPage() {
     setActiveSessionId(null);
     setMessages([]);
     setInput("");
+    setSelectedModel(defaultModel);
     sessionStorage.removeItem("ai_active_session");
   }
 
-  const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDeleteSession = async (id: string) => {
+    setSessionPendingDelete(null);
     try {
       await fetch(`${API_BASE}/api/ai/sessions/${id}`, { method: "DELETE" });
       if (activeSessionId === id) {
         setActiveSessionId(null);
         setMessages([]);
+        setSelectedModel(defaultModel);
         sessionStorage.removeItem("ai_active_session");
       }
       fetchSessions();
@@ -280,7 +278,10 @@ export default function AiPage() {
     }
   };
 
-  const handleUpdateSession = async (id: string, updates: { title?: string; is_pinned?: boolean }) => {
+  const handleUpdateSession = async (
+    id: string,
+    updates: { title?: string; is_pinned?: boolean; model_name?: string },
+  ) => {
     try {
       const res = await fetch(`${API_BASE}/api/ai/sessions/${id}`, {
         method: "PUT",
@@ -294,6 +295,27 @@ export default function AiPage() {
       console.error("Failed to update session", err);
     }
   };
+
+  async function handleModelChange(modelName: string) {
+    const previousModel = selectedModel;
+    setSelectedModel(modelName);
+    if (!activeSessionId) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/sessions/${activeSessionId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model_name: modelName }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const updated: Session = await res.json();
+      setSessions((current) =>
+        current.map((session) => session.id === updated.id ? updated : session)
+      );
+    } catch {
+      setSelectedModel(previousModel);
+    }
+  }
 
   async function handleSend(forcedInput?: string, sessionId?: string, overrideHistory?: Message[]) {
     const userMsg = (forcedInput ?? input).trim();
@@ -537,6 +559,19 @@ export default function AiPage() {
         <header className="page-header print-hide">
           <PageTitle>AI Coach</PageTitle>
           <div className="ai-link-header-actions">
+            <label className="ai-link-model-picker">
+              <span>Model</span>
+              <select
+                aria-label="AI model"
+                value={selectedModel}
+                onChange={(event) => handleModelChange(event.target.value)}
+                disabled={isLoading || availableModels.length === 0}
+              >
+                {availableModels.map((model) => (
+                  <option key={model} value={model}>{model}</option>
+                ))}
+              </select>
+            </label>
             <div className="ai-link-context">
               <span className="ai-link-context-label">Calendar context</span>
               <span className="ai-link-context-range">
@@ -600,7 +635,12 @@ export default function AiPage() {
                     <div
                       key={s.id}
                       id={`session-${s.id}`}
-                      onClick={() => { if (!isLoading) setActiveSessionId(s.id); }}
+                      onClick={() => {
+                        if (!isLoading) {
+                          setActiveSessionId(s.id);
+                          setSelectedModel(s.model_name);
+                        }
+                      }}
                       onMouseEnter={() => setHoveredSessionId(s.id)}
                       onMouseLeave={() => setHoveredSessionId(null)}
                       style={{
@@ -679,51 +719,63 @@ export default function AiPage() {
                             }}>
                               {s.title}
                             </p>
-                            <p style={{ fontSize: "10px", color: "var(--color-text-muted)", margin: "2px 0 0", lineHeight: 1 }}>
+                            <p style={{ alignItems: "center", display: "flex", fontSize: "10px", gap: "6px", color: "var(--color-text-muted)", margin: "2px 0 0", lineHeight: 1 }}>
                               {relativeTime(s.updated_at)}
+                              {s.is_pinned && <span className="ai-session-pinned-label">Pinned</span>}
                             </p>
                           </>
                         )}
                       </div>
                       {editingSessionId !== s.id && (s.is_pinned || isHovered || isActive) && (
-                        <div style={{ display: "flex", gap: "2px", flexShrink: 0 }}>
-                          <button
-                            className="btn btn-ghost"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleUpdateSession(s.id, { is_pinned: !s.is_pinned });
-                            }}
-                            style={{ padding: "2px", color: s.is_pinned ? "var(--color-text-primary)" : "var(--color-text-muted)", lineHeight: 1 }}
-                            aria-label={s.is_pinned ? "Unpin session" : "Pin session"}
-                          >
-                            {s.is_pinned ? <PinnedIcon /> : <PinIcon />}
-                          </button>
-                          {(isHovered || isActive) && (
+                        <details
+                          className="ai-session-menu"
+                          name="ai-session-menu"
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") {
+                              event.currentTarget.removeAttribute("open");
+                              event.currentTarget.querySelector("summary")?.focus();
+                            }
+                          }}
+                        >
+                          <summary className="ai-session-menu-trigger" aria-label={`Actions for ${s.title}`}>
+                            <span aria-hidden="true">⋮</span>
+                          </summary>
+                          <div className="ai-session-menu-popover" role="menu">
                             <button
-                              className="btn btn-ghost"
-                              onClick={(e) => {
-                                e.stopPropagation();
+                              type="button"
+                              role="menuitem"
+                              onClick={(event) => {
+                                handleUpdateSession(s.id, { is_pinned: !s.is_pinned });
+                                event.currentTarget.closest("details")?.removeAttribute("open");
+                              }}
+                            >
+                              {s.is_pinned ? "Unpin" : "Pin"}
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={(event) => {
                                 setEditingSessionId(s.id);
                                 setEditingTitle(s.title);
+                                event.currentTarget.closest("details")?.removeAttribute("open");
                               }}
-                              style={{ padding: "2px", color: "var(--color-text-muted)", lineHeight: 1 }}
-                              aria-label="Edit session"
                             >
-                              <EditIcon />
+                              Rename
                             </button>
-                          )}
-                          {(isHovered || isActive) && (
                             <button
-                              id={`delete-session-${s.id}`}
-                              className="btn btn-ghost"
-                              onClick={(e) => handleDeleteSession(s.id, e)}
-                              style={{ padding: "2px", color: "var(--color-text-muted)", lineHeight: 1 }}
-                              aria-label="Delete session"
+                              type="button"
+                              role="menuitem"
+                              className="is-danger"
+                              onClick={(event) => {
+                                setSessionPendingDelete(s);
+                                event.currentTarget.closest("details")?.removeAttribute("open");
+                              }}
                             >
-                              <TrashIcon />
+                              Delete
                             </button>
-                          )}
-                        </div>
+                          </div>
+                        </details>
                       )}
                     </div>
                   );
@@ -860,6 +912,47 @@ export default function AiPage() {
             </div>
           </div>
         </div>
+
+        <dialog
+          ref={deleteDialogRef}
+          className="ai-delete-dialog"
+          aria-labelledby="delete-session-title"
+          aria-describedby="delete-session-description"
+          onCancel={() => setSessionPendingDelete(null)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setSessionPendingDelete(null);
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setSessionPendingDelete(null);
+          }}
+        >
+          <div className="ai-delete-dialog-content">
+            <span className="ai-delete-dialog-label">Delete session</span>
+            <h2 id="delete-session-title">Delete this chat?</h2>
+            <p id="delete-session-description">
+              “{sessionPendingDelete?.title}” and its messages will be permanently deleted.
+            </p>
+            <div className="ai-delete-dialog-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                autoFocus
+                onClick={() => setSessionPendingDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn ai-delete-dialog-confirm"
+                onClick={() => {
+                  if (sessionPendingDelete) handleDeleteSession(sessionPendingDelete.id);
+                }}
+              >
+                Delete chat
+              </button>
+            </div>
+          </div>
+        </dialog>
       </main>
     </div>
   );

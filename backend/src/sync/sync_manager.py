@@ -264,7 +264,15 @@ def _detail_activity_laps(activity: Activity, raw_detail: dict) -> list[Activity
     """Convert COROS detail lap items from centiseconds and centimetres."""
     elapsed_before = 0.0
     laps: list[ActivityLap] = []
-    for index, item in enumerate(_coros_detail_lap_items(raw_detail)):
+    items = [
+        item
+        for item in _coros_detail_lap_items(raw_detail)
+        if _nonnegative_number(item.get("mode")) != 16
+    ]
+    first_start = _nonnegative_number(items[0].get("startTimestamp")) if items else None
+    for item in items:
+        mode = _nonnegative_number(item.get("mode"))
+        exercise_type = _nonnegative_number(item.get("exerciseType"))
         time_raw = next(
             (
                 value
@@ -281,35 +289,112 @@ def _detail_activity_laps(activity: Activity, raw_detail: dict) -> list[Activity
             ),
             None,
         )
+        actual_value = _nonnegative_number(item.get("actualValue"))
+        target_type = _nonnegative_number(item.get("targetType"))
+        if mode == 2 and actual_value is not None:
+            distance_raw = max(distance_raw or 0, actual_value)
+        elif mode == 14:
+            distance_raw = actual_value
         elapsed_s = time_raw / 100 if time_raw is not None else 0
-        distance_m = distance_raw / 100 if distance_raw is not None else None
-        mode = _nonnegative_number(item.get("mode"))
+        distance_m = (
+            distance_raw
+            if mode == 14 and target_type == 3
+            else distance_raw / 100
+            if distance_raw is not None
+            else None
+        )
         if elapsed_s <= 0 and distance_m is None:
             continue
+        start_timestamp = _nonnegative_number(item.get("startTimestamp"))
+        start_offset_s = (
+            (start_timestamp - first_start) / 100
+            if start_timestamp is not None and first_start is not None
+            else elapsed_before
+        )
+        exercise_name_key = item.get("exerciseNameKey")
+        workout_step_trigger = (
+            {
+                1: "coros_warmup",
+                2: "coros_training",
+                3: "coros_cooldown",
+                4: "coros_rest",
+            }.get(int(exercise_type))
+            if exercise_type is not None
+            else None
+        )
+        lap_trigger = workout_step_trigger or (
+            "coros_rest"
+            if mode == 3
+            else "coros_run"
+            if mode in {0, 2} and distance_m is not None and distance_m > 0
+            else f"coros_hyrox:{exercise_name_key}:{'reps' if target_type == 3 else 'm'}"
+            if mode == 14 and isinstance(exercise_name_key, str)
+            else "coros_functional"
+            if mode == 0
+            else "coros_detail"
+        )
         laps.append(
             ActivityLap(
                 activity_id=activity.id,
-                lap_index=index + 1,
-                start_time=activity.start_time + timedelta(seconds=elapsed_before),
+                lap_index=len(laps) + 1,
+                start_time=activity.start_time + timedelta(seconds=start_offset_s),
                 elapsed_s=elapsed_s,
                 distance_m=distance_m,
                 avg_hr_bpm=int(_nonnegative_number(item.get("avgHr")) or 0) or None,
                 max_hr_bpm=int(_nonnegative_number(item.get("maxHr")) or 0) or None,
-                avg_speed_mps=distance_m / elapsed_s if distance_m is not None and elapsed_s > 0 else None,
+                avg_speed_mps=distance_m / elapsed_s
+                if lap_trigger
+                in {"coros_warmup", "coros_training", "coros_cooldown", "coros_rest", "coros_run"}
+                and distance_m is not None
+                and elapsed_s > 0
+                else None,
                 avg_power_w=int(_nonnegative_number(item.get("avgPower")) or 0) or None,
-                lap_trigger=(
-                    "coros_rest"
-                    if mode == 3
-                    else "coros_run"
-                    if mode == 0 and distance_m is not None and distance_m > 0
-                    else "coros_functional"
-                    if mode == 0
-                    else "coros_detail"
-                ),
+                calories_kcal=round((_nonnegative_number(item.get("calories")) or 0) / 1_000)
+                or None,
+                avg_cadence=int(_nonnegative_number(item.get("avgCadence")) or 0) or None,
+                lap_trigger=lap_trigger,
             )
         )
         elapsed_before += elapsed_s
     return laps
+
+
+def _detail_activity_records(activity: Activity, raw_detail: dict) -> list[ActivityRecord]:
+    """Convert COROS Hybrid frequency samples into existing activity records."""
+    points = raw_detail.get("frequencyList")
+    if not isinstance(points, list):
+        return []
+    items = [
+        item
+        for item in _coros_detail_lap_items(raw_detail)
+        if _nonnegative_number(item.get("mode")) != 16
+    ]
+    first_start = _nonnegative_number(items[0].get("startTimestamp")) if items else None
+    if first_start is None:
+        return []
+
+    records: list[ActivityRecord] = []
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        timestamp_raw = _nonnegative_number(point.get("timestamp"))
+        if timestamp_raw is None or timestamp_raw < first_start:
+            continue
+        elapsed_s = (timestamp_raw - first_start) / 100
+        pace_s_per_km = _nonnegative_number(point.get("speed"))
+        distance_cm = _nonnegative_number(point.get("distance"))
+        records.append(
+            ActivityRecord(
+                activity_id=activity.id,
+                timestamp=activity.start_time + timedelta(seconds=elapsed_s),
+                elapsed_s=elapsed_s,
+                distance_m=distance_cm / 100 if distance_cm is not None else None,
+                speed_mps=1000 / pace_s_per_km if pace_s_per_km else None,
+                heart_rate_bpm=int(_nonnegative_number(point.get("heart")) or 0) or None,
+                cadence=int(_nonnegative_number(point.get("cadence")) or 0) or None,
+            )
+        )
+    return records
 
 
 def _record_date(data: dict) -> str | None:
@@ -867,15 +952,21 @@ async def _upsert_activities(
                         activity.id,
                         exc,
                     )
-        elif item.get("name") == "Hybrid Fitness Training":
+        elif raw_sport == 1200:
             label_id = item.get("labelId")
             if isinstance(label_id, str) and label_id:
                 try:
                     detail = await client.fetch_activity_detail(label_id, int(raw_sport))
                     detail_laps = _detail_activity_laps(activity, detail)
+                    detail_records = _detail_activity_records(activity, detail)
                     if detail_laps:
                         await db.execute(delete(ActivityLap).where(ActivityLap.activity_id == activity.id))
                         db.add_all(detail_laps)
+                    if detail_records:
+                        await db.execute(
+                            delete(ActivityRecord).where(ActivityRecord.activity_id == activity.id)
+                        )
+                        db.add_all(detail_records)
                     await asyncio.sleep(0.4)
                 except CorosApiClientError as exc:
                     logger.warning(

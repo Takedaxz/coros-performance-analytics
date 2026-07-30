@@ -46,6 +46,20 @@ const DEFAULT_FILTERS: ActivityFilters = {
   sort: "newest",
 };
 
+const PERIOD_INPUT_LABELS: Record<Exclude<DatePeriod, "">, string> = {
+  day: "Exact calendar date",
+  week: "Week number and year",
+  month: "Month and year",
+  year: "Year",
+};
+
+const PERIOD_INPUT_HINTS: Record<Exclude<DatePeriod, "">, string> = {
+  day: "Choose the exact activity date.",
+  week: "Example: Week 31, 2026",
+  month: "Example: July 2026",
+  year: "Enter four digits, for example 2026",
+};
+
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -177,6 +191,12 @@ export default function ActivitiesPage() {
     Boolean(filters.minDistanceKm || filters.maxDistanceKm),
     filters.sort !== "newest",
   ].filter(Boolean).length;
+  const periodInputLabel = draftFilters.period
+    ? PERIOD_INPUT_LABELS[draftFilters.period]
+    : "Choose a period first";
+  const periodInputHint = draftFilters.period
+    ? PERIOD_INPUT_HINTS[draftFilters.period]
+    : "Choose Exact date, week, month, or year.";
 
   const setDraftFilter = (key: keyof ActivityFilters, value: string) => {
     setDraftFilters((current) => ({ ...current, [key]: value }));
@@ -191,6 +211,7 @@ export default function ActivitiesPage() {
           <div className="activity-header-controls">
             <SingleSelect
               ariaLabel="Sport filter"
+              detailsName="activity-header-menu"
               value={sportFilter}
               onChange={(value) => {
                 setSportFilter(value);
@@ -202,7 +223,7 @@ export default function ActivitiesPage() {
                 ...Object.entries(SPORT_LABELS).map(([value, label]) => ({ value, label })),
               ]}
             />
-            <details className="activity-filter">
+            <details className="activity-filter" name="activity-header-menu">
               <summary className="activity-filter-trigger">
                 Filters
                 {activeFilterCount > 0 && <span className="activity-filter-count">{activeFilterCount}</span>}
@@ -221,9 +242,9 @@ export default function ActivitiesPage() {
               >
                 <div className="activity-filter-grid">
                   <div className="activity-filter-field">
-                    <span>Date range</span>
+                    <span>Filter period</span>
                     <SingleSelect
-                      ariaLabel="Date range"
+                      ariaLabel="Filter period"
                       value={draftFilters.period}
                       onChange={(value) => {
                         setDraftFilter("period", value as DatePeriod);
@@ -231,7 +252,7 @@ export default function ActivitiesPage() {
                       }}
                       options={[
                         { value: "", label: "All dates" },
-                        { value: "day", label: "Day" },
+                        { value: "day", label: "Date" },
                         { value: "week", label: "Week" },
                         { value: "month", label: "Month" },
                         { value: "year", label: "Year" },
@@ -240,9 +261,10 @@ export default function ActivitiesPage() {
                   </div>
 
                   <label className="activity-filter-field">
-                    <span>{draftFilters.period ? `Choose ${draftFilters.period}` : "Date"}</span>
+                    <span>{periodInputLabel}</span>
                     {draftFilters.period === "year" ? (
                       <input
+                        aria-label={periodInputLabel}
                         type="number"
                         min="2000"
                         max="2100"
@@ -253,13 +275,15 @@ export default function ActivitiesPage() {
                       />
                     ) : (
                       <input
-                        type={draftFilters.period || "date"}
+                        aria-label={periodInputLabel}
+                        type={draftFilters.period === "day" ? "date" : draftFilters.period || "date"}
                         required={Boolean(draftFilters.period)}
                         disabled={!draftFilters.period}
                         value={draftFilters.periodValue}
                         onChange={(event) => setDraftFilter("periodValue", event.target.value)}
                       />
                     )}
+                    <small className="activity-filter-hint">{periodInputHint}</small>
                   </label>
 
                   <div className="activity-filter-field">
