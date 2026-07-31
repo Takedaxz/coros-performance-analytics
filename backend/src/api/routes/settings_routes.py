@@ -85,6 +85,9 @@ class UserProfile(BaseModel):
     weight_kg: float | None = None
     body_fat_pct: float | None = None
     training_notes: str | None = None
+    max_hr_bpm: int | None = None
+    resting_hr_bpm: int | None = None
+    heart_rate_reserve_bpm: int | None = None
 
 
 @router.get("/sync-config")
@@ -166,6 +169,15 @@ async def get_profile(db: AsyncSession = Depends(get_db_session)) -> UserProfile
         weight_kg=user.weight_kg,
         body_fat_pct=user.body_fat_pct,
         training_notes=user.training_notes,
+        max_hr_bpm=user.max_hr_bpm,
+        resting_hr_bpm=user.resting_hr_bpm,
+        heart_rate_reserve_bpm=(
+            user.max_hr_bpm - user.resting_hr_bpm
+            if user.max_hr_bpm is not None
+            and user.resting_hr_bpm is not None
+            and user.max_hr_bpm > user.resting_hr_bpm
+            else None
+        ),
     )
 
 
@@ -208,6 +220,15 @@ async def update_profile(
         weight_kg=user.weight_kg,
         body_fat_pct=user.body_fat_pct,
         training_notes=user.training_notes,
+        max_hr_bpm=user.max_hr_bpm,
+        resting_hr_bpm=user.resting_hr_bpm,
+        heart_rate_reserve_bpm=(
+            user.max_hr_bpm - user.resting_hr_bpm
+            if user.max_hr_bpm is not None
+            and user.resting_hr_bpm is not None
+            and user.max_hr_bpm > user.resting_hr_bpm
+            else None
+        ),
     )
 
 

@@ -182,7 +182,7 @@ export default function FitnessPage() {
                 ) : (
                   <ResponsiveContainer width="100%" height={210}>
                     <AreaChart data={vo2Readings}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" vertical={false} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" vertical={false} />
                       <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(val) => val.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                       <YAxis stroke="var(--color-text-muted)" fontSize={11} domain={['dataMin - 0.5', 'dataMax + 0.5']} axisLine={false} />
                       <Tooltip />

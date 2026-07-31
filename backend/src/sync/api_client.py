@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import logging
@@ -17,6 +18,14 @@ _MOBILE_TOKEN_TTL_SECONDS = 3600  # 1 hour
 _REDIS_KEY_ACCESS_TOKEN = "coros:token:access"
 _REDIS_KEY_MOBILE_TOKEN = "coros:token:mobile"
 _REDIS_KEY_USER_ID = "coros:token:user_id"
+
+
+def _rate_limit_delay(retry_after: str | None) -> float:
+    try:
+        seconds = float(retry_after) if retry_after is not None else 1.0
+    except ValueError:
+        seconds = 1.0
+    return min(max(seconds, 0.0), 5.0)
 
 
 class CorosApiClientError(Exception):
@@ -156,6 +165,11 @@ class CorosApiClient:
     ) -> dict:
         """GET with automatic token refresh on 401 or API-level token error."""
         resp = await client.get(url, params=params, headers=self._get_auth_headers())
+        if resp.status_code == 429:
+            delay = _rate_limit_delay(resp.headers.get("Retry-After"))
+            logger.warning("coros_api: rate limited, retrying once in %.1fs", delay)
+            await asyncio.sleep(delay)
+            resp = await client.get(url, params=params, headers=self._get_auth_headers())
         
         body = None
         is_token_invalid = resp.status_code == 401

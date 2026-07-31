@@ -1,8 +1,9 @@
 """Sync routes: trigger API sync, stream progress via SSE, check sync history."""
 
 import asyncio
-from collections.abc import AsyncGenerator
-from datetime import datetime
+import logging
+from collections.abc import AsyncGenerator, Callable
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import redis.asyncio as aioredis
@@ -13,16 +14,19 @@ from sse_starlette.sse import EventSourceResponse
 
 from src.config import get_settings
 from src.db.credential_store import load_coros_credentials
-from src.db.engine import get_db_session
+from src.db.engine import async_session_factory, get_db_session
 from src.db.models import SyncEvent
 from src.db.owner import get_owner_id
 
 router = APIRouter()
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 # In-memory sync state for SSE broadcasting.
 # Production would use Redis pub/sub; this works for single-user MVP.
 _sync_events: dict[str, list[dict[str, str]]] = {}
+# ponytail: process-local lock; replace with Redis only if multiple API workers are added.
+_sync_lock = asyncio.Lock()
 
 
 def _push_sync_event(job_id: str, event_type: str, data: str) -> None:
@@ -32,9 +36,73 @@ def _push_sync_event(job_id: str, event_type: str, data: str) -> None:
     _sync_events[job_id].append({"event": event_type, "data": data})
 
 
+async def _run_sync_job(
+    job_id: str,
+    days: int | None,
+    on_event: Callable[[str, str], None] | None,
+) -> None:
+    from src.sync.sync_manager import run_sync
+
+    redis_client = aioredis.from_url(settings.redis_url, decode_responses=False)
+    try:
+        async for session in get_db_session():
+            try:
+                await run_sync(
+                    session,
+                    get_owner_id(),
+                    days=days,
+                    on_event=on_event,
+                    redis=redis_client,
+                    sync_event_id=job_id,
+                )
+                await session.commit()
+            except Exception as exc:
+                await session.rollback()
+                logger.exception("sync_job_failed: job_id=%s", job_id)
+                if on_event is not None:
+                    on_event("error", f'{{"message": "Sync failed: {exc}"}}')
+    finally:
+        try:
+            await redis_client.aclose()
+        finally:
+            _sync_lock.release()
+
+
+async def run_scheduled_sync() -> bool:
+    """Run one scheduled sync, or skip when unavailable or already running."""
+    if _sync_lock.locked():
+        logger.info("scheduled_sync_skipped: sync already running")
+        return False
+
+    async with async_session_factory() as db:
+        creds = await load_coros_credentials(db, settings.app_secret_key)
+    if not (creds or (settings.coros_email and settings.coros_password)):
+        logger.info("scheduled_sync_skipped: COROS credentials not configured")
+        return False
+
+    if _sync_lock.locked():
+        logger.info("scheduled_sync_skipped: sync started while checking credentials")
+        return False
+    await _sync_lock.acquire()
+    await _run_sync_job(str(uuid4()), None, None)
+    return True
+
+
+def _utc_iso(value: datetime) -> str:
+    """Serialize naive database timestamps as explicit UTC."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
+
+
 @router.post("/now")
 async def trigger_sync(
-    days: int = Query(default=1095, ge=1, le=3650, description="Number of days back to sync (e.g. 30, 365, 1095)"),
+    days: int | None = Query(
+        default=None,
+        ge=1,
+        le=3650,
+        description="Activity days override; omit for an automatic incremental sync",
+    ),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, str]:
     """Trigger an immediate API sync. Returns a job_id for SSE tracking."""
@@ -46,37 +114,18 @@ async def trigger_sync(
             detail="COROS API credentials not configured. Please configure them in Settings.",
         )
 
+    if _sync_lock.locked():
+        raise HTTPException(status_code=409, detail="A sync is already running.")
+    await _sync_lock.acquire()
+
     job_id = str(uuid4())
     _sync_events[job_id] = []
 
-    async def _do_sync(job_id_val: str, days_to_sync: int) -> None:
-        from src.db.engine import get_db_session
-        from src.sync.sync_manager import run_sync
-
-        def _on_event(evt_type: str, evt_data: str) -> None:
-            _push_sync_event(job_id_val, evt_type, evt_data)
-
-        redis_client = aioredis.from_url(settings.redis_url, decode_responses=False)
-        try:
-            async for session in get_db_session():
-                try:
-                    await run_sync(
-                        session,
-                        get_owner_id(),
-                        days=days_to_sync,
-                        on_event=_on_event,
-                        redis=redis_client,
-                        sync_event_id=job_id_val,
-                    )
-                    await session.commit()
-                except Exception as e:
-                    await session.rollback()
-                    _push_sync_event(job_id_val, "error", f'{{"message": "Sync failed: {e}"}}')
-        finally:
-            await redis_client.aclose()
+    def _on_event(evt_type: str, evt_data: str) -> None:
+        _push_sync_event(job_id, evt_type, evt_data)
 
     # dispatch in background
-    asyncio.create_task(_do_sync(job_id, days))
+    asyncio.create_task(_run_sync_job(job_id, days, _on_event))
 
     return {"status": "accepted", "job_id": job_id}
 
@@ -151,7 +200,7 @@ async def sync_status(
     return {
         "api_enabled": api_enabled,
         "sync_interval_minutes": str(settings.sync_interval_minutes),
-        "last_sync_at": last.completed_at.isoformat() if last and last.completed_at else "never",
+        "last_sync_at": _utc_iso(last.completed_at) if last and last.completed_at else "never",
         "last_sync_status": last.status if last else "none",
     }
 

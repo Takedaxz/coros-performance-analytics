@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import type { CircleMarker, Map as LeafletMap, Polyline } from "leaflet";
+import type { CircleMarker, LatLngBounds, Map as LeafletMap, Polyline } from "leaflet";
 import { routePositionAt, type TimedRoutePoint } from "./routeReplay";
+import { cartoBasemapUrl, type Theme } from "@/lib/theme";
 
 interface RoutePoint {
   lat: number;
@@ -45,6 +46,7 @@ export default function Map({ points }: MapProps) {
   const elapsedLabelRef = useRef<HTMLSpanElement>(null);
   const progressInputRef = useRef<HTMLInputElement>(null);
   const mapInstanceRef = useRef<LeafletMap | null>(null);
+  const routeBoundsRef = useRef<LatLngBounds | null>(null);
   const progressLineRef = useRef<Polyline | null>(null);
   const runnerMarkerRef = useRef<CircleMarker | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -167,6 +169,18 @@ export default function Map({ points }: MapProps) {
     renderPlayback(elapsedSeconds);
   };
 
+  const resetMapView = (): void => {
+    const map = mapInstanceRef.current;
+    const bounds = routeBoundsRef.current;
+    if (!map || !bounds) return;
+
+    map.fitBounds(bounds, {
+      animate: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      duration: 0.35,
+      padding: [20, 20],
+    });
+  };
+
   useEffect(() => {
     const linkId = "leaflet-css-link";
     if (!document.getElementById(linkId)) {
@@ -178,6 +192,7 @@ export default function Map({ points }: MapProps) {
     }
 
     let isMounted = true;
+    let themeObserver: MutationObserver | null = null;
     cancelAnimation();
     playbackRef.current.elapsedSeconds = 0;
     segmentIndexRef.current = 0;
@@ -220,15 +235,21 @@ export default function Map({ points }: MapProps) {
       });
       mapInstanceRef.current = map;
 
-      L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-        {
-          attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-          subdomains: "abcd",
-          maxZoom: 20,
-        },
-      ).addTo(map);
+      const currentTheme = (): Theme =>
+        document.documentElement.dataset.theme === "light" ? "light" : "dark";
+      const tileLayer = L.tileLayer(cartoBasemapUrl(currentTheme()), {
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: "abcd",
+        maxZoom: 20,
+      }).addTo(map);
+      themeObserver = new MutationObserver(() => {
+        tileLayer.setUrl(cartoBasemapUrl(currentTheme()));
+      });
+      themeObserver.observe(document.documentElement, {
+        attributeFilter: ["data-theme"],
+        attributes: true,
+      });
 
       const fullRoute = L.polyline(latLngs, {
         color: "#21E6A5",
@@ -236,7 +257,8 @@ export default function Map({ points }: MapProps) {
         opacity: normalizedTimedPoints.length > 1 ? 0.24 : 0.9,
         lineJoin: "round",
       }).addTo(map);
-      map.fitBounds(fullRoute.getBounds(), { padding: [20, 20] });
+      routeBoundsRef.current = fullRoute.getBounds();
+      map.fitBounds(routeBoundsRef.current, { padding: [20, 20] });
 
       const startPoint = latLngs[0];
       const endPoint = latLngs[latLngs.length - 1];
@@ -283,9 +305,11 @@ export default function Map({ points }: MapProps) {
 
     return () => {
       isMounted = false;
+      themeObserver?.disconnect();
       cancelAnimation();
       progressLineRef.current = null;
       runnerMarkerRef.current = null;
+      routeBoundsRef.current = null;
       timedPointsRef.current = [];
       if (mapInstanceRef.current) {
         mapInstanceRef.current.off();
@@ -301,6 +325,18 @@ export default function Map({ points }: MapProps) {
         ref={mapContainerRef}
         className="activity-route-map"
       />
+      <button
+        aria-label="Reset map view"
+        className="activity-route-reset"
+        onClick={resetMapView}
+        title="Show full route"
+        type="button"
+      >
+        <svg aria-hidden="true" viewBox="0 0 20 20">
+          <path d="M7 3H3v4M13 3h4v4M17 13v4h-4M7 17H3v-4" />
+          <circle cx="10" cy="10" r="2.25" />
+        </svg>
+      </button>
       {canReplay && (
         <div className="route-replay-controls" aria-label="Route replay controls">
           <input

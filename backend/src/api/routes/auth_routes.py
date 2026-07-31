@@ -10,7 +10,9 @@ Flow:
   DELETE /auth/coros-mcp        → disconnect (delete stored tokens)
 """
 
+import html
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -36,6 +38,7 @@ settings = get_settings()
 
 @router.get("/coros-mcp/connect")
 async def connect_coros_mcp(
+    theme: Literal["light", "dark"] = "dark",
     db: AsyncSession = Depends(get_db_session),
 ) -> RedirectResponse:
     """Start the COROS MCP OAuth flow.
@@ -48,7 +51,7 @@ async def connect_coros_mcp(
     except Exception as exc:
         logger.error("coros_mcp: failed to discover OAuth metadata: %s", exc)
         return HTMLResponse(
-            content=_error_page("Could not reach COROS MCP server. Try again later."),
+            content=_error_page("Could not reach COROS MCP server. Try again later.", theme),
             status_code=502,
         )
 
@@ -58,7 +61,7 @@ async def connect_coros_mcp(
 
     if not authorization_endpoint or not token_endpoint:
         return HTMLResponse(
-            content=_error_page("COROS MCP returned incomplete OAuth metadata."),
+            content=_error_page("COROS MCP returned incomplete OAuth metadata.", theme),
             status_code=502,
         )
 
@@ -80,7 +83,7 @@ async def connect_coros_mcp(
         except Exception as exc:
             logger.error("coros_mcp: dynamic registration failed: %s", exc)
             return HTMLResponse(
-                content=_error_page(f"COROS OAuth registration failed: {exc}"),
+                content=_error_page(f"COROS OAuth registration failed: {exc}", theme),
                 status_code=502,
             )
 
@@ -88,7 +91,8 @@ async def connect_coros_mcp(
         return HTMLResponse(
             content=_error_page(
                 "COROS MCP server does not support dynamic registration. "
-                "A pre-registered client_id is required."
+                "A pre-registered client_id is required.",
+                theme,
             ),
             status_code=501,
         )
@@ -99,6 +103,7 @@ async def connect_coros_mcp(
         registration_endpoint=registration_endpoint or "",
         client_id=client_id,
         redirect_uri=settings.coros_mcp_redirect_uri,
+        theme=theme,
     )
 
     # Temporarily store client_id in DB so the callback can use it
@@ -127,26 +132,30 @@ async def coros_mcp_callback(
     Exchanges the authorization code for tokens and stores them.
     Returns a small HTML page the user can close.
     """
+    pending = consume_oauth_state(state) if state else None
+    theme = pending.get("theme", "dark") if pending else "dark"
+
     if error:
         logger.warning("coros_mcp: OAuth error from COROS: %s", error)
-        return HTMLResponse(content=_error_page(f"COROS authorization denied: {error}"))
+        return HTMLResponse(content=_error_page(f"COROS authorization denied: {error}", theme))
 
     if not code or not state:
-        return HTMLResponse(content=_error_page("Missing code or state parameter."))
+        return HTMLResponse(content=_error_page("Missing code or state parameter.", theme))
 
-    pending = consume_oauth_state(state)
     if not pending:
         # State may have been lost on server restart; try to proceed with stored client_id.
         logger.warning("coros_mcp: unknown state %s — attempting recovery", state)
         stored = await load_tokens(db)
         if not stored or not stored.get("client_id"):
-            return HTMLResponse(content=_error_page("OAuth state expired. Please try connecting again."))
+            return HTMLResponse(
+                content=_error_page("OAuth state expired. Please try connecting again.", theme)
+            )
         client_id = stored["client_id"]
         try:
             metadata = await discover_oauth_metadata(settings.coros_mcp_url)
             token_endpoint = metadata["token_endpoint"]
         except Exception as exc:
-            return HTMLResponse(content=_error_page(f"Token exchange setup failed: {exc}"))
+            return HTMLResponse(content=_error_page(f"Token exchange setup failed: {exc}", theme))
         code_verifier = ""  # Can't recover verifier — PKCE will fail; user must retry
         tokens = None
         try:
@@ -158,7 +167,9 @@ async def coros_mcp_callback(
                 client_id=client_id,
             )
         except Exception as exc:
-            return HTMLResponse(content=_error_page(f"Token exchange failed: {exc}. Please reconnect."))
+            return HTMLResponse(
+                content=_error_page(f"Token exchange failed: {exc}. Please reconnect.", theme)
+            )
     else:
         client_id = pending["client_id"]
         try:
@@ -171,7 +182,7 @@ async def coros_mcp_callback(
             )
         except Exception as exc:
             logger.error("coros_mcp: token exchange failed: %s", exc)
-            return HTMLResponse(content=_error_page(f"Token exchange failed: {exc}"))
+            return HTMLResponse(content=_error_page(f"Token exchange failed: {exc}", theme))
 
     await save_tokens(
         db,
@@ -182,7 +193,7 @@ async def coros_mcp_callback(
     )
 
     logger.info("coros_mcp: OAuth complete, tokens stored")
-    return HTMLResponse(content=_success_page())
+    return HTMLResponse(content=_success_page(theme))
 
 
 @router.get("/coros-mcp/status")
@@ -219,51 +230,139 @@ async def disconnect_coros_mcp(
 # HTML helpers
 # ---------------------------------------------------------------------------
 
-def _success_page() -> str:
-    return """<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>COROS Connected</title>
-<style>
-  body{font-family:system-ui,sans-serif;display:flex;align-items:center;
-       justify-content:center;height:100vh;margin:0;background:#0f1117;color:#e2e8f0}
-  .card{text-align:center;padding:2rem 3rem;background:#1a1f2e;border-radius:1rem;
-        border:1px solid #2d3748}
-  h1{color:#68d391;margin-bottom:.5rem}
-  p{color:#a0aec0}
-  button{margin-top:1.5rem;padding:.6rem 1.4rem;background:#3182ce;color:#fff;
-         border:none;border-radius:.5rem;cursor:pointer;font-size:1rem}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>COROS MCP Connected</h1>
-  <p>Sleep data sync is now active. You can close this tab.</p>
-  <button onclick="window.close()">Close</button>
-</div>
-</body>
-</html>"""
+def _success_page(theme: str = "dark") -> str:
+    return _result_page(
+        status="success",
+        title="COROS MCP connected",
+        message="Sleep data sync is active and ready to use.",
+        theme=theme,
+    )
 
 
-def _error_page(message: str) -> str:
+def _error_page(message: str, theme: str = "dark") -> str:
+    return _result_page(
+        status="error",
+        title="Connection failed",
+        message=message,
+        theme=theme,
+    )
+
+
+def _result_page(
+    status: Literal["success", "error"],
+    title: str,
+    message: str,
+    theme: str,
+) -> str:
+    safe_theme = "light" if theme == "light" else "dark"
+    safe_message = html.escape(message)
+    icon = (
+        '<path d="m8.5 12.5 2.2 2.2 4.8-5.2"/>'
+        if status == "success"
+        else '<path d="M12 8.5v4.25M12 16h.01"/>'
+    )
+    eyebrow = "Connection complete" if status == "success" else "Action required"
+
     return f"""<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Connection Failed</title>
+<html lang="en" data-theme="{safe_theme}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
 <style>
-  body{{font-family:system-ui,sans-serif;display:flex;align-items:center;
-       justify-content:center;height:100vh;margin:0;background:#0f1117;color:#e2e8f0}}
-  .card{{text-align:center;padding:2rem 3rem;background:#1a1f2e;border-radius:1rem;
-        border:1px solid #2d3748}}
-  h1{{color:#fc8181;margin-bottom:.5rem}}
-  p{{color:#a0aec0;max-width:24rem}}
-  button{{margin-top:1.5rem;padding:.6rem 1.4rem;background:#3182ce;color:#fff;
-         border:none;border-radius:.5rem;cursor:pointer;font-size:1rem}}
+  :root {{
+    color-scheme: dark;
+    --bg: #070a0c; --surface: #131a1e;
+    --text: #f5f7f7; --muted: #a5afb4; --border: rgba(255,255,255,.1);
+    --brand: #21e6a5; --brand-text: #07120e; --success: #38df64;
+    --error: #ff4d62; --shadow: 0 24px 70px rgba(0,0,0,.42);
+  }}
+  :root[data-theme="light"] {{
+    color-scheme: light;
+    --bg: #f4f6f5; --surface: #fff;
+    --text: #17201c; --muted: #52605a; --border: rgba(23,32,28,.11);
+    --brand: #11875f; --brand-text: #fff; --success: #15803d;
+    --error: #c9364a; --shadow: 0 24px 70px rgba(55,70,63,.16);
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    min-height: 100vh; min-height: 100dvh; margin: 0; padding: 24px;
+    display: grid; place-items: center; overflow: hidden;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--text); background:
+      radial-gradient(
+        circle at 50% 30%,
+        color-mix(in srgb, var(--brand) 10%, transparent),
+        transparent 34%
+      ),
+      var(--bg);
+  }}
+  .card {{
+    width: min(100%, 460px); padding: clamp(32px, 8vw, 48px);
+    text-align: center; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; box-shadow: var(--shadow);
+    animation: card-in 420ms cubic-bezier(.2,.8,.2,1) both;
+  }}
+  .brand {{
+    display: inline-flex; align-items: center; gap: 9px; margin-bottom: 32px;
+    color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .16em;
+    text-transform: uppercase;
+  }}
+  .brand-mark {{ width: 10px; height: 10px; border: 3px solid var(--brand); border-radius: 50%; }}
+  .status {{
+    width: 68px; height: 68px; margin: 0 auto 24px; display: grid; place-items: center;
+    color: var(--{status}); background: color-mix(in srgb, var(--{status}) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--{status}) 28%, transparent);
+    border-radius: 50%; animation: status-in 500ms 120ms cubic-bezier(.2,.9,.25,1.25) both;
+  }}
+  .status svg {{ width: 31px; height: 31px; fill: none; stroke: currentColor;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }}
+  .eyebrow {{
+    margin: 0 0 10px; color: var(--{status}); font-size: 12px; font-weight: 700;
+    letter-spacing: .12em; text-transform: uppercase;
+  }}
+  h1 {{ margin: 0; font-size: clamp(26px, 6vw, 34px); line-height: 1.12; letter-spacing: -.035em; }}
+  .message {{
+    margin: 14px auto 0; max-width: 340px; color: var(--muted);
+    font-size: 15px; line-height: 1.65;
+  }}
+  button {{
+    width: 100%; min-height: 48px; margin-top: 32px; padding: 0 20px;
+    color: var(--brand-text); background: var(--brand); border: 0; border-radius: 12px;
+    font: inherit; font-weight: 700; cursor: pointer;
+    transition: transform 140ms ease, filter 140ms ease;
+  }}
+  button:hover {{ filter: brightness(1.06); transform: translateY(-1px); }}
+  button:active {{ transform: translateY(0); }}
+  button:focus-visible {{
+    outline: 3px solid color-mix(in srgb, var(--brand) 35%, transparent);
+    outline-offset: 3px;
+  }}
+  .hint {{ margin: 14px 0 0; color: var(--muted); font-size: 12px; }}
+  @keyframes card-in {{ from {{ opacity: 0; transform: translateY(14px) scale(.985); }} }}
+  @keyframes status-in {{ from {{ opacity: 0; transform: scale(.72); }} }}
+  @media (prefers-reduced-motion: reduce) {{
+    .card, .status {{ animation: none; }}
+    button {{ transition: none; }}
+  }}
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>Connection Failed</h1>
-  <p>{message}</p>
-  <button onclick="window.close()">Close</button>
-</div>
+  <main class="card">
+    <div class="brand"><span class="brand-mark"></span>COROS Analytics</div>
+    <div class="status" aria-hidden="true">
+      <svg viewBox="0 0 24 24">{icon}</svg>
+    </div>
+    <p class="eyebrow">{eyebrow}</p>
+    <h1>{title}</h1>
+    <p class="message">{safe_message}</p>
+    <button
+      type="button"
+      onclick="window.close();setTimeout(()=>document.querySelector('.hint').hidden=false,250)"
+    >
+      Close window
+    </button>
+    <p class="hint" hidden>This window can now be closed safely.</p>
+  </main>
 </body>
 </html>"""

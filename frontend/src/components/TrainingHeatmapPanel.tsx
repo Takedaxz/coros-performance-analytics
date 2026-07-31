@@ -176,7 +176,7 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
 
   // Compute cell background color / multi-sport conic gradient pie slice (Inspired by CorosLink)
   const getCellBackground = (day: HeatmapDay) => {
-    if (day.load === 0 || day.sports.length === 0) return "rgba(255, 255, 255, 0.04)";
+    if (day.load === 0 || day.sports.length === 0) return "var(--color-overlay-subtle)";
 
     // Single sport -> solid sport color with intensity
     if (day.sports.length === 1) {
@@ -213,7 +213,7 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
             TRAINING ACTIVITY
           </span>
           <h3 style={{ fontSize: "20px", fontWeight: 800, color: "var(--color-text-primary)", marginTop: "2px" }}>
-            Load heatmap
+            Load log
           </h3>
         </div>
       </div>

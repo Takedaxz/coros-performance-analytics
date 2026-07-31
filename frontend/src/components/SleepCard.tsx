@@ -142,7 +142,7 @@ export default function SleepCard({
                 gap: "6px",
                 padding: "6px 9px",
                 borderRadius: "8px",
-                background: "#192126",
+                background: "var(--color-popover)",
                 border: "1px solid var(--border-color)",
                 color: "var(--color-text-primary)",
                 fontSize: "11px",
@@ -161,7 +161,7 @@ export default function SleepCard({
               height: "12px",
               borderRadius: "var(--radius-full)",
               overflow: "hidden",
-              background: "rgba(255, 255, 255, 0.05)",
+              background: "var(--color-overlay-soft)",
             }}
           >
             {stages.filter((stage) => stage.percentage > 0).map((stage) => (

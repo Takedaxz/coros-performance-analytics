@@ -95,7 +95,7 @@ export default function Vo2Gauge({
           <path
             d={`M ${cx - radius} ${cy} A ${radius} ${radius} 0 0 1 ${cx + radius} ${cy}`}
             fill="none"
-            stroke="rgba(255, 255, 255, 0.08)"
+            stroke="var(--color-overlay-medium)"
             strokeWidth={strokeWidth}
             strokeLinecap="round"
           />
@@ -109,7 +109,7 @@ export default function Vo2Gauge({
             strokeLinecap="round"
           />
 
-          {hasScore && <><circle cx={dotX} cy={dotY} r="8" fill="#F5F7F7" stroke="#070A0C" strokeWidth="2" filter="url(#dotGlow)" /><circle cx={dotX} cy={dotY} r="4" fill="#21E6A5" /></>}
+          {hasScore && <><circle cx={dotX} cy={dotY} r="8" fill="var(--color-text-primary)" stroke="var(--color-bg-primary)" strokeWidth="2" filter="url(#dotGlow)" /><circle cx={dotX} cy={dotY} r="4" fill="var(--color-accent-primary)" /></>}
 
           {/* Unobscured Score Display */}
           <text

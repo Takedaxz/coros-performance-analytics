@@ -12,9 +12,9 @@ Implements:
 import logging
 import secrets
 import time
+from base64 import urlsafe_b64encode
 from datetime import datetime
 from hashlib import sha256
-from base64 import urlsafe_b64encode
 
 import httpx
 from sqlalchemy import text
@@ -179,6 +179,7 @@ def start_oauth_flow(
     client_id: str,
     redirect_uri: str,
     scope: str = "openid mcp.tools offline_access",
+    theme: str = "dark",
 ) -> tuple[str, str]:
     """Create a PKCE state entry and return (state, authorization_url)."""
     state = secrets.token_urlsafe(16)
@@ -189,6 +190,7 @@ def start_oauth_flow(
         "client_id": client_id,
         "token_endpoint": token_endpoint,
         "redirect_uri": redirect_uri,
+        "theme": theme,
     }
 
     url = build_authorization_url(

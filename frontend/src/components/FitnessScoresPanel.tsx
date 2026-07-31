@@ -63,7 +63,7 @@ export default function FitnessScoresPanel({ fitness }: FitnessScoresPanelProps)
               <span style={{ fontWeight: 600, color: "var(--color-text-secondary)" }}>{s.label}</span>
               <strong style={{ color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums" }}>{s.value.toFixed(1)}</strong>
             </div>
-            <div style={{ height: "6px", width: "100%", background: "rgba(255, 255, 255, 0.06)", borderRadius: "3px", overflow: "hidden" }}>
+            <div style={{ height: "6px", width: "100%", background: "var(--color-overlay-soft)", borderRadius: "3px", overflow: "hidden" }}>
               <div style={{ width: `${Math.max(0, Math.min(100, s.value))}%`, height: "100%", background: "var(--color-accent-primary)", transition: "width 600ms ease-out" }} />
             </div>
           </div>

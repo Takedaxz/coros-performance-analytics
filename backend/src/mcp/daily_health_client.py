@@ -37,43 +37,12 @@ async def fetch_daily_health_via_mcp(
             )
             if tool is None:
                 return []
-            records: dict[str, dict[str, int | str | None]] = {}
-            for args in _argument_candidates(tool.inputSchema, start_day, end_day, days):
-                try:
-                    result = await session.call_tool(tool.name, args)
-                    for record in _parse_mcp_daily_health_result(result.content, end_day):
-                        records[str(record["happenDay"])] = record
-                except Exception:
-                    continue
+            args = _build_daily_health_args(tool.inputSchema, start_day, end_day, days)
+            result = await session.call_tool(tool.name, args)
+            if result.isError:
+                raise RuntimeError(f"COROS MCP tool {tool.name} failed: {result.content}")
 
-            # If range call didn't cover all days, iterate per-day to fill missing steps & calories
-            days_list = _generate_days_list(start_day, end_day)
-            for day_str in days_list:
-                if day_str in records and records[day_str].get("steps") is not None:
-                    continue
-                for args in _argument_candidates(tool.inputSchema, day_str, day_str, 1):
-                    try:
-                        result = await session.call_tool(tool.name, args)
-                        for record in _parse_mcp_daily_health_result(result.content, day_str):
-                            records[str(record["happenDay"])] = record
-                    except Exception:
-                        continue
-
-    return list(records.values())
-
-
-def _generate_days_list(start_day: str, end_day: str) -> list[str]:
-    try:
-        start_dt = datetime.datetime.strptime(start_day, "%Y%m%d").date()
-        end_dt = datetime.datetime.strptime(end_day, "%Y%m%d").date()
-        result = []
-        curr = start_dt
-        while curr <= end_dt:
-            result.append(curr.strftime("%Y%m%d"))
-            curr += datetime.timedelta(days=1)
-        return result
-    except Exception:
-        return [end_day]
+    return _parse_mcp_daily_health_result(result.content, end_day)
 
 
 def _days_between(start_day: str, end_day: str) -> int:
@@ -85,46 +54,35 @@ def _days_between(start_day: str, end_day: str) -> int:
         return 14
 
 
-def _argument_candidates(
+def _build_daily_health_args(
     schema: dict[str, Any], start_day: str, end_day: str, days: int
-) -> list[dict[str, Any]]:
-    """Match COROS's published tool schema before trying its prompt interface."""
+) -> dict[str, Any]:
+    """Build the single range argument shape declared by the MCP tool."""
     properties = schema.get("properties", {})
     names = set(properties) if isinstance(properties, dict) else set()
+    required = set(schema.get("required", []))
     end_iso = f"{end_day[:4]}-{end_day[4:6]}-{end_day[6:]}"
-    query = f"Return COROS daily health data for {end_iso} ({end_day}). Include steps and total calories."
-    candidates: list[dict[str, Any]] = []
+    start_iso = f"{start_day[:4]}-{start_day[4:6]}-{start_day[6:]}"
+    args: dict[str, Any]
 
-    for key, value in (("date", end_iso), ("happenDay", end_day), ("day", end_day)):
-        if key in names:
-            candidates.append({key: value})
-    for key in ("query", "question", "prompt", "input"):
-        if key in names:
-            candidates.append({key: query})
+    if {"startDate", "endDate"} <= names:
+        args = {"startDate": start_iso, "endDate": end_iso}
+        if "days" in names:
+            args["days"] = days
+    elif {"startDay", "endDay"} <= names:
+        args = {"startDay": start_day, "endDay": end_day}
+        if "days" in names:
+            args["days"] = days
+    elif "days" in names:
+        args = {"days": days}
+    elif start_day == end_day and "date" in names:
+        args = {"date": end_iso}
+    else:
+        raise RuntimeError("Unsupported COROS MCP daily-health tool schema")
 
-    ranged = {
-        key: value
-        for key, value in (
-            ("startDate", f"{start_day[:4]}-{start_day[4:6]}-{start_day[6:]}"),
-            ("endDate", end_iso),
-            ("startDay", start_day),
-            ("endDay", end_day),
-            ("days", days),
-        )
-        if key in names
-    }
-    if ranged:
-        candidates.append(ranged)
-
-    candidates.extend(({"date": end_iso}, {"query": query}, {"startDate": end_iso, "endDate": end_iso, "days": 1}))
-    unique: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in candidates:
-        key = json.dumps(item, sort_keys=True)
-        if key not in seen:
-            seen.add(key)
-            unique.append(item)
-    return unique
+    if not required <= args.keys():
+        raise RuntimeError("Unsupported COROS MCP daily-health required fields")
+    return args
 
 
 def _parse_mcp_daily_health_result(

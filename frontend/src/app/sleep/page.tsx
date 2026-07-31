@@ -46,7 +46,7 @@ function SleepStageTooltip({
   const total = payload[0].payload?.total ?? 0;
 
   return (
-    <div style={{ padding: "12px 14px", borderRadius: "16px", background: "#192126", border: "1px solid var(--border-color)", color: "var(--color-text-primary)" }}>
+    <div style={{ padding: "12px 14px", borderRadius: "16px", background: "var(--color-popover)", border: "1px solid var(--border-color)", color: "var(--color-text-primary)" }}>
       <strong style={{ display: "block", marginBottom: "8px", color: "var(--color-text-secondary)", fontSize: "12px" }}>{label}</strong>
       {payload.map((entry) => (
         <div key={entry.name} style={{ display: "flex", justifyContent: "space-between", gap: "18px", marginTop: "5px" }}>
@@ -265,7 +265,7 @@ export default function SleepPage() {
                     <stop offset="95%" stopColor="var(--color-accent-primary)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                 <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
                 <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="ms" />
                 <Tooltip formatter={(value) => `${Math.round(Number(value))} ms`} />
@@ -283,10 +283,10 @@ export default function SleepPage() {
               </div>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={sleepData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                   <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
                   <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="h" />
-                  <Tooltip cursor={{ fill: "rgba(255, 255, 255, 0.04)" }} content={<SleepStageTooltip />} />
+                  <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<SleepStageTooltip />} />
                   <Bar dataKey="deep" name="Deep" stackId="s" fill="#21E6A5" />
                   <Bar dataKey="rem" name="REM" stackId="s" fill="#2D9BF0" />
                   <Bar dataKey="light" name="Light" stackId="s" fill="#8DABC2">
@@ -312,7 +312,7 @@ export default function SleepPage() {
                       <stop offset="95%" stopColor="var(--color-accent-exertion)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                   <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
                   <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={[0, 100]} unit="%" />
                   <Tooltip />
@@ -329,7 +329,7 @@ export default function SleepPage() {
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={rhrData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                 <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
                 <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={["dataMin - 3", "dataMax + 3"]} unit="bpm" />
                 <Tooltip formatter={(value) => `${Math.round(Number(value))} bpm`} />

@@ -40,7 +40,7 @@ export default function MetricCard({
     }
     return {
       color: "var(--color-text-secondary)",
-      background: "rgba(255, 255, 255, 0.04)",
+      background: "var(--color-overlay-subtle)",
       border: "1px solid var(--border-color)",
     };
   };

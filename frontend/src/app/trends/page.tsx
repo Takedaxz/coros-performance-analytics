@@ -178,7 +178,7 @@ function DistributionPanel({
                 <Pie data={segments.filter((segment) => segment.percent > 0)} dataKey="percent" nameKey="label" innerRadius="58%" outerRadius="86%" paddingAngle={2} stroke="transparent">
                   {segments.filter((segment) => segment.percent > 0).map((segment) => <Cell key={segment.label} fill={segment.color} />)}
                 </Pie>
-                <Tooltip contentStyle={{ background: "#192126", border: "1px solid var(--border-color)", borderRadius: 12 }} formatter={(amount) => `${Number(amount).toFixed(1)}%`} />
+                <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--border-color)", borderRadius: 12 }} formatter={(amount) => `${Number(amount).toFixed(1)}%`} />
               </PieChart>
             </ResponsiveContainer>
             {primary && (
@@ -195,7 +195,7 @@ function DistributionPanel({
               <div key={segment.label} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "8px", alignItems: "center" }}>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "12px", color: "var(--color-text-secondary)" }}>{segment.label}</span>
                 <strong style={{ fontSize: "12px", fontVariantNumeric: "tabular-nums" }}>{segment.detail}</strong>
-                <span style={{ gridColumn: "1 / -1", height: "5px", borderRadius: "999px", overflow: "hidden", background: "rgba(255,255,255,0.06)" }}>
+                <span style={{ gridColumn: "1 / -1", height: "5px", borderRadius: "999px", overflow: "hidden", background: "var(--color-overlay-soft)" }}>
                   <span style={{ display: "block", width: `${Math.max(segment.percent, segment.percent > 0 ? 4 : 0)}%`, height: "100%", borderRadius: "inherit", background: segment.color }} />
                 </span>
               </div>
@@ -345,12 +345,12 @@ export default function TrendsPage() {
                       <span style={{ fontSize: "11px", fontWeight: 750, color: "var(--color-text-primary)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
                         ACWR Workload Ratio
                       </span>
-                      <span style={{ fontSize: "12px", fontWeight: 800, color: acwrColor, background: "rgba(255, 255, 255, 0.06)", padding: "2px 8px", borderRadius: "6px" }}>
+                      <span style={{ fontSize: "12px", fontWeight: 800, color: acwrColor, background: "var(--color-overlay-soft)", padding: "2px 8px", borderRadius: "6px" }}>
                         {acwr?.toFixed(2) ?? "--"} ({acwrStatus})
                       </span>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "10px", background: "rgba(255, 255, 255, 0.03)", padding: "8px", borderRadius: "8px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginBottom: "10px", background: "var(--color-overlay-faint)", padding: "8px", borderRadius: "8px" }}>
                       <div>
                         <span style={{ fontSize: "10px", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>7d Fatigue (Acute)</span>
                         <div style={{ fontSize: "13px", fontWeight: 750, color: "var(--color-text-primary)" }}>{Math.round(acuteLoad / 7)} <span style={{ fontSize: "10px", color: "var(--color-text-muted)", fontWeight: 500 }}>/day</span></div>
@@ -430,10 +430,10 @@ export default function TrendsPage() {
                 <ResponsiveContainer width="100%" height={300}>
                   <AreaChart data={loadChartData}>
                     <defs><linearGradient id="loadGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--color-accent-exertion)" stopOpacity={0.3} /><stop offset="95%" stopColor="var(--color-accent-exertion)" stopOpacity={0} /></linearGradient></defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                     <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                     <YAxis stroke="var(--color-text-muted)" fontSize={11} axisLine={false} />
-                    <Tooltip contentStyle={{ background: "#192126", border: "1px solid var(--border-color)", borderRadius: 12 }} />
+                    <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--border-color)", borderRadius: 12 }} />
                     <Area type="monotone" dataKey="total_load" name="Training Load" stroke="var(--color-accent-exertion)" fill="url(#loadGrad)" strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-exertion)" }} />
                     <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
                   </AreaChart>
@@ -465,11 +465,11 @@ export default function TrendsPage() {
                             <stop offset="95%" stopColor="#4fc3f3" stopOpacity={0} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                         <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                         <YAxis stroke="#4fc3f3" fontSize={11} axisLine={false} tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`} />
                         <Tooltip
-                          contentStyle={{ background: "#192126", border: "1px solid var(--border-color)", borderRadius: 12 }}
+                          contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--border-color)", borderRadius: 12 }}
                           formatter={(val: any, name: any) => [val != null ? Math.round(Number(val)).toLocaleString() : "No Data", String(name)]}
                         />
                         <Area type="monotone" dataKey="steps" name="Daily Steps" stroke="#4fc3f3" fill="url(#stepsGrad)" strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#4fc3f3" }} />
@@ -499,11 +499,11 @@ export default function TrendsPage() {
                             <stop offset="95%" stopColor="#ff9800" stopOpacity={0} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.05)" />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                         <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                         <YAxis stroke="#ff9800" fontSize={11} axisLine={false} />
                         <Tooltip
-                          contentStyle={{ background: "#192126", border: "1px solid var(--border-color)", borderRadius: 12 }}
+                          contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--border-color)", borderRadius: 12 }}
                           formatter={(val: any, name: any) => [val != null ? `${Math.round(Number(val)).toLocaleString()} kcal` : "No Data", String(name)]}
                         />
                         <Area type="monotone" dataKey="active_calories_kcal" name="Active Calories" stroke="#ff9800" fill="url(#calGrad)" strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#ff9800" }} />

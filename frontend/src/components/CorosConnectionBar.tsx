@@ -18,7 +18,7 @@ export default function CorosConnectionBar({
   return (
     <div
       style={{
-        background: "linear-gradient(90deg, rgba(33, 230, 165, 0.08) 0%, rgba(12, 17, 20, 0.95) 100%)",
+        background: "linear-gradient(90deg, rgba(33, 230, 165, 0.08) 0%, var(--color-bg-secondary) 100%)",
         border: "1px solid rgba(33, 230, 165, 0.2)",
         borderRadius: "var(--radius-md)",
         padding: "var(--space-3) var(--space-5)",

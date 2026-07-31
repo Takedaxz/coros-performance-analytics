@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
@@ -12,9 +13,10 @@ from src.activity_laps import (
     distance_splits as _distance_splits,
     hyrox_lap_detail as _hyrox_lap_detail,
     lap_type as _lap_type,
+    swim_lap_name as _swim_lap_name,
 )
 from src.db.engine import get_db_session
-from src.db.models import Activity, ActivityLap, ActivityRecord
+from src.db.models import Activity, ActivityLap, ActivityRecord, FitnessEstimate
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,6 +80,48 @@ def _validate_range(
 
 def _lap_start_elapsed(lap_start: datetime, first_lap_start: datetime) -> float:
     return max(0.0, (lap_start - first_lap_start).total_seconds())
+
+
+def _interval_hr_recovery(
+    laps: list[ActivityLap],
+    records: list[ActivityRecord],
+) -> dict[int, int]:
+    samples = sorted(
+        (
+            (record.elapsed_s, record.heart_rate_bpm)
+            for record in records
+            if record.elapsed_s is not None
+            if record.heart_rate_bpm is not None
+            and 30 <= record.heart_rate_bpm <= 250
+        ),
+        key=lambda sample: sample[0],
+    )
+    elapsed_values = [elapsed_s for elapsed_s, _ in samples]
+
+    def heart_rate_at(target: float) -> int | None:
+        index = bisect_left(elapsed_values, target)
+        candidates = samples[max(0, index - 1) : index + 1]
+        if not candidates:
+            return None
+        elapsed_s, heart_rate = min(
+            candidates,
+            key=lambda sample: abs(sample[0] - target),
+        )
+        return heart_rate if abs(elapsed_s - target) <= 2 else None
+
+    recovery_by_lap: dict[int, int] = {}
+    first_lap_start = min((lap.start_time for lap in laps), default=None)
+    if first_lap_start is None:
+        return recovery_by_lap
+    for lap in laps:
+        if _lap_type(lap.lap_trigger) != "rest":
+            continue
+        start_elapsed_s = _lap_start_elapsed(lap.start_time, first_lap_start)
+        start_hr = heart_rate_at(start_elapsed_s)
+        end_hr = heart_rate_at(start_elapsed_s + lap.elapsed_s)
+        if start_hr is not None and end_hr is not None:
+            recovery_by_lap[lap.lap_index] = start_hr - end_hr
+    return recovery_by_lap
 
 
 @router.get("/")
@@ -191,6 +235,7 @@ from src.sync.sync_manager import _detail_activity_laps
 from src.parsers.fit_parser import parse_fit_file
 
 logger = logging.getLogger(__name__)
+RUNNING_DYNAMICS_PARSER_VERSION = "0.2.0"
 
 
 async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -> None:
@@ -221,7 +266,14 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
         and bool(lap_count)
         and bool(unlabeled_lap_count)
     )
-    has_complete_fit_data = records_count > 0 and not rebuild_multisport
+    needs_running_dynamics = (
+        activity.sport in {"run", "trail_run"}
+        and bool(records_count)
+        and activity.parser_version != RUNNING_DYNAMICS_PARSER_VERSION
+    )
+    has_complete_fit_data = (
+        records_count > 0 and not rebuild_multisport and not needs_running_dynamics
+    )
     if (has_complete_fit_data and not needs_step_labels) or not activity.label_id:
         return
 
@@ -239,7 +291,7 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
 
         sport_type = int(activity.subsport or 0)
         detail_laps: list[ActivityLap] = []
-        if activity.sport in {"run", "trail_run"}:
+        if activity.sport in {"run", "trail_run", "swim", "ride"}:
             try:
                 detail = await client.fetch_activity_detail(activity.label_id, sport_type)
                 detail_laps = _detail_activity_laps(activity, detail)
@@ -250,7 +302,7 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
                     exc,
                 )
 
-        if records_count > 0 and needs_step_labels:
+        if records_count > 0 and needs_step_labels and not needs_running_dynamics:
             if detail_laps:
                 await db.execute(delete(ActivityLap).where(ActivityLap.activity_id == activity.id))
                 db.add_all(detail_laps)
@@ -303,8 +355,18 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
                     )
                 )
             fit_records.extend(segment.records)
+        if activity.sport == "swim" and len(detail_laps) == len(db_laps):
+            for detail_lap, fit_lap in zip(detail_laps, db_laps, strict=True):
+                if detail_lap.lap_trigger == "coros_swim":
+                    detail_lap.lap_trigger = (
+                        "coros_swim:drills"
+                        if fit_lap.lap_trigger == "coros_swim:drill"
+                        else fit_lap.lap_trigger
+                    )
+                detail_lap.avg_cadence = detail_lap.avg_cadence or fit_lap.avg_cadence
         if rebuild_multisport:
             await db.execute(delete(ActivityLap).where(ActivityLap.activity_id == activity.id))
+        if rebuild_multisport or needs_running_dynamics:
             await db.execute(delete(ActivityRecord).where(ActivityRecord.activity_id == activity.id))
         if not lap_count or rebuild_multisport:
             db.add_all(detail_laps or db_laps)
@@ -322,13 +384,22 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
                 altitude_m=r.altitude_m,
                 speed_mps=r.speed_mps,
                 heart_rate_bpm=r.heart_rate_bpm,
-                cadence=r.cadence,
+                cadence=(
+                    r.cadence * 2
+                    if activity.sport in {"run", "trail_run"} and r.cadence is not None
+                    else r.cadence
+                ),
                 power_w=r.power_w,
+                ground_time_ms=r.ground_time_ms,
+                stride_length_cm=r.stride_length_cm,
+                stride_ratio_pct=r.stride_ratio_pct,
+                stride_height_cm=r.stride_height_cm,
                 temperature_c=r.temperature_c,
             )
             for r in fit_records
         ]
         db.add_all(db_records)
+        activity.parser_version = RUNNING_DYNAMICS_PARSER_VERSION
         await db.commit()
         logger.info(f"on_demand_fit: populated {len(db_records)} records and {len(db_laps)} laps for activity {activity.id}")
     except Exception as exc:
@@ -348,6 +419,17 @@ async def get_activity(
 
     await ensure_activity_fit_downloaded(db, activity)
 
+    fitness = (
+        await db.scalar(
+            select(FitnessEstimate)
+            .where(FitnessEstimate.user_id == activity.user_id)
+            .order_by(FitnessEstimate.date.desc())
+            .limit(1)
+        )
+        if activity.sport in {"run", "trail_run"}
+        else None
+    )
+
     # Fetch laps
     lap_result = await db.execute(
         select(ActivityLap)
@@ -356,9 +438,30 @@ async def get_activity(
     )
     laps = lap_result.scalars().all()
     lap_origin = laps[0].start_time if laps else activity.start_time
+    split_distance_m = (
+        1_000
+        if activity.sport in {"run", "trail_run"}
+        else 20
+        if activity.sport == "swim"
+        else None
+    )
+    records: list[ActivityRecord] = []
+    needs_records = split_distance_m is not None or any(
+        _lap_type(lap.lap_trigger) == "rest" for lap in laps
+    )
+    if laps and needs_records:
+        record_result = await db.execute(
+            select(ActivityRecord)
+            .where(ActivityRecord.activity_id == activity_id)
+            .order_by(ActivityRecord.timestamp)
+        )
+        records = list(record_result.scalars().all())
+    recovery_by_lap = _interval_hr_recovery(laps, records)
+
     lap_payload = []
     for lap in laps:
         lap_name, load_unit = _hyrox_lap_detail(lap.lap_trigger)
+        lap_name = lap_name or _swim_lap_name(lap.lap_trigger)
         lap_payload.append(
             {
                 "lap_index": lap.lap_index,
@@ -377,23 +480,12 @@ async def get_activity(
                 "avg_power_w": lap.avg_power_w,
                 "avg_cadence": lap.avg_cadence,
                 "lap_type": _lap_type(lap.lap_trigger),
+                "hrr_bpm": recovery_by_lap.get(lap.lap_index),
             }
         )
 
     lap_splits: dict[str, list[dict[str, float | int | None]]] = {}
-    split_distance_m = (
-        1_000
-        if activity.sport in {"run", "trail_run"}
-        else 20
-        if activity.sport == "swim"
-        else None
-    )
     if split_distance_m is not None and laps:
-        record_result = await db.execute(
-            select(ActivityRecord)
-            .where(ActivityRecord.activity_id == activity_id)
-            .order_by(ActivityRecord.timestamp)
-        )
         source_laps = [lap for lap in laps if lap.distance_m is not None and lap.distance_m > 0]
         source_lap_distances = [float(lap.distance_m) for lap in source_laps]
         source_lap_start_elapsed = None
@@ -405,7 +497,7 @@ async def get_activity(
                     source_lap_start_elapsed.append(elapsed_before_lap)
                 elapsed_before_lap += lap.elapsed_s
         distance_splits = _distance_splits(
-            record_result.scalars().all(),
+            records,
             split_distance_m,
             source_lap_distances,
             source_lap_start_elapsed,
@@ -448,6 +540,10 @@ async def get_activity(
         "strength_detail": activity.strength_detail,
         "postmortem": activity.postmortem,
         "source_type": activity.source_type,
+        "threshold_hr_bpm": fitness.lactate_threshold_hr if fitness else None,
+        "threshold_pace_s_per_km": (
+            fitness.lactate_threshold_pace_s_per_km if fitness else None
+        ),
         "laps": lap_payload,
         "lap_splits": lap_splits,
     }
@@ -487,6 +583,10 @@ async def get_activity_records(
                 "heart_rate_bpm": r.heart_rate_bpm,
                 "cadence": r.cadence,
                 "power_w": r.power_w,
+                "ground_time_ms": r.ground_time_ms,
+                "stride_length_cm": r.stride_length_cm,
+                "stride_ratio_pct": r.stride_ratio_pct,
+                "stride_height_cm": r.stride_height_cm,
                 "position_lat": r.position_lat,
                 "position_long": r.position_long,
             }

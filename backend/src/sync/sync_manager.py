@@ -12,7 +12,7 @@ from datetime import date as date_type
 from datetime import datetime, timedelta
 
 from redis.asyncio import Redis
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import get_settings
@@ -64,6 +64,11 @@ _TRAINING_DISTRIBUTION_FIELDS = {
     "distance_training_load": "distanceTlAreaList",
     "distance_time": "distanceTimeAreaList",
 }
+
+_ACTIVITY_INCREMENTAL_DAYS = 28
+_HEALTH_INCREMENTAL_DAYS = 7
+_HEALTH_BOOTSTRAP_DAYS = 100
+_ACTIVITY_BOOTSTRAP_DAYS = 1095
 
 
 def _number(value: object) -> float | None:
@@ -226,7 +231,7 @@ def _strength_detail_payload(raw_detail: dict) -> dict[str, object] | None:
     return payload
 
 
-def _coros_detail_lap_items(raw_detail: dict) -> list[dict]:
+def _coros_detail_lap_items(raw_detail: dict, group_type: int | None = None) -> list[dict]:
     """Select the most detailed COROS lap group, matching CorosLink."""
     summary = raw_detail.get("summaryInfo")
     sources = [raw_detail, summary] if isinstance(summary, dict) else [raw_detail]
@@ -237,6 +242,10 @@ def _coros_detail_lap_items(raw_detail: dict) -> list[dict]:
         if not isinstance(lap_list, list):
             continue
         for lap in lap_list:
+            if group_type is not None and (
+                not isinstance(lap, dict) or _nonnegative_number(lap.get("type")) != group_type
+            ):
+                continue
             items = (
                 lap.get("lapItemList")
                 if isinstance(lap, dict) and isinstance(lap.get("lapItemList"), list)
@@ -264,11 +273,19 @@ def _detail_activity_laps(activity: Activity, raw_detail: dict) -> list[Activity
     """Convert COROS detail lap items from centiseconds and centimetres."""
     elapsed_before = 0.0
     laps: list[ActivityLap] = []
+    is_hyrox = activity.subsport == "1200"
+    is_running = activity.sport in {SportType.RUN, SportType.TRAIL_RUN}
+    is_swim = activity.sport == SportType.SWIM
+    is_ride = activity.sport == SportType.RIDE
     items = [
         item
-        for item in _coros_detail_lap_items(raw_detail)
+        for item in _coros_detail_lap_items(raw_detail, 2 if is_swim or is_ride else None)
         if _nonnegative_number(item.get("mode")) != 16
     ]
+    if is_ride and not any(
+        _nonnegative_number(item.get("exerciseType")) in {1, 2, 3, 4} for item in items
+    ):
+        return []
     first_start = _nonnegative_number(items[0].get("startTimestamp")) if items else None
     for item in items:
         mode = _nonnegative_number(item.get("mode"))
@@ -319,18 +336,37 @@ def _detail_activity_laps(activity: Activity, raw_detail: dict) -> list[Activity
                 3: "coros_cooldown",
                 4: "coros_rest",
             }.get(int(exercise_type))
-            if exercise_type is not None
+            if (is_running or is_ride) and exercise_type is not None
             else None
         )
-        lap_trigger = workout_step_trigger or (
+        swim_trigger = (
+            {
+                1: "coros_swim:warm_up",
+                3: "coros_swim:cool_down",
+                4: "coros_rest",
+            }.get(int(exercise_type))
+            if is_swim and exercise_type is not None
+            else None
+        )
+        lap_trigger = workout_step_trigger or swim_trigger or (
             "coros_rest"
-            if mode == 3
+            if is_swim and mode == 3
+            else "coros_swim"
+            if is_swim
+            else
+            "coros_rest"
+            if (is_hyrox or is_running or is_ride) and mode == 3
+            else "coros_ride"
+            if is_ride and mode in {0, 2} and distance_m is not None and distance_m > 0
             else "coros_run"
-            if mode in {0, 2} and distance_m is not None and distance_m > 0
+            if (is_hyrox or is_running)
+            and mode in {0, 2}
+            and distance_m is not None
+            and distance_m > 0
             else f"coros_hyrox:{exercise_name_key}:{'reps' if target_type == 3 else 'm'}"
-            if mode == 14 and isinstance(exercise_name_key, str)
+            if is_hyrox and mode == 14 and isinstance(exercise_name_key, str)
             else "coros_functional"
-            if mode == 0
+            if is_hyrox and mode == 0
             else "coros_detail"
         )
         laps.append(
@@ -344,7 +380,17 @@ def _detail_activity_laps(activity: Activity, raw_detail: dict) -> list[Activity
                 max_hr_bpm=int(_nonnegative_number(item.get("maxHr")) or 0) or None,
                 avg_speed_mps=distance_m / elapsed_s
                 if lap_trigger
-                in {"coros_warmup", "coros_training", "coros_cooldown", "coros_rest", "coros_run"}
+                in {
+                    "coros_warmup",
+                    "coros_training",
+                    "coros_cooldown",
+                    "coros_rest",
+                    "coros_run",
+                    "coros_ride",
+                    "coros_swim",
+                    "coros_swim:warm_up",
+                    "coros_swim:cool_down",
+                }
                 and distance_m is not None
                 and elapsed_s > 0
                 else None,
@@ -392,6 +438,21 @@ def _detail_activity_records(activity: Activity, raw_detail: dict) -> list[Activ
                 speed_mps=1000 / pace_s_per_km if pace_s_per_km else None,
                 heart_rate_bpm=int(_nonnegative_number(point.get("heart")) or 0) or None,
                 cadence=int(_nonnegative_number(point.get("cadence")) or 0) or None,
+                power_w=int(_nonnegative_number(point.get("power")) or 0) or None,
+                ground_time_ms=_nonnegative_number(point.get("groundTime")),
+                stride_length_cm=_nonnegative_number(point.get("cadenceLength")),
+                stride_ratio_pct=(
+                    value / 10
+                    if (value := _nonnegative_number(point.get("verticalStrideRatio")))
+                    is not None
+                    else None
+                ),
+                stride_height_cm=(
+                    value / 10
+                    if (value := _nonnegative_number(point.get("verticalVibration")))
+                    is not None
+                    else None
+                ),
             )
         )
     return records
@@ -679,7 +740,7 @@ async def _upsert_coros_training_distributions(
 async def run_sync(
     db: AsyncSession,
     user_id: str,
-    days: int = 14,
+    days: int | None = None,
     on_event: EventCallback | None = None,
     redis: Redis | None = None,
     sync_event_id: str | None = None,
@@ -726,33 +787,41 @@ async def run_sync(
         await client.login()
 
         end_date = datetime.utcnow().date()
-        start_date = end_date - timedelta(days=days)
-        start_str = start_date.strftime("%Y%m%d")
+        activity_start, health_start, mcp_health_start, sleep_start = (
+            await _resolve_sync_start_dates(db, user_id, end_date, days)
+        )
+        start_str = activity_start.strftime("%Y%m%d")
         end_str = end_date.strftime("%Y%m%d")
-
-        # Keep enough daily health history for the 90-day view and 7-day moving average.
-        health_days = 100
-        health_start_str = (end_date - timedelta(days=health_days)).strftime("%Y%m%d")
+        health_start_str = health_start.strftime("%Y%m%d")
+        mcp_health_start_str = mcp_health_start.strftime("%Y%m%d")
+        sleep_start_str = sleep_start.strftime("%Y%m%d")
 
         # --- Activities ---
         _emit(on_event, "progress", '{"stage": "activities", "message": "Fetching activities..."}')
-        raw_activities = await client.fetch_activities(start_str, end_str)
+        raw_activities, raw_health, raw_fitness, raw_dashboard = await asyncio.gather(
+            client.fetch_activities(start_str, end_str),
+            client.fetch_daily_metrics(health_start_str, end_str),
+            client.fetch_analyse(),
+            client.fetch_dashboard(),
+        )
         activity_count = await _upsert_activities(db, user_id, raw_activities, client)
         total_upserted += activity_count
         _emit(on_event, "progress", f'{{"stage": "activities_done", "count": {activity_count}}}')
 
         # --- Daily Health & Fitness (Team API only) ---
-        _emit(on_event, "progress", '{"stage": "health", "message": "Fetching daily health..."}')
-        raw_health = await client.fetch_daily_metrics(health_start_str, end_str)
-        raw_fitness = await client.fetch_analyse()
-        raw_dashboard = await client.fetch_dashboard()
+        _emit(on_event, "progress", '{"stage": "health", "message": "Updating daily health..."}')
         raw_hrv = raw_dashboard.get("summaryInfo", {}).get("sleepHrvData", {}).get("sleepHrvList", [])
+        total_upserted += await _upsert_user_heart_rate_profile(
+            db, user_id, raw_dashboard
+        )
 
         # --- Steps and active calories via COROS MCP (no Mobile API) ---
         try:
             from src.mcp.daily_health_client import fetch_daily_health_via_mcp
 
-            raw_mcp_health = await fetch_daily_health_via_mcp(health_start_str, end_str, db)
+            raw_mcp_health = await fetch_daily_health_via_mcp(
+                mcp_health_start_str, end_str, db
+            )
             mcp_health_count = await _upsert_mcp_daily_health(db, user_id, raw_mcp_health)
             total_upserted += mcp_health_count
         except RuntimeError as exc:
@@ -790,7 +859,7 @@ async def run_sync(
         sleep_count = 0
         try:
             from src.mcp.sleep_client import fetch_sleep_via_mcp
-            raw_sleep = await fetch_sleep_via_mcp(health_start_str, end_str, db)
+            raw_sleep = await fetch_sleep_via_mcp(sleep_start_str, end_str, db)
             sleep_count = await _upsert_sleep(db, user_id, raw_sleep)
             total_upserted += sleep_count
             _emit(on_event, "progress", f'{{"stage": "sleep_done", "count": {sleep_count}}}')
@@ -827,6 +896,90 @@ def _emit(callback: EventCallback | None, event_type: str, data: str) -> None:
         callback(event_type, data)
 
 
+async def _upsert_user_heart_rate_profile(
+    db: AsyncSession,
+    user_id: str,
+    dashboard_data: dict,
+) -> int:
+    summary = dashboard_data.get("summaryInfo")
+    if not isinstance(summary, dict):
+        return 0
+
+    max_hr = _number(summary.get("fitnessMaxHr"))
+    resting_hr = _number(summary.get("rhr"))
+    max_hr_bpm = round(max_hr) if max_hr is not None and max_hr <= 250 else None
+    resting_hr_bpm = (
+        round(resting_hr) if resting_hr is not None and resting_hr <= 250 else None
+    )
+    if max_hr_bpm is None and resting_hr_bpm is None:
+        return 0
+
+    user = await db.get(User, user_id)
+    if user is None:
+        return 0
+
+    changed = False
+    if max_hr_bpm is not None and user.max_hr_bpm != max_hr_bpm:
+        user.max_hr_bpm = max_hr_bpm
+        changed = True
+    if resting_hr_bpm is not None and user.resting_hr_bpm != resting_hr_bpm:
+        user.resting_hr_bpm = resting_hr_bpm
+        changed = True
+    return int(changed)
+
+
+async def _resolve_sync_start_dates(
+    db: AsyncSession,
+    user_id: str,
+    end_date: date_type,
+    requested_activity_days: int | None,
+) -> tuple[date_type, date_type, date_type, date_type]:
+    latest_activity = await db.scalar(
+        select(func.max(Activity.start_time)).where(Activity.user_id == user_id)
+    )
+    latest_health = await db.scalar(
+        select(func.max(DailyHealth.date)).where(DailyHealth.user_id == user_id)
+    )
+    latest_mcp_health = await db.scalar(
+        select(func.max(DailyHealth.date)).where(
+            DailyHealth.user_id == user_id,
+            or_(
+                DailyHealth.steps.is_not(None),
+                DailyHealth.active_calories_kcal.is_not(None),
+            ),
+        )
+    )
+    latest_sleep = await db.scalar(
+        select(func.max(SleepSession.sleep_start)).where(SleepSession.user_id == user_id)
+    )
+
+    if requested_activity_days is not None:
+        activity_start = end_date - timedelta(days=requested_activity_days)
+    elif latest_activity is not None:
+        activity_start = min(latest_activity.date(), end_date) - timedelta(
+            days=_ACTIVITY_INCREMENTAL_DAYS
+        )
+    else:
+        activity_start = end_date - timedelta(days=_ACTIVITY_BOOTSTRAP_DAYS)
+
+    health_start = (
+        min(latest_health, end_date) - timedelta(days=_HEALTH_INCREMENTAL_DAYS)
+        if latest_health is not None
+        else end_date - timedelta(days=_HEALTH_BOOTSTRAP_DAYS)
+    )
+    mcp_health_start = (
+        min(latest_mcp_health, end_date) - timedelta(days=_HEALTH_INCREMENTAL_DAYS)
+        if latest_mcp_health is not None
+        else end_date - timedelta(days=_HEALTH_BOOTSTRAP_DAYS)
+    )
+    sleep_start = (
+        min(latest_sleep.date(), end_date) - timedelta(days=_HEALTH_INCREMENTAL_DAYS)
+        if latest_sleep is not None
+        else end_date - timedelta(days=_HEALTH_BOOTSTRAP_DAYS)
+    )
+    return activity_start, health_start, mcp_health_start, sleep_start
+
+
 def _parse_timestamp(ts) -> datetime | None:
     if not ts:
         return None
@@ -860,6 +1013,23 @@ async def _upsert_activities(
     from src.parsers.fit_parser import parse_fit_file
     import os
 
+    start_times = [
+        start_time
+        for item in items
+        if (start_time := _parse_timestamp(item.get("startTime"))) is not None
+    ]
+    existing_by_start: dict[datetime, Activity] = {}
+    if start_times:
+        existing_result = await db.execute(
+            select(Activity).where(
+                Activity.user_id == user_id,
+                Activity.start_time.in_(start_times),
+            )
+        )
+        existing_by_start = {
+            activity.start_time: activity for activity in existing_result.scalars().all()
+        }
+
     for item in items:
         start_dt = _parse_timestamp(item.get("startTime"))
         if not start_dt:
@@ -883,13 +1053,7 @@ async def _upsert_activities(
         else:
             sport_enum = SportType.OTHER
 
-        existing = await db.execute(
-            select(Activity).where(
-                Activity.user_id == user_id,
-                Activity.start_time == start_dt,
-            )
-        )
-        activity = existing.scalar_one_or_none()
+        activity = existing_by_start.get(start_dt)
 
         source_hash = hashlib.sha256(f"api:{start_dt.isoformat()}:{raw_sport}".encode()).hexdigest()
 
@@ -921,6 +1085,7 @@ async def _upsert_activities(
                 label_id=str(label_id_val) if label_id_val else None,
             )
             db.add(activity)
+            existing_by_start[start_dt] = activity
             count += 1
         else:
             if activity.source_type == SourceType.API_OFFICIAL:
@@ -935,9 +1100,6 @@ async def _upsert_activities(
                 if label_id_val and not activity.label_id:
                     activity.label_id = str(label_id_val)
                 count += 1
-
-        # Flush to obtain activity.id if newly created
-        await db.flush()
 
         if sport_enum == SportType.STRENGTH and activity.strength_detail is None:
             label_id = item.get("labelId")
@@ -956,6 +1118,8 @@ async def _upsert_activities(
             label_id = item.get("labelId")
             if isinstance(label_id, str) and label_id:
                 try:
+                    if activity.id is None:
+                        await db.flush()
                     detail = await client.fetch_activity_detail(label_id, int(raw_sport))
                     detail_laps = _detail_activity_laps(activity, detail)
                     detail_records = _detail_activity_records(activity, detail)

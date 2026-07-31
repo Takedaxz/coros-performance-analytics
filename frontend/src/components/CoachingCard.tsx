@@ -20,7 +20,7 @@ export default function CoachingCard({
   return (
     <div
       style={{
-        background: "linear-gradient(135deg, rgba(19, 26, 30, 0.95) 0%, rgba(12, 17, 20, 0.95) 100%)",
+        background: "linear-gradient(135deg, var(--color-bg-tertiary) 0%, var(--color-bg-secondary) 100%)",
         border: "1px solid var(--border-color)",
         borderLeft: `4px solid ${accentColor}`,
         borderRadius: "var(--radius-md)",
@@ -45,7 +45,7 @@ export default function CoachingCard({
             gap: "6px",
             padding: "3px 10px",
             borderRadius: "var(--radius-sm)",
-            background: "rgba(255, 255, 255, 0.04)",
+            background: "var(--color-overlay-subtle)",
             border: "1px solid var(--border-color)",
           }}
         >
@@ -92,10 +92,10 @@ export default function CoachingCard({
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
           gap: "var(--space-4)",
-          background: "rgba(0, 0, 0, 0.2)",
+          background: "var(--color-overlay-faint)",
           padding: "var(--space-4)",
           borderRadius: "var(--radius-sm)",
-          border: "1px solid rgba(255, 255, 255, 0.04)",
+          border: "1px solid var(--color-overlay-subtle)",
         }}
       >
         <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>

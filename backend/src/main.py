@@ -1,7 +1,9 @@
 """FastAPI application entry point."""
 
+import asyncio
+import logging
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +20,19 @@ from src.api.routes import (
 from src.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+async def _scheduled_sync_loop() -> None:
+    from src.api.routes.sync_routes import run_scheduled_sync
+
+    interval_seconds = settings.sync_interval_minutes * 60
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await run_scheduled_sync()
+        except Exception:
+            logger.exception("scheduled_sync_failed")
 
 
 @asynccontextmanager
@@ -49,8 +64,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "units": settings.owner_units,
             },
         )
-    yield
-    # Shutdown: nothing to clean up for now
+    scheduler_task = asyncio.create_task(_scheduled_sync_loop())
+    try:
+        yield
+    finally:
+        scheduler_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await scheduler_task
 
 
 

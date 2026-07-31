@@ -418,7 +418,7 @@ export default function DashboardPage() {
                 <div
                   className="hover-card"
                   style={{
-                    background: "radial-gradient(circle at top left, rgba(240, 211, 72, 0.22) 0%, rgba(12, 17, 20, 0.95) 75%)",
+                    background: "radial-gradient(circle at top left, rgba(240, 211, 72, 0.22) 0%, var(--color-bg-secondary) 75%)",
                     border: "1px solid rgba(240, 211, 72, 0.25)",
                     borderRadius: "16px",
                     padding: "var(--space-4)",
@@ -442,7 +442,7 @@ export default function DashboardPage() {
                       {Math.round(todayLoad)}
                     </div>
                     <div style={{ marginTop: "6px" }}>
-                      <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", background: "rgba(0, 0, 0, 0.4)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", background: "var(--color-badge-bg)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
                         {`${Math.round(weeklyMetricTotals.load)} / 7 days`}
                       </span>
                     </div>
@@ -453,7 +453,7 @@ export default function DashboardPage() {
                 <div
                   className="hover-card"
                   style={{
-                    background: "radial-gradient(circle at top left, rgba(255, 77, 98, 0.22) 0%, rgba(12, 17, 20, 0.95) 75%)",
+                    background: "radial-gradient(circle at top left, rgba(255, 77, 98, 0.22) 0%, var(--color-bg-secondary) 75%)",
                     border: "1px solid rgba(255, 77, 98, 0.25)",
                     borderRadius: "16px",
                     padding: "var(--space-4)",
@@ -477,7 +477,7 @@ export default function DashboardPage() {
                       {latestHealth.resting_hr_bpm ? `${latestHealth.resting_hr_bpm}` : "--"}
                     </div>
                     <div style={{ marginTop: "6px" }}>
-                      <span style={{ fontSize: "11px", fontWeight: 600, color: restingHrDelta === null ? "var(--color-text-muted)" : restingHrDelta > 0 ? "var(--color-status-critical)" : "var(--color-status-positive)", background: "rgba(0, 0, 0, 0.4)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: restingHrDelta === null ? "var(--color-text-muted)" : restingHrDelta > 0 ? "var(--color-status-critical)" : "var(--color-status-positive)", background: "var(--color-badge-bg)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
                         {restingHrDelta === null
                           ? "no baseline data"
                           : `${restingHrDelta >= 0 ? "+" : ""}${restingHrDelta.toFixed(1)} vs avg`}
@@ -490,7 +490,7 @@ export default function DashboardPage() {
                 <div
                   className="hover-card"
                   style={{
-                    background: "radial-gradient(circle at top left, rgba(33, 230, 165, 0.22) 0%, rgba(12, 17, 20, 0.95) 75%)",
+                    background: "radial-gradient(circle at top left, rgba(33, 230, 165, 0.22) 0%, var(--color-bg-secondary) 75%)",
                     border: "1px solid rgba(33, 230, 165, 0.25)",
                     borderRadius: "16px",
                     padding: "var(--space-4)",
@@ -514,7 +514,7 @@ export default function DashboardPage() {
                       {latestStepsHealth?.steps?.toLocaleString() || "--"}
                     </div>
                     <div style={{ marginTop: "6px" }}>
-                      <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", background: "rgba(0, 0, 0, 0.4)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", background: "var(--color-badge-bg)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
                         {latestStepsHealth
                           ? new Date(`${latestStepsHealth.date}T00:00:00`).toLocaleDateString(
                               "en-US",
@@ -530,7 +530,7 @@ export default function DashboardPage() {
                 <div
                   className="hover-card"
                   style={{
-                    background: "radial-gradient(circle at top left, rgba(45, 155, 240, 0.22) 0%, rgba(12, 17, 20, 0.95) 75%)",
+                    background: "radial-gradient(circle at top left, rgba(45, 155, 240, 0.22) 0%, var(--color-bg-secondary) 75%)",
                     border: "1px solid rgba(45, 155, 240, 0.25)",
                     borderRadius: "16px",
                     padding: "var(--space-4)",
@@ -554,7 +554,7 @@ export default function DashboardPage() {
                       {latestStepsHealth?.active_calories_kcal?.toLocaleString() || "--"}
                     </div>
                     <div style={{ marginTop: "6px" }}>
-                      <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", background: "rgba(0, 0, 0, 0.4)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", background: "var(--color-badge-bg)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
                         {latestStepsHealth ? "today's calories" : "no daily data"}
                       </span>
                     </div>
@@ -673,7 +673,7 @@ export default function DashboardPage() {
                         display: "grid",
                         gap: "4px",
                         padding: "8px",
-                        background: "#151c20",
+                        background: "var(--color-popover)",
                         border: "1px solid var(--border-color)",
                         borderRadius: "18px",
                         boxShadow: "var(--shadow-md)",
@@ -717,7 +717,7 @@ export default function DashboardPage() {
                                 placeItems: "center",
                                 borderRadius: 8,
                                 color: "#08110e",
-                                background: isSelected ? WEEKLY_ACTIVITY_CONFIG[metric].color : "rgba(255, 255, 255, 0.08)",
+                                background: isSelected ? WEEKLY_ACTIVITY_CONFIG[metric].color : "var(--color-overlay-medium)",
                               }}
                             >
                               {isSelected && (
@@ -737,7 +737,7 @@ export default function DashboardPage() {
                 {/* Recharts Rounded Bar Chart (Rolling 7 Days Ending Today) */}
                 <ResponsiveContainer width="100%" height={230}>
                   <BarChart data={weeklyActivityData} margin={{ top: 6, right: 8, left: 0, bottom: 0 }} barGap={2}>
-                    <CartesianGrid strokeDasharray="2 6" stroke="rgba(255, 255, 255, 0.055)" vertical={false} />
+                    <CartesianGrid strokeDasharray="2 6" stroke="var(--color-chart-grid)" vertical={false} />
                     <XAxis dataKey="day" tick={{ fill: "var(--color-text-muted)", fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} dy={4} height={22} interval="equidistantPreserveStart" />
                     <YAxis
                       domain={isRelativeChart ? [0, 100] : [0, "auto"]}
@@ -762,8 +762,8 @@ export default function DashboardPage() {
                       />
                     )}
                     <Tooltip
-                      cursor={{ fill: "rgba(255, 255, 255, 0.035)", radius: 10 }}
-                      contentStyle={{ background: "#192126", border: "1px solid var(--border-color)", borderRadius: 16, boxShadow: "var(--shadow-sm)", fontSize: 12 }}
+                      cursor={{ fill: "var(--color-chart-cursor)", radius: 10 }}
+                      contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--border-color)", borderRadius: 16, boxShadow: "var(--shadow-sm)", fontSize: 12 }}
                       labelStyle={{ color: "var(--color-text-muted)", marginBottom: 4 }}
                       formatter={(value, name) => {
                         const metric = WEEKLY_ACTIVITY_METRICS.find(

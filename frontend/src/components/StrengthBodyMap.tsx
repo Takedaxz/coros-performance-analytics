@@ -52,7 +52,7 @@ function BodyFigure({
 
   const fillFor = (slug: string | undefined): string => {
     const area = areaForMuscle(slug);
-    if (!area || !loads[area]) return "rgba(255, 255, 255, 0.06)";
+    if (!area || !loads[area]) return "var(--color-overlay-soft)";
     const intensity = loads[area] / maximumLoad;
     return `rgba(255, 77, 98, ${0.22 + intensity * 0.68})`;
   };
@@ -73,7 +73,7 @@ function BodyFigure({
             key={`${side}-${index}`}
             d={path}
             fill={fillFor(slug)}
-            stroke="rgba(255, 255, 255, 0.12)"
+            stroke="var(--color-overlay-strong)"
             strokeWidth="2"
           />
         ))}

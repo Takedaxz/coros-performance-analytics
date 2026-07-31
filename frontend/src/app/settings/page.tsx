@@ -27,6 +27,9 @@ interface UserProfile {
   weight_kg: string;
   body_fat_pct: string;
   training_notes: string;
+  max_hr_bpm: number | null;
+  resting_hr_bpm: number | null;
+  heart_rate_reserve_bpm: number | null;
 }
 
 const EMPTY_GOAL: UserGoal = {
@@ -48,6 +51,9 @@ const EMPTY_PROFILE: UserProfile = {
   weight_kg: "",
   body_fat_pct: "",
   training_notes: "",
+  max_hr_bpm: null,
+  resting_hr_bpm: null,
+  heart_rate_reserve_bpm: null,
 };
 
 function daysUntil(dateStr: string): number | null {
@@ -166,6 +172,9 @@ export default function SettingsPage() {
             weight_kg: data.weight_kg?.toString() ?? "",
             body_fat_pct: data.body_fat_pct?.toString() ?? "",
             training_notes: data.training_notes ?? "",
+            max_hr_bpm: data.max_hr_bpm ?? null,
+            resting_hr_bpm: data.resting_hr_bpm ?? null,
+            heart_rate_reserve_bpm: data.heart_rate_reserve_bpm ?? null,
           });
           profileLoaded.current = true;
         }
@@ -199,6 +208,8 @@ export default function SettingsPage() {
     fetchProfile();
     fetchMcpStatus();
     fetchCorosCreds();
+    const syncStatusTimer = window.setInterval(fetchConfig, 60_000);
+    return () => window.clearInterval(syncStatusTimer);
   }, [apiBase]);
 
   useEffect(() => {
@@ -294,7 +305,8 @@ export default function SettingsPage() {
 
   async function connectMcp() {
     setMcpConnecting(true);
-    const popup = window.open(`${apiBase}/auth/coros-mcp/connect`, "_blank", "width=540,height=780");
+    const theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    const popup = window.open(`${apiBase}/auth/coros-mcp/connect?theme=${theme}`, "_blank", "width=540,height=780");
     // Poll status after popup closes or after 60 s
     const poll = setInterval(async () => {
       try {
@@ -539,7 +551,14 @@ export default function SettingsPage() {
                 <div className="settings-sync-facts">
                   <div>
                     <span>Last successful sync</span>
-                    <strong>{syncConfig?.last_sync_at ? new Date(syncConfig.last_sync_at).toLocaleString() : "Never"}</strong>
+                    <strong>
+                      {syncConfig?.last_sync_at && syncConfig.last_sync_at !== "never"
+                        ? new Date(syncConfig.last_sync_at).toLocaleString(undefined, {
+                            timeZone: "Asia/Bangkok",
+                            timeZoneName: "short",
+                          })
+                        : "Never"}
+                    </strong>
                   </div>
                   <div>
                     <span>Background interval</span>
@@ -625,6 +644,20 @@ export default function SettingsPage() {
                         value={profile.body_fat_pct}
                         onChange={(bodyFatPct) => updateProfileField("body_fat_pct", bodyFatPct)}
                       />
+                    </div>
+                  </div>
+                  <div className="settings-sync-facts">
+                    <div>
+                      <span>Max heart rate</span>
+                      <strong>{profile.max_hr_bpm ?? "--"} bpm</strong>
+                    </div>
+                    <div>
+                      <span>Resting heart rate</span>
+                      <strong>{profile.resting_hr_bpm ?? "--"} bpm</strong>
+                    </div>
+                    <div>
+                      <span>Heart rate reserve</span>
+                      <strong>{profile.heart_rate_reserve_bpm ?? "--"} bpm</strong>
                     </div>
                   </div>
                   {profileError && <p className="settings-feedback is-error">{profileError}</p>}

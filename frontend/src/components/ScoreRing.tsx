@@ -54,7 +54,7 @@ export default function ScoreRing({
           cy={size / 2}
           r={radius}
           fill="transparent"
-          stroke="rgba(255, 255, 255, 0.05)"
+          stroke="var(--color-overlay-soft)"
           strokeWidth={strokeWidth}
         />
 

@@ -8,7 +8,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.activity_laps import distance_splits, hyrox_lap_detail, lap_type
+from src.activity_laps import distance_splits, hyrox_lap_detail, lap_type, swim_lap_name
 from src.db.models import (
     Activity,
     ActivityLap,
@@ -111,6 +111,9 @@ def _lap_label(lap: ActivityLap) -> tuple[str, str | None]:
     station_name, load_unit = hyrox_lap_detail(lap.lap_trigger)
     if station_name:
         return station_name, load_unit
+    stroke_name = swim_lap_name(lap.lap_trigger)
+    if stroke_name:
+        return stroke_name, None
     workout_step = lap_type(lap.lap_trigger)
     if workout_step:
         return workout_step.replace("_", " ").title(), None

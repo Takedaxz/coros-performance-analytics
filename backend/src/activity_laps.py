@@ -21,6 +21,13 @@ def hyrox_lap_detail(lap_trigger: str | None) -> tuple[str | None, str | None]:
     return _HYROX_EXERCISE_NAMES.get(exercise_key, "Functional"), load_unit
 
 
+def swim_lap_name(lap_trigger: str | None) -> str | None:
+    if not lap_trigger or not lap_trigger.startswith("coros_swim"):
+        return None
+    stroke = lap_trigger.removeprefix("coros_swim:").replace("_", " ")
+    return stroke.title() if stroke and stroke != "coros swim" else "Swim"
+
+
 def lap_type(lap_trigger: str | None) -> str | None:
     coros_types = {
         "coros_warmup": "warmup",
@@ -28,11 +35,14 @@ def lap_type(lap_trigger: str | None) -> str | None:
         "coros_cooldown": "cooldown",
         "coros_rest": "rest",
         "coros_run": "run",
+        "coros_ride": "ride",
     }
     if lap_trigger in coros_types:
         return coros_types[lap_trigger]
     if lap_trigger == "coros_functional" or (lap_trigger or "").startswith("coros_hyrox:"):
         return "functional"
+    if (lap_trigger or "").startswith("coros_swim"):
+        return "swim"
     return None
 
 
