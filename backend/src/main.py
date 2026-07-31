@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
+from uuid import UUID
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,21 +50,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Create any tables that don't exist yet (idempotent — safe to run every boot)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Upsert (idempotent — เรียกซ้ำแล้วได้ผลลัพธ์เดิม) the owner user row so FK
-        # constraints on sync_events and other tables are satisfied.
-        await conn.execute(
-            text(
-                "INSERT INTO users (id, email, timezone, units)"
-                " VALUES (:id, :email, :tz, :units)"
-                " ON CONFLICT (id) DO NOTHING"
-            ),
-            {
-                "id": str(settings.owner_user_id),
-                "email": settings.owner_email,
-                "tz": settings.owner_timezone,
-                "units": settings.owner_units,
-            },
-        )
+        owner_id = (
+            await conn.execute(
+                text("SELECT id FROM users WHERE email = :email LIMIT 1"),
+                {"email": settings.owner_email},
+            )
+        ).scalar_one_or_none()
+        if owner_id is None:
+            await conn.execute(
+                text(
+                    "INSERT INTO users (id, email, timezone, units)"
+                    " VALUES (:id, :email, :tz, :units)"
+                    " ON CONFLICT (id) DO NOTHING"
+                ),
+                {
+                    "id": str(settings.owner_user_id),
+                    "email": settings.owner_email,
+                    "tz": settings.owner_timezone,
+                    "units": settings.owner_units,
+                },
+            )
+        else:
+            settings.owner_user_id = UUID(str(owner_id))
     scheduler_task = asyncio.create_task(_scheduled_sync_loop())
     try:
         yield

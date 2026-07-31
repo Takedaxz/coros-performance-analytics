@@ -1,5 +1,6 @@
 """Application configuration loaded from environment variables."""
 
+from functools import cache
 from uuid import UUID
 
 from pydantic import Field
@@ -64,6 +65,7 @@ class Settings(BaseSettings):
         return self.owner_email
 
 
+@cache
 def get_settings() -> Settings:
     """Factory function for settings singleton."""
     return Settings()
