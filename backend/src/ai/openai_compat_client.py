@@ -9,6 +9,8 @@ e.g. the KKU OKMD gateway, vLLM, LM Studio, Ollama (OpenAI-compat mode), etc.
 
 import logging
 from collections.abc import Iterator
+from functools import lru_cache
+from time import monotonic
 
 from openai import OpenAI
 
@@ -17,6 +19,7 @@ from src.config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+_MODEL_CACHE_SECONDS = 300
 
 
 def _get_client() -> OpenAI | None:
@@ -29,10 +32,29 @@ def _get_client() -> OpenAI | None:
     )
 
 
+@lru_cache(maxsize=1)
+def _discover_models(_cache_bucket: int) -> tuple[str, ...]:
+    client = _get_client()
+    if not client:
+        return (settings.openai_compat_model,)
+    try:
+        models = tuple(sorted(model.id for model in client.models.list().data))
+        return models or (settings.openai_compat_model,)
+    except Exception:
+        logger.exception("OpenAI-compatible model discovery failed")
+        return (settings.openai_compat_model,)
+
+
+def list_models() -> list[str]:
+    """Return discovered model IDs with a five-minute in-process cache."""
+    cache_bucket = int(monotonic() // _MODEL_CACHE_SECONDS)
+    return list(_discover_models(cache_bucket))
+
+
 def _build_history_messages(history: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Convert internal history dicts to OpenAI message format (last 4 turns)."""
+    """Convert up to six recent conversation turns to OpenAI message format."""
     messages: list[dict[str, str]] = []
-    for msg in history[-4:]:
+    for msg in history[-12:]:
         role = "user" if msg["role"] == "user" else "assistant"
         messages.append({"role": role, "content": msg["content"]})
     return messages
@@ -73,6 +95,7 @@ def ask_coach_stream(
     question: str,
     context: str,
     history: list[dict[str, str]] | None = None,
+    model: str | None = None,
 ) -> Iterator[str]:
     """Stream the AI coach response chunk by chunk."""
     client = _get_client()
@@ -86,7 +109,7 @@ def ask_coach_stream(
 
     try:
         stream = client.chat.completions.create(
-            model=settings.openai_compat_model,
+            model=model or settings.openai_compat_model,
             messages=messages,  # type: ignore[arg-type]
             stream=True,
         )
@@ -143,3 +166,30 @@ def generate_postmortem(context: str, activity_context: str) -> str:
     except Exception as exc:
         logger.exception("OpenAI-compat generate_postmortem failed")
         return f"Error: {exc}"
+
+
+def generate_postmortem_stream(context: str, activity_context: str) -> Iterator[str]:
+    """Stream a postmortem analysis chunk by chunk."""
+    client = _get_client()
+    if not client:
+        yield "OpenAI-compatible AI is not configured."
+        return
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": POSTMORTEM_PROMPT},
+        {"role": "user", "content": f"{context}\n\nActivity Details:\n{activity_context}"},
+    ]
+
+    try:
+        stream = client.chat.completions.create(
+            model=settings.openai_compat_model,
+            messages=messages,  # type: ignore[arg-type]
+            stream=True,
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+    except Exception:
+        logger.exception("OpenAI-compat generate_postmortem_stream failed")
+        yield "Error generating postmortem."

@@ -19,6 +19,8 @@ out/
 
 # Data
 data/raw_files/
+backend/data/
+**/data/
 *.fit
 *.tcx
 *.gpx
@@ -32,3 +34,6 @@ data/raw_files/
 # OS
 .DS_Store
 Thumbs.db
+CorosLink
+# COROS MCP OAuth tokens
+.coros_mcp_tokens.json

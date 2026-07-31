@@ -25,6 +25,10 @@ class ParsedRecord:
     heart_rate_bpm: int | None = None
     cadence: int | None = None
     power_w: int | None = None
+    ground_time_ms: float | None = None
+    stride_length_cm: float | None = None
+    stride_ratio_pct: float | None = None
+    stride_height_cm: float | None = None
     temperature_c: float | None = None
 
 
@@ -100,6 +104,10 @@ def _semicircles_to_degrees(semicircles: int | None) -> float | None:
     return semicircles * (180.0 / 2**31)
 
 
+def _millimetres_to_centimetres(value: float | None) -> float | None:
+    return value / 10 if value is not None else None
+
+
 def _map_sport(sport_raw: Any) -> str:
     """Map FIT sport enum to canonical sport type string."""
     if sport_raw is None:
@@ -116,6 +124,27 @@ def _map_sport(sport_raw: Any) -> str:
         "multisport": "multisport",
     }
     return sport_map.get(sport_str, "other")
+
+
+def _fit_lap_trigger(
+    sport_raw: object,
+    subsport_raw: object,
+    distance_m: float | None,
+    swim_stroke: object,
+    raw_trigger: object,
+) -> str | None:
+    is_swim = (
+        _map_sport(sport_raw) == "swim"
+        or str(subsport_raw).lower() == "lap_swimming"
+        or swim_stroke is not None
+    )
+    if is_swim:
+        if not distance_m or distance_m <= 0:
+            return "coros_rest"
+        stroke = str(swim_stroke).strip().lower().replace(" ", "_")
+        return f"coros_swim:{stroke}" if stroke and stroke != "none" else "coros_swim"
+    trigger = str(raw_trigger) if raw_trigger is not None else None
+    return None if trigger in {None, "None"} else trigger
 
 
 def parse_fit_file(data: bytes) -> ParsedFitFile:
@@ -185,20 +214,27 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
                     )
 
                 elif msg_name == "lap":
+                    distance_m = _get_field_value(frame, "total_distance")
                     laps.append(
                         ParsedLap(
                             lap_index=lap_index,
                             start_time=_get_field_value(frame, "start_time")
                             or _get_field_value(frame, "timestamp"),
                             elapsed_s=_get_field_value(frame, "total_elapsed_time") or 0.0,
-                            distance_m=_get_field_value(frame, "total_distance"),
+                            distance_m=distance_m,
                             avg_hr_bpm=_get_field_value(frame, "avg_heart_rate"),
                             max_hr_bpm=_get_field_value(frame, "max_heart_rate"),
                             avg_speed_mps=_get_field_value(frame, "avg_speed"),
                             avg_power_w=_get_field_value(frame, "avg_power"),
                             calories_kcal=_get_field_value(frame, "total_calories"),
                             avg_cadence=_get_field_value(frame, "avg_cadence"),
-                            lap_trigger=str(_get_field_value(frame, "lap_trigger")),
+                            lap_trigger=_fit_lap_trigger(
+                                _get_field_value(frame, "sport"),
+                                _get_field_value(frame, "sub_sport"),
+                                distance_m,
+                                _get_field_value(frame, "swim_stroke"),
+                                _get_field_value(frame, "lap_trigger"),
+                            ),
                         )
                     )
                     lap_index += 1
@@ -222,6 +258,14 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
                             heart_rate_bpm=_get_field_value(frame, "heart_rate"),
                             cadence=_get_field_value(frame, "cadence"),
                             power_w=_get_field_value(frame, "power"),
+                            ground_time_ms=_get_field_value(frame, "stance_time"),
+                            stride_length_cm=_millimetres_to_centimetres(
+                                _get_field_value(frame, "step_length")
+                            ),
+                            stride_ratio_pct=_get_field_value(frame, "vertical_ratio"),
+                            stride_height_cm=_millimetres_to_centimetres(
+                                _get_field_value(frame, "vertical_oscillation")
+                            ),
                             temperature_c=_get_field_value(frame, "temperature"),
                         )
                     )

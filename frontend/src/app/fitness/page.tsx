@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
+import PageTitle from "@/components/PageTitle";
+import MetricCard from "@/components/MetricCard";
+import FitnessScoresPanel from "@/components/FitnessScoresPanel";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
 interface FitnessTrendDay {
@@ -9,7 +12,18 @@ interface FitnessTrendDay {
   vo2max: number | null;
   running_fitness: number | null;
   threshold_pace: number | null;
-  biological_age: number | null;
+  cardio_fitness_age: number | null;
+}
+
+interface RunningFitness {
+  aerobicEnduranceScore: number | null;
+  lactateThresholdCapacityScore: number | null;
+  anaerobicEnduranceScore: number | null;
+  anaerobicCapacityScore: number | null;
+  lthr: number | null;
+  ltsp: number | null;
+  fitnessMaxHr: number | null;
+  runningLevelHr: number | null;
 }
 
 function formatPace(speedMps: number): string {
@@ -32,19 +46,23 @@ function formatRaceTime(seconds: number): string {
 
 export default function FitnessPage() {
   const [data, setData] = useState<FitnessTrendDay[]>([]);
+  const [runningFitness, setRunningFitness] = useState<RunningFitness | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function fetchData() {
       try {
         const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const res = await fetch(`${apiBase}/api/dashboard/fitness-trend?days=180`);
-        if (res.ok) {
-          const json = await res.json();
-          // Filter out days without data
+        const [trendResponse, scoresResponse] = await Promise.all([
+          fetch(`${apiBase}/api/dashboard/fitness-trend?days=180`),
+          fetch(`${apiBase}/api/dashboard/running-fitness`),
+        ]);
+        if (trendResponse.ok) {
+          const json = await trendResponse.json();
           const valid = json.filter((d: FitnessTrendDay) => d.vo2max != null || d.running_fitness != null);
           setData(valid);
         }
+        if (scoresResponse.ok) setRunningFitness(await scoresResponse.json());
       } catch (err) {
         console.error(err);
       } finally {
@@ -54,231 +72,181 @@ export default function FitnessPage() {
     fetchData();
   }, []);
 
-  // Determine active VO2 Max for race predictions
-  const latestVo2 = data.find((d) => d.vo2max != null)?.vo2max || 50.4;
-  const latestFitness = data.find((d) => d.running_fitness != null)?.running_fitness || 78;
-  const latestThreshold = data.find((d) => d.threshold_pace != null)?.threshold_pace || null;
-  const latestBioAge = data.find((d) => d.biological_age != null)?.biological_age || null;
+  const latestVo2 = [...data].reverse().find((d) => d.vo2max != null)?.vo2max || 54.2;
+  const latestFitness = [...data].reverse().find((d) => d.running_fitness != null)?.running_fitness || 81;
+  const latestThreshold = [...data].reverse().find((d) => d.threshold_pace != null)?.threshold_pace || null;
+  const latestCardioFitnessAge = [...data]
+    .reverse()
+    .find((day) => day.cardio_fitness_age != null)?.cardio_fitness_age ?? null;
+  const vo2Readings = data.filter((d): d is FitnessTrendDay & { vo2max: number } => d.vo2max !== null);
+  const vo2Change = vo2Readings.length > 1 ? latestVo2 - vo2Readings[0].vo2max : null;
 
-  // Race calculations using realistic threshold pace if available, fallback to VO2 max
-  const t5k = latestThreshold ? latestThreshold * 0.93 * 5 : (20.0 * 60 * (50 / latestVo2));
+  const t1k = latestThreshold ? latestThreshold * 0.82 : (4.0 * 60 * (50 / latestVo2));
+  const t3k = latestThreshold ? latestThreshold * 0.91 * 3 : (12.0 * 60 * (50 / latestVo2));
+  const t5k = latestThreshold ? latestThreshold * 0.94 * 5 : (20.0 * 60 * (50 / latestVo2));
   const t10k = latestThreshold ? latestThreshold * 0.98 * 10 : (41.5 * 60 * (50 / latestVo2) * 1.02);
-  const tHalf = latestThreshold ? latestThreshold * 1.05 * 21.0975 : (92.0 * 60 * (50 / latestVo2) * 1.05);
-  const tFull = latestThreshold ? latestThreshold * 1.15 * 42.195 : (192.0 * 60 * (50 / latestVo2) * 1.10);
+  const tHalf = latestThreshold ? latestThreshold * 1.02 * 21.0975 : (92.0 * 60 * (50 / latestVo2) * 1.05);
+  const tFull = latestThreshold ? latestThreshold * 1.07 * 42.195 : (192.0 * 60 * (50 / latestVo2) * 1.10);
+  const trainingThreshold = latestThreshold ?? 1;
+  const predictions = [
+    { label: "1K", seconds: t1k, distance: 1_000 },
+    { label: "3K", seconds: t3k, distance: 3_000 },
+    { label: "5K", seconds: t5k, distance: 5_000 },
+    { label: "10K", seconds: t10k, distance: 10_000 },
+    { label: "Half Marathon", seconds: tHalf, distance: 21_097.5 },
+    { label: "Marathon", seconds: tFull, distance: 42_195 },
+  ];
+  const danielsZones = [
+    { code: "@R", label: "Repetition", pace: formatPace(1000 / (trainingThreshold * 0.85)), color: "var(--color-status-critical)", glow: "rgba(255, 77, 98, 0.10)" },
+    { code: "@I", label: "Interval / VO2", pace: formatPace(1000 / (trainingThreshold * 0.93)), color: "var(--color-status-moderate)", glow: "rgba(240, 211, 72, 0.10)" },
+    { code: "@T", label: "Threshold", pace: formatPace(1000 / trainingThreshold), color: "var(--color-accent-primary)", glow: "rgba(33, 230, 165, 0.10)" },
+    { code: "@M", label: "Marathon", pace: formatPace(1000 / (trainingThreshold * 1.07)), color: "var(--color-accent-exertion)", glow: "rgba(45, 155, 240, 0.10)" },
+    { code: "@E", label: "Easy aerobic", pace: formatPace(1000 / (trainingThreshold * 1.25)), color: "var(--color-accent-sleep)", glow: "rgba(141, 171, 194, 0.10)" },
+  ];
+  const frielZones = [
+    { code: "Z5", label: "Anaerobic", pace: `< ${formatPace(1000 / (trainingThreshold * 0.90))}`, color: "var(--color-status-critical)", glow: "rgba(255, 77, 98, 0.10)" },
+    { code: "Z4", label: "Threshold", pace: `${formatPace(1000 / (trainingThreshold * 1.05))} – ${formatPace(1000 / trainingThreshold)}`, color: "var(--color-accent-primary)", glow: "rgba(33, 230, 165, 0.10)" },
+    { code: "Z3", label: "Tempo", pace: `${formatPace(1000 / (trainingThreshold * 1.14))} – ${formatPace(1000 / (trainingThreshold * 1.05))}`, color: "var(--color-status-moderate)", glow: "rgba(240, 211, 72, 0.10)" },
+    { code: "Z2", label: "Endurance", pace: `${formatPace(1000 / (trainingThreshold * 1.29))} – ${formatPace(1000 / (trainingThreshold * 1.14))}`, color: "var(--color-accent-exertion)", glow: "rgba(45, 155, 240, 0.10)" },
+    { code: "Z1", label: "Active recovery", pace: `> ${formatPace(1000 / (trainingThreshold * 1.29))}`, color: "var(--color-accent-sleep)", glow: "rgba(141, 171, 194, 0.10)" },
+  ];
 
   return (
     <div className="app-layout">
       <Sidebar />
       <main className="main-content">
         <header className="page-header">
-          <h2 className="page-title">Fitness & Estimates</h2>
+          <PageTitle>Fitness Capabilities & Estimates</PageTitle>
         </header>
 
         <div className="page-body">
-          {/* Top Row: Overview Cards */}
-          <div className="metrics-grid" style={{ marginBottom: "var(--space-4)" }}>
-            <div className="metric-card">
-              <div className="metric-header">
-                <span className="metric-label">Estimated VO2 Max</span>
-                <svg className="metric-card-icon" style={{ color: "var(--color-accent-emerald)" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <div className="metrics-grid fitness-metrics-grid">
+            <MetricCard
+              label="Estimated VO2 Max"
+              value={latestVo2.toFixed(1)}
+              unit="ml/kg/min"
+              accentColor="var(--color-accent-primary)"
+              subtext="Elite Athletic Capacity"
+              icon={(
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
                 </svg>
-              </div>
-              <div className="metric-value">{latestVo2.toFixed(1)}</div>
-              <div className="metric-change neutral">Aesthetic Elite Tier</div>
-            </div>
-
-            <div className="metric-card">
-              <div className="metric-header">
-                <span className="metric-label">Running Fitness Index</span>
-                <svg className="metric-card-icon" style={{ color: "var(--color-accent-violet)" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              )}
+            />
+            <MetricCard
+              label="Running Fitness Index"
+              value={latestFitness}
+              subtext="Pace & threshold score"
+              icon={(
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="20" x2="18" y2="10" />
                   <line x1="12" y1="20" x2="12" y2="4" />
                   <line x1="6" y1="20" x2="6" y2="14" />
                 </svg>
-              </div>
-              <div className="metric-value">{latestFitness}</div>
-              <div className="metric-change neutral">Based on threshold pace</div>
-            </div>
-
-            <div className="metric-card">
-              <div className="metric-header">
-                <span className="metric-label">Biological Age</span>
-                <svg className="metric-card-icon" style={{ color: "var(--color-accent-blue)" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                </svg>
-              </div>
-              <div className="metric-value" style={{ color: latestBioAge ? "var(--color-accent-blue)" : "inherit" }}>
-                {latestBioAge || "--"}
-              </div>
-              <div className="metric-change positive">Years Old</div>
-            </div>
+              )}
+            />
+            <MetricCard
+              label="Cardio Fitness Age"
+              value={latestCardioFitnessAge ?? "--"}
+              unit={latestCardioFitnessAge === null ? undefined : "years"}
+              accentColor="var(--color-accent-exertion)"
+              subtext={
+                latestCardioFitnessAge === null
+                  ? "Select sex in Settings"
+                  : "Based on your 30-day average VO₂ max"
+              }
+            />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: "var(--space-4)" }}>
-            {/* Chart: VO2 Max Trend */}
-            <div className="chart-container animate-fade-in" id="chart-vo2max">
-              <div className="chart-header">
-                <div className="chart-title">VO2 Max Progression (6 Months)</div>
-              </div>
-              <div style={{ marginTop: "1rem" }}>
-                {isLoading ? (
-                  <div style={{ color: "var(--color-text-muted)" }}>Loading...</div>
-                ) : data.length === 0 ? (
-                  <div style={{ color: "var(--color-text-muted)" }}>No fitness data recorded in this period.</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={320}>
-                    <AreaChart data={data}>
+          <FitnessScoresPanel fitness={runningFitness} />
 
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                      <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(val) => val.substring(5)} axisLine={false} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "var(--space-6)", marginBottom: "var(--space-6)" }}>
+            {/* Chart: VO2 Max Trend */}
+            <div className="card" id="chart-vo2max">
+              <div className="card-header">
+                <span className="card-title">VO2 Max Progression (12 Weeks)</span>
+                {vo2Readings.length > 0 && (
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "var(--space-2)", textAlign: "right" }}>
+                    <strong className="mono" style={{ fontSize: "20px", color: "var(--color-accent-primary)" }}>{latestVo2.toFixed(1)}</strong>
+                    <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>
+                      {vo2Change === null || Math.abs(vo2Change) < 0.05 ? "Stable" : `${vo2Change > 0 ? "+" : ""}${vo2Change.toFixed(1)} over period`}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div style={{ marginTop: "var(--space-3)" }}>
+                {isLoading ? (
+                  <div className="skeleton" style={{ width: "100%", height: 210, borderRadius: 12 }} />
+                ) : vo2Readings.length === 0 ? (
+                  <div style={{ color: "var(--color-text-muted)", padding: "2rem", textAlign: "center" }}>No fitness data recorded in this period.</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={210}>
+                    <AreaChart data={vo2Readings}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" vertical={false} />
+                      <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(val) => val.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                       <YAxis stroke="var(--color-text-muted)" fontSize={11} domain={['dataMin - 0.5', 'dataMax + 0.5']} axisLine={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: "var(--color-bg-elevated)", borderColor: "var(--border-color)", borderRadius: 8, fontSize: 12 }}
-                      />
-                      <Area type="monotone" dataKey="vo2max" name="VO2 Max" stroke="var(--color-accent-emerald)" fill="var(--color-accent-emerald)" fillOpacity={0.1} strokeWidth={3} dot={{ r: 4, fill: "var(--color-accent-emerald)" }} />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="vo2max" name="VO2 Max" stroke="var(--color-accent-primary)" fill="none" strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
                     </AreaChart>
                   </ResponsiveContainer>
                 )}
               </div>
             </div>
 
-            {/* Race Predictor Card */}
-            <div className="card animate-fade-in" style={{ display: "flex", flexDirection: "column" }}>
-              <div className="card-header">
-                <h3 className="card-title">Race Time Predictor</h3>
+            <div className="card">
+              <span className="card-title">Race Predictor</span>
+              <h3 style={{ fontSize: "20px", margin: "var(--space-1) 0", color: "var(--color-text-primary)" }}>Estimated finish times</h3>
+              <p style={{ fontSize: "12px", color: "var(--color-text-muted)", marginBottom: "var(--space-3)" }}>Running level {Math.round(latestFitness)}</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "var(--space-2)" }}>
+                {predictions.map((prediction) => (
+                  <div
+                    key={prediction.label}
+                    style={{
+                      background: "radial-gradient(circle at 0 0, rgba(33, 230, 165, 0.12), transparent 64%), var(--color-surface-secondary)",
+                      border: "1px solid rgba(33, 230, 165, 0.12)",
+                      borderRadius: "14px",
+                      minWidth: 0,
+                      padding: "12px",
+                    }}
+                  >
+                    <span style={{ display: "block", color: "var(--color-text-secondary)", fontSize: "11px", fontWeight: 750 }}>{prediction.label}</span>
+                    <strong className="mono" style={{ display: "block", marginTop: "7px", fontSize: "22px", lineHeight: 1, color: "var(--color-text-primary)" }}>{formatRaceTime(prediction.seconds)}</strong>
+                    <span style={{ display: "block", marginTop: "7px", color: "var(--color-text-secondary)", fontSize: "11px" }}>{formatPace(prediction.distance / prediction.seconds)}</span>
+                  </div>
+                ))}
               </div>
-              <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", marginBottom: "var(--space-4)" }}>
-                Calculated estimations based on threshold and oxygen capacity levels.
-              </p>
-              
-              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", flex: 1 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "var(--space-2)", borderBottom: "1px solid var(--border-color)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                    <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)" }}>5K</span>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <span className="mono" style={{ fontSize: "var(--text-base)", fontWeight: "var(--weight-bold)", color: "var(--color-accent-cyan)", display: "block" }}>
-                      {formatRaceTime(t5k)}
-                    </span>
-                    <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{formatPace(5000 / t5k)}</span>
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "var(--space-2)", borderBottom: "1px solid var(--border-color)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                    <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)" }}>10K</span>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <span className="mono" style={{ fontSize: "var(--text-base)", fontWeight: "var(--weight-bold)", color: "var(--color-accent-cyan)", display: "block" }}>
-                      {formatRaceTime(t10k)}
-                    </span>
-                    <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{formatPace(10000 / t10k)}</span>
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "var(--space-2)", borderBottom: "1px solid var(--border-color)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                    <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)" }}>Half Marathon</span>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <span className="mono" style={{ fontSize: "var(--text-base)", fontWeight: "var(--weight-bold)", color: "var(--color-accent-cyan)", display: "block" }}>
-                      {formatRaceTime(tHalf)}
-                    </span>
-                    <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{formatPace(21097.5 / tHalf)}</span>
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "var(--space-2)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                    <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)" }}>Marathon</span>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <span className="mono" style={{ fontSize: "var(--text-base)", fontWeight: "var(--weight-bold)", color: "var(--color-accent-cyan)", display: "block" }}>
-                      {formatRaceTime(tFull)}
-                    </span>
-                    <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{formatPace(42195 / tFull)}</span>
-                  </div>
-                </div>
-              </div>
-              {latestThreshold && (
-                <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: "var(--space-4)" }}>
-                  <em>Predictions are calculated using your actual Lactate Threshold Pace for realistic target setting.</em>
-                </div>
-              )}
             </div>
           </div>
 
           {/* Training Paces Row */}
           {latestThreshold && (
-            <div className="card animate-fade-in" style={{ marginTop: "var(--space-4)" }}>
-              <div className="card-header">
-                <h3 className="card-title">Target Training Paces</h3>
+            <div>
+              <div className="training-pace-intro">
+                <span className="card-title">Training pace zones</span>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-6)" }}>
-                
-                {/* Jack Daniels */}
-                <div style={{ border: "1px solid var(--border-color)", borderRadius: "var(--radius-md)", overflow: "hidden", backgroundColor: "var(--color-bg-card)" }}>
-                  <div style={{ backgroundColor: "var(--color-bg-elevated)", padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-color)" }}>
-                    <h4 style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-bold)", color: "var(--color-text)", margin: 0 }}>Daniels' Running Formula</h4>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-color)" }}>
-                      <span style={{ fontWeight: "var(--weight-medium)", fontSize: "var(--text-sm)" }}>@R (Repetition)</span>
-                      <span className="mono" style={{ color: "var(--color-accent-rose)", fontWeight: "var(--weight-semibold)" }}>{formatPace(1000 / (latestThreshold * 0.85))}</span>
+              <div className="training-pace-guide">
+                {[
+                  { title: "Daniels Formula", subtitle: "Training formula", zones: danielsZones },
+                  { title: "Friel Zones", subtitle: "Threshold zones", zones: frielZones },
+                ].map((guide) => (
+                  <section className="card" key={guide.title}>
+                    <div className="card-header">
+                      <div>
+                        <span className="card-title">{guide.title}</span>
+                        <h3 style={{ color: "var(--color-text-primary)", fontSize: "15px", margin: "var(--space-1) 0 0" }}>{guide.subtitle}</h3>
+                      </div>
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-color)" }}>
-                      <span style={{ fontWeight: "var(--weight-medium)", fontSize: "var(--text-sm)" }}>@I (Interval / VO2)</span>
-                      <span className="mono" style={{ color: "var(--color-accent-amber)", fontWeight: "var(--weight-semibold)" }}>{formatPace(1000 / (latestThreshold * 0.93))}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-color)" }}>
-                      <span style={{ fontWeight: "var(--weight-medium)", fontSize: "var(--text-sm)" }}>@T (Threshold)</span>
-                      <span className="mono" style={{ color: "var(--color-accent-emerald)", fontWeight: "var(--weight-semibold)" }}>{formatPace(1000 / latestThreshold)}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-color)" }}>
-                      <span style={{ fontWeight: "var(--weight-medium)", fontSize: "var(--text-sm)" }}>@M (Marathon)</span>
-                      <span className="mono" style={{ color: "var(--color-accent-blue-light)", fontWeight: "var(--weight-semibold)" }}>{formatPace(1000 / (latestThreshold * 1.15))}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-4)" }}>
-                      <span style={{ fontWeight: "var(--weight-medium)", fontSize: "var(--text-sm)" }}>@E (Easy)</span>
-                      <span className="mono" style={{ color: "var(--color-accent-violet)", fontWeight: "var(--weight-semibold)" }}>{formatPace(1000 / (latestThreshold * 1.25))}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Joe Friel */}
-                <div style={{ border: "1px solid var(--border-color)", borderRadius: "var(--radius-md)", overflow: "hidden", backgroundColor: "var(--color-bg-card)" }}>
-                  <div style={{ backgroundColor: "var(--color-bg-elevated)", padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-color)" }}>
-                    <h4 style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-bold)", color: "var(--color-text)", margin: 0 }}>Friel's Triathlete's Training Bible</h4>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-color)" }}>
-                      <span style={{ fontWeight: "var(--weight-medium)", fontSize: "var(--text-sm)" }}>Z5c (Anaerobic)</span>
-                      <span className="mono" style={{ color: "var(--color-accent-rose)", fontWeight: "var(--weight-semibold)" }}>&lt; {formatPace(1000 / (latestThreshold * 0.90))}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-color)" }}>
-                      <span style={{ fontWeight: "var(--weight-medium)", fontSize: "var(--text-sm)" }}>Z5a/b (Super-Threshold)</span>
-                      <span className="mono" style={{ color: "var(--color-accent-amber)", fontWeight: "var(--weight-semibold)" }}>{formatPace(1000 / (latestThreshold * 1.00))} - {formatPace(1000 / (latestThreshold * 0.90))}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-color)" }}>
-                      <span style={{ fontWeight: "var(--weight-medium)", fontSize: "var(--text-sm)" }}>Z4 (Threshold)</span>
-                      <span className="mono" style={{ color: "var(--color-accent-emerald)", fontWeight: "var(--weight-semibold)" }}>{formatPace(1000 / (latestThreshold * 1.05))} - {formatPace(1000 / (latestThreshold * 1.00))}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-color)" }}>
-                      <span style={{ fontWeight: "var(--weight-medium)", fontSize: "var(--text-sm)" }}>Z3 (Tempo)</span>
-                      <span className="mono" style={{ color: "var(--color-accent-cyan)", fontWeight: "var(--weight-semibold)" }}>{formatPace(1000 / (latestThreshold * 1.14))} - {formatPace(1000 / (latestThreshold * 1.05))}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-4)", borderBottom: "1px solid var(--border-color)" }}>
-                      <span style={{ fontWeight: "var(--weight-medium)", fontSize: "var(--text-sm)" }}>Z2 (Endurance)</span>
-                      <span className="mono" style={{ color: "var(--color-accent-blue-light)", fontWeight: "var(--weight-semibold)" }}>{formatPace(1000 / (latestThreshold * 1.29))} - {formatPace(1000 / (latestThreshold * 1.14))}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "var(--space-3) var(--space-4)" }}>
-                      <span style={{ fontWeight: "var(--weight-medium)", fontSize: "var(--text-sm)" }}>Z1 (Recovery)</span>
-                      <span className="mono" style={{ color: "var(--color-accent-violet)", fontWeight: "var(--weight-semibold)" }}>&gt; {formatPace(1000 / (latestThreshold * 1.29))}</span>
-                    </div>
-                  </div>
-                </div>
-
+                      <div className="training-pace-zone-grid">
+                        {guide.zones.map((zone) => (
+                          <div key={zone.code} style={{ background: `radial-gradient(circle at 0 0, ${zone.glow}, transparent 68%), var(--color-surface-secondary)`, border: `1px solid ${zone.glow}`, borderRadius: "12px", padding: "12px" }}>
+                            <span className="mono" style={{ color: zone.color, fontSize: "11px", fontWeight: 700 }}>{zone.code}</span>
+                            <span style={{ display: "block", color: "var(--color-text-secondary)", fontSize: "11px", marginTop: "2px" }}>{zone.label}</span>
+                            <strong className="mono" style={{ display: "block", color: "var(--color-text-primary)", fontSize: "16px", marginTop: "var(--space-2)" }}>{zone.pace}</strong>
+                          </div>
+                        ))}
+                      </div>
+                  </section>
+                ))}
               </div>
             </div>
           )}

@@ -1,19 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <!-- Rounded square background -->
-  <rect width="128" height="128" rx="28" fill="#f8f8f8"/>
-  <rect width="128" height="128" rx="28" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="1"/>
-
-  <!--
-    Letter C — arc center at (64, 64), radius 32, gap ±60° from 3 o'clock.
-    Top endpoint:    (64 + 32·cos(-60°), 64 + 32·sin(-60°)) = (80, 36.3)
-    Bottom endpoint: (64 + 32·cos( 60°), 64 + 32·sin( 60°)) = (80, 91.7)
-    large-arc=1, sweep=0 → goes counterclockwise (left side of the C)
-  -->
-  <path
-    d="M 80 36.3 A 32 32 0 1 0 80 91.7"
+  <rect width="128" height="128" rx="28" fill="#0A0F12"/>
+  <circle
+    cx="64"
+    cy="64"
+    r="42"
     fill="none"
-    stroke="#1a1a1a"
-    stroke-width="13"
+    stroke="#AEB8BD"
+    stroke-width="7"
     stroke-linecap="round"
+    stroke-dasharray="74 26"
+    transform="rotate(-22 64 64)"
   />
+  <circle cx="64" cy="64" r="23" fill="none" stroke="#F5F7F7" stroke-width="7"/>
+  <circle cx="64" cy="64" r="8" fill="#F5F7F7"/>
 </svg>

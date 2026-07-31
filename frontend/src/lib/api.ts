@@ -28,23 +28,35 @@ export function createSSEConnection(
 ): EventSource {
   const url = `${API_BASE}${path}`;
   const source = new EventSource(url);
+  let isClosed = false;
 
   source.onmessage = (event) => {
+    if (isClosed) return;
     onEvent("message", event.data);
   };
 
   source.addEventListener("progress", (event) => {
+    if (isClosed) return;
     onEvent("progress", (event as MessageEvent).data);
   });
 
+  source.addEventListener("ping", (event) => {
+    if (isClosed) return;
+    onEvent("ping", (event as MessageEvent).data);
+  });
+
   source.addEventListener("complete", (event) => {
+    isClosed = true;
     onEvent("complete", (event as MessageEvent).data);
     source.close();
   });
 
   source.addEventListener("error", (event) => {
-    onEvent("error", JSON.stringify({ message: "SSE connection error" }));
+    if (isClosed) return;
+    isClosed = true;
+    onEvent("error", (event as MessageEvent).data || JSON.stringify({ message: "SSE connection error" }));
     if (onError) onError(event);
+    source.close();
   });
 
   return source;

@@ -1,14 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Sidebar from "@/components/Sidebar";
+import PageTitle from "@/components/PageTitle";
+import SingleSelect from "@/components/SingleSelect";
+import NumberStepper from "@/components/NumberStepper";
 import type { SyncStatus } from "@/lib/types";
-
-interface AppStatus {
-  app_env: string;
-  gemini_enabled: boolean;
-  api_enabled: boolean;
-}
 
 interface UserGoal {
   id?: string;
@@ -25,10 +22,14 @@ interface UserProfile {
   last_name: string;
   nickname: string;
   birthdate: string;
+  sex: string;
   height_cm: string;
   weight_kg: string;
   body_fat_pct: string;
   training_notes: string;
+  max_hr_bpm: number | null;
+  resting_hr_bpm: number | null;
+  heart_rate_reserve_bpm: number | null;
 }
 
 const EMPTY_GOAL: UserGoal = {
@@ -45,10 +46,14 @@ const EMPTY_PROFILE: UserProfile = {
   last_name: "",
   nickname: "",
   birthdate: "",
+  sex: "",
   height_cm: "",
   weight_kg: "",
   body_fat_pct: "",
   training_notes: "",
+  max_hr_bpm: null,
+  resting_hr_bpm: null,
+  heart_rate_reserve_bpm: null,
 };
 
 function daysUntil(dateStr: string): number | null {
@@ -67,9 +72,27 @@ function goalRaceState(dateStr: string): "upcoming" | "recovery" | "expired" | "
   return "expired";                    // 30+ days after race
 }
 
+function targetTimeParts(value: string): [string, string, string] {
+  const [hours = "", minutes = "", seconds = ""] = value.split(":");
+  return [hours, minutes, seconds];
+}
+
+function updateTargetTime(value: string, index: 0 | 1 | 2, nextValue: string): string {
+  const parts = targetTimeParts(value);
+  parts[index] = nextValue;
+  return parts.join(":");
+}
+
+function normalizedTargetTime(value: string): string | null {
+  const [hours, minutes, seconds] = targetTimeParts(value);
+  if (!hours && !minutes && !seconds) return null;
+  return `${Number(hours) || 0}:${String(Number(minutes) || 0).padStart(2, "0")}:${String(Number(seconds) || 0).padStart(2, "0")}`;
+}
+
 export default function SettingsPage() {
   const [syncConfig, setSyncConfig] = useState<SyncStatus | null>(null);
-  const [appStatus, setAppStatus] = useState<AppStatus | null>(null);
+  const [mcpStatus, setMcpStatus] = useState<{ connected: boolean; expired?: boolean } | null>(null);
+  const [mcpConnecting, setMcpConnecting] = useState(false);
   
   // Multi-goal state
   const [goals, setGoals] = useState<UserGoal[]>([]);
@@ -87,6 +110,17 @@ export default function SettingsPage() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const profileLoaded = useRef(false);
+  const profileDirty = useRef(false);
+  const profileSavedTimer = useRef<number | null>(null);
+
+  // COROS Account Credentials state
+  const [corosCredStatus, setCorosCredStatus] = useState<{ configured: boolean; email?: string | null; source?: string | null } | null>(null);
+  const [corosEmailInput, setCorosEmailInput] = useState("");
+  const [corosPasswordInput, setCorosPasswordInput] = useState("");
+  const [corosSaving, setCorosSaving] = useState(false);
+  const [corosSaved, setCorosSaved] = useState(false);
+  const [corosError, setCorosError] = useState("");
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -121,12 +155,6 @@ export default function SettingsPage() {
       } catch {
         // Backend not available
       }
-      try {
-        const res2 = await fetch(`${apiBase}/api/settings/status`);
-        if (res2.ok) setAppStatus(await res2.json());
-      } catch {
-        // Backend not available
-      }
     }
 
     async function fetchProfile() {
@@ -139,19 +167,168 @@ export default function SettingsPage() {
             last_name: data.last_name ?? "",
             nickname: data.nickname ?? "",
             birthdate: data.birthdate ?? "",
+            sex: data.sex ?? "",
             height_cm: data.height_cm?.toString() ?? "",
             weight_kg: data.weight_kg?.toString() ?? "",
             body_fat_pct: data.body_fat_pct?.toString() ?? "",
             training_notes: data.training_notes ?? "",
+            max_hr_bpm: data.max_hr_bpm ?? null,
+            resting_hr_bpm: data.resting_hr_bpm ?? null,
+            heart_rate_reserve_bpm: data.heart_rate_reserve_bpm ?? null,
           });
+          profileLoaded.current = true;
         }
       } catch {}
+    }
+
+    async function fetchMcpStatus() {
+      try {
+        const res = await fetch(`${apiBase}/auth/coros-mcp/status`);
+        if (res.ok) setMcpStatus(await res.json());
+      } catch {
+        // Backend not available
+      }
+    }
+
+    async function fetchCorosCreds() {
+      try {
+        const res = await fetch(`${apiBase}/api/settings/coros-credentials`);
+        if (res.ok) {
+          const data = await res.json();
+          setCorosCredStatus(data);
+          if (data.email) setCorosEmailInput(data.email);
+        }
+      } catch {
+        // Backend not available
+      }
     }
 
     fetchConfig();
     fetchGoals();
     fetchProfile();
+    fetchMcpStatus();
+    fetchCorosCreds();
+    const syncStatusTimer = window.setInterval(fetchConfig, 60_000);
+    return () => window.clearInterval(syncStatusTimer);
   }, [apiBase]);
+
+  useEffect(() => {
+    if (!profileLoaded.current || !profileDirty.current) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setProfileSaving(true);
+      try {
+        const res = await fetch(`${apiBase}/api/settings/profile`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            first_name: profile.first_name || null,
+            last_name: profile.last_name || null,
+            nickname: profile.nickname || null,
+            birthdate: profile.birthdate || null,
+            sex: profile.sex || null,
+            height_cm: profile.height_cm ? parseFloat(profile.height_cm) : null,
+            weight_kg: profile.weight_kg ? parseFloat(profile.weight_kg) : null,
+            body_fat_pct: profile.body_fat_pct ? parseFloat(profile.body_fat_pct) : null,
+            training_notes: profile.training_notes || null,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setProfileSaved(true);
+        profileSavedTimer.current = window.setTimeout(() => setProfileSaved(false), 3000);
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") return;
+        setProfileError(err instanceof Error ? err.message : "Failed to save");
+      } finally {
+        if (!controller.signal.aborted) setProfileSaving(false);
+      }
+    }, 600);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [apiBase, profile]);
+
+  async function saveCorosCreds() {
+    if (!corosEmailInput.trim() || !corosPasswordInput) {
+      setCorosError("Please enter both email and password.");
+      return;
+    }
+    setCorosSaving(true);
+    setCorosError("");
+    setCorosSaved(false);
+    try {
+      const res = await fetch(`${apiBase}/api/settings/coros-credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: corosEmailInput.trim(),
+          password: corosPasswordInput,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || `HTTP ${res.status}`);
+      }
+      setCorosSaved(true);
+      setCorosPasswordInput("");
+      setTimeout(() => setCorosSaved(false), 3000);
+
+      // Refresh status
+      const resCreds = await fetch(`${apiBase}/api/settings/coros-credentials`);
+      if (resCreds.ok) setCorosCredStatus(await resCreds.json());
+
+      const resSync = await fetch(`${apiBase}/api/sync/status`);
+      if (resSync.ok) setSyncConfig(await resSync.json());
+    } catch (err) {
+      setCorosError(err instanceof Error ? err.message : "Failed to save credentials");
+    } finally {
+      setCorosSaving(false);
+    }
+  }
+
+  async function deleteCorosCreds() {
+    if (!confirm("Are you sure you want to remove your stored COROS credentials?")) return;
+    try {
+      await fetch(`${apiBase}/api/settings/coros-credentials`, { method: "DELETE" });
+      setCorosEmailInput("");
+      setCorosPasswordInput("");
+      setCorosCredStatus({ configured: false, email: null });
+
+      const resSync = await fetch(`${apiBase}/api/sync/status`);
+      if (resSync.ok) setSyncConfig(await resSync.json());
+    } catch {}
+  }
+
+  async function connectMcp() {
+    setMcpConnecting(true);
+    const theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    const popup = window.open(`${apiBase}/auth/coros-mcp/connect?theme=${theme}`, "_blank", "width=540,height=780");
+    // Poll status after popup closes or after 60 s
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${apiBase}/auth/coros-mcp/status`);
+        if (res.ok) {
+          const data = await res.json();
+          setMcpStatus(data);
+          if (data.connected) {
+            clearInterval(poll);
+            setMcpConnecting(false);
+          }
+        }
+      } catch { /* ignore */ }
+    }, 2000);
+    setTimeout(() => { clearInterval(poll); setMcpConnecting(false); }, 120_000);
+    if (popup) popup.addEventListener("close", () => clearInterval(poll));
+  }
+
+  async function disconnectMcp() {
+    await fetch(`${apiBase}/auth/coros-mcp`, { method: "DELETE" });
+    setMcpStatus({ connected: false });
+  }
 
   async function saveGoal() {
     setGoalSaving(true);
@@ -162,7 +339,7 @@ export default function SettingsPage() {
       goal_description: goalForm.goal_description || null,
       goal_race_name: goalForm.goal_race_name || null,
       goal_race_date: goalForm.goal_race_date || null,
-      goal_target_time: goalForm.goal_target_time || null,
+      goal_target_time: normalizedTargetTime(goalForm.goal_target_time),
       weekly_training_hours: goalForm.weekly_training_hours
         ? parseFloat(goalForm.weekly_training_hours)
         : null,
@@ -254,667 +431,442 @@ export default function SettingsPage() {
     setGoalForm(EMPTY_GOAL);
   }
 
-  async function saveProfile() {
-    setProfileSaving(true);
+  function updateProfileField<Key extends keyof UserProfile>(key: Key, value: UserProfile[Key]) {
+    if (profileSavedTimer.current !== null) window.clearTimeout(profileSavedTimer.current);
+    profileDirty.current = true;
     setProfileError("");
     setProfileSaved(false);
-    try {
-      const res = await fetch(`${apiBase}/api/settings/profile`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          first_name: profile.first_name || null,
-          last_name: profile.last_name || null,
-          nickname: profile.nickname || null,
-          birthdate: profile.birthdate || null,
-          height_cm: profile.height_cm ? parseFloat(profile.height_cm) : null,
-          weight_kg: profile.weight_kg ? parseFloat(profile.weight_kg) : null,
-          body_fat_pct: profile.body_fat_pct ? parseFloat(profile.body_fat_pct) : null,
-          training_notes: profile.training_notes || null,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setProfileSaved(true);
-      setTimeout(() => setProfileSaved(false), 3000);
-    } catch (err) {
-      setProfileError(err instanceof Error ? err.message : "Failed to save");
-    } finally {
-      setProfileSaving(false);
-    }
+    setProfile((current) => ({ ...current, [key]: value }));
   }
+
+  const [targetHours, targetMinutes, targetSeconds] = targetTimeParts(goalForm.goal_target_time);
+  const savedMessage = profileSaving
+    ? "Saving changes…"
+    : corosSaved
+    ? "Credentials saved securely."
+    : goalSaved
+      ? "Goal saved."
+      : profileSaved
+        ? "Changes saved."
+        : "";
 
   return (
     <div className="app-layout">
       <Sidebar />
       <main className="main-content">
-        <header className="page-header">
-          <h2 className="page-title">Settings</h2>
-        </header>
-        <div className="page-body">
-
-          {/* User Profile & Biometrics */}
-          <div className="card animate-fade-in" style={{ marginBottom: "var(--space-4)" }} id="settings-profile">
-            <div className="card-header">
-              <div className="card-title">User Profile & Biometrics</div>
-            </div>
-
-            <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", marginBottom: "var(--space-4)" }}>
-              Keep your profile up to date so the AI coach can better estimate training zones, calories, and biological age insights.
-            </p>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "var(--space-3)" }}>
-                <div>
-                  <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                    First Name
-                  </label>
-                  <input
-                    type="text"
-                    className="chat-input"
-                    style={{ fontSize: "var(--text-sm)", width: "100%" }}
-                    placeholder="e.g. John"
-                    value={profile.first_name}
-                    onChange={(e) => setProfile((p) => ({ ...p, first_name: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                    Last Name
-                  </label>
-                  <input
-                    type="text"
-                    className="chat-input"
-                    style={{ fontSize: "var(--text-sm)", width: "100%" }}
-                    placeholder="e.g. Doe"
-                    value={profile.last_name}
-                    onChange={(e) => setProfile((p) => ({ ...p, last_name: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                    Nickname
-                  </label>
-                  <input
-                    type="text"
-                    className="chat-input"
-                    style={{ fontSize: "var(--text-sm)", width: "100%" }}
-                    placeholder="e.g. Johnny"
-                    value={profile.nickname}
-                    onChange={(e) => setProfile((p) => ({ ...p, nickname: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
-                <div>
-                  <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                    Birthdate
-                  </label>
-                  <input
-                    type="date"
-                    className="chat-input"
-                    style={{ fontSize: "var(--text-sm)", width: "100%" }}
-                    value={profile.birthdate}
-                    onChange={(e) => setProfile((p) => ({ ...p, birthdate: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                    Height (cm)
-                  </label>
-                  <input
-                    type="number"
-                    min="50"
-                    max="300"
-                    className="chat-input"
-                    style={{ fontSize: "var(--text-sm)", width: "100%" }}
-                    placeholder="e.g. 180"
-                    value={profile.height_cm}
-                    onChange={(e) => setProfile((p) => ({ ...p, height_cm: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
-                <div>
-                  <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                    Weight (kg)
-                  </label>
-                  <input
-                    type="number"
-                    min="20"
-                    max="300"
-                    step="0.1"
-                    className="chat-input"
-                    style={{ fontSize: "var(--text-sm)", width: "100%" }}
-                    placeholder="e.g. 75.5"
-                    value={profile.weight_kg}
-                    onChange={(e) => setProfile((p) => ({ ...p, weight_kg: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                    Body Fat (%)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="80"
-                    step="0.1"
-                    className="chat-input"
-                    style={{ fontSize: "var(--text-sm)", width: "100%" }}
-                    placeholder="e.g. 15.0"
-                    value={profile.body_fat_pct}
-                    onChange={(e) => setProfile((p) => ({ ...p, body_fat_pct: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginTop: "var(--space-1)" }}>
-                <button
-                  className="btn btn-primary"
-                  onClick={saveProfile}
-                  disabled={profileSaving}
-                >
-                  {profileSaving ? "Saving…" : "Save Profile"}
-                </button>
-                {profileSaved && (
-                  <span style={{ fontSize: "var(--text-sm)", color: "var(--color-accent-emerald)" }}>
-                    Saved successfully.
-                  </span>
-                )}
-                {profileError && (
-                  <span style={{ fontSize: "var(--text-sm)", color: "#ef4444" }}>
-                    {profileError}
-                  </span>
-                )}
-              </div>
-            </div>
+        {savedMessage && (
+          <div className="sync-toast" role="status" aria-live="polite">
+            {savedMessage}
           </div>
-
-          {/* Training Goals Manager */}
-          <div className="card animate-fade-in" style={{ marginBottom: "var(--space-4)" }} id="settings-goals">
-            <div className="card-header" style={{ borderBottom: "1px solid var(--border-color)", paddingBottom: "var(--space-3)", marginBottom: "var(--space-4)" }}>
-              <div>
-                <div className="card-title" style={{ fontSize: "var(--text-base)" }}>Training Goals</div>
-                <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: "4px" }}>
-                  Manage multiple training goals — the AI coach will customize briefings and load recommendations accordingly.
-                </p>
-              </div>
-              {!isAddingGoal && !editingGoalId && (
-                <button className="btn btn-secondary btn-sm" onClick={startAddGoal}>
-                  + Add Goal
-                </button>
-              )}
-            </div>
-
-            {/* List of Goals */}
-            {!isAddingGoal && !editingGoalId && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-                {goalsLoading ? (
-                  <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", textAlign: "center", padding: "var(--space-4)" }}>
-                    Loading goals…
-                  </p>
-                ) : goals.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "var(--space-6) var(--space-4)", border: "1px dashed var(--border-color)", borderRadius: "var(--radius-md)" }}>
-                    <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)", marginBottom: "var(--space-4)" }}>
-                      No training goals configured yet. Setup your first goal to receive customized AI coach advice.
-                    </p>
-                    <button className="btn className=btn-primary btn-sm" onClick={startAddGoal}>
-                      Configure Training Goal
-                    </button>
+        )}
+        <header className="page-header">
+          <PageTitle>Settings</PageTitle>
+        </header>
+        <div className="page-body settings-page">
+          <div className="settings-sections">
+              <section className="settings-section hover-card" id="settings-connections">
+                <div className="settings-section-heading">
+                  <div>
+                    <h2>Connections</h2>
+                    <p>COROS connections keep activity metrics and detailed sleep stages current.</p>
                   </div>
-                ) : (
-                  [...goals]
-                    .sort((a, b) => {
-                      if (!a.goal_race_date && !b.goal_race_date) return 0;
-                      if (!a.goal_race_date) return 1;
-                      if (!b.goal_race_date) return -1;
-                      return a.goal_race_date < b.goal_race_date ? -1 : a.goal_race_date > b.goal_race_date ? 1 : 0;
-                    })
-                    .map((g) => {
-                    const daysLeft = daysUntil(g.goal_race_date);
-                    const raceState = goalRaceState(g.goal_race_date);
-                    const isFrozen = g.is_active && (raceState === "recovery" || raceState === "expired");
-                    const daysSinceRace = daysLeft !== null && daysLeft < 0 ? Math.abs(daysLeft) : null;
+                </div>
 
-                    return (
-                      <div
-                        key={g.id}
-                        style={{
-                          border: `1px solid ${
-                            isFrozen ? "rgba(139,149,168,0.3)" : "var(--border-color)"
-                          }`,
-                          borderRadius: "var(--radius-md)",
-                          padding: "var(--space-4)",
-                          background: isFrozen
-                            ? "rgba(139,149,168,0.06)"
-                            : g.is_active
-                            ? "var(--color-bg-secondary)"
-                            : "var(--color-bg-tertiary)",
-                          opacity: isFrozen ? 0.82 : g.is_active ? 1 : 0.7,
-                          transition: "all var(--transition-fast)",
-                          position: "relative",
-                        }}
-                      >
-                        {/* Frozen overlay label for recovery/expired goals */}
-                        {isFrozen && (
-                          <div style={{
-                            position: "absolute",
-                            top: "var(--space-2)",
-                            right: "var(--space-2)",
-                            fontSize: "10px",
-                            color: "var(--color-text-muted)",
-                            letterSpacing: "0.08em",
-                            textTransform: "uppercase",
-                            fontWeight: 600,
-                          }}>
-                          </div>
-                        )}
+                <div className="settings-connection-row" id="settings-sync">
+                  <div className="settings-connection-main">
+                    <div className="settings-title-line">
+                      <h3>COROS account</h3>
+                      <span className={`settings-state ${corosCredStatus?.configured ? "is-connected" : ""}`}>
+                        {corosCredStatus?.configured ? "Connected" : "Not configured"}
+                      </span>
+                    </div>
+                    <p>Activity history, fitness metrics, and recovery data.</p>
+                    {corosCredStatus?.configured && (
+                      <div className="settings-account-detail">
+                        <strong>{corosCredStatus.email}</strong>
+                      </div>
+                    )}
+                  </div>
+                  {corosCredStatus?.configured ? (
+                    <button className="btn btn-secondary btn-sm settings-danger-action" onClick={deleteCorosCreds}>
+                      Disconnect
+                    </button>
+                  ) : (
+                    <form className="settings-credential-form" onSubmit={(e) => { e.preventDefault(); saveCorosCreds(); }}>
+                      <div className="settings-form-grid">
+                        <div className="settings-field">
+                          <label htmlFor="coros-email">COROS email</label>
+                          <input
+                            id="coros-email"
+                            type="email"
+                            placeholder="you@example.com"
+                            value={corosEmailInput}
+                            onChange={(e) => setCorosEmailInput(e.target.value)}
+                            required
+                          />
+                        </div>
+                        <div className="settings-field">
+                          <label htmlFor="coros-password">Password</label>
+                          <input
+                            id="coros-password"
+                            type="password"
+                            placeholder="Enter your password"
+                            value={corosPasswordInput}
+                            onChange={(e) => setCorosPasswordInput(e.target.value)}
+                            required
+                          />
+                        </div>
+                      </div>
+                      <div className="settings-actions">
+                        <button type="submit" className="btn btn-primary" disabled={corosSaving}>
+                          {corosSaving ? "Saving…" : "Connect account"}
+                        </button>
+                        {corosError && <span className="settings-feedback is-error">{corosError}</span>}
+                      </div>
+                    </form>
+                  )}
+                </div>
 
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "var(--space-3)", flexWrap: "wrap" }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
-                              <h4 style={{
-                                fontSize: "var(--text-base)",
-                                fontWeight: "var(--weight-semibold)",
-                                color: isFrozen ? "var(--color-text-secondary)" : "var(--color-text-primary)",
-                              }}>
-                                {g.goal_race_name || "General Fitness Goal"}
-                              </h4>
+                <div className="settings-connection-row" id="settings-coros-mcp">
+                  <div className="settings-connection-main">
+                    <div className="settings-title-line">
+                      <h3>COROS MCP</h3>
+                      <span className={`settings-state ${mcpStatus?.connected && !mcpStatus.expired ? "is-connected" : mcpStatus?.expired ? "is-warning" : ""}`}>
+                        {mcpStatus?.connected ? (mcpStatus.expired ? "Authorization expired" : "Connected") : "Not connected"}
+                      </span>
+                    </div>
+                    <p>Deep, light, and REM stages sync through COROS MCP.</p>
+                  </div>
+                  {mcpStatus?.connected && !mcpStatus.expired ? (
+                    <button id="settings-coros-mcp-disconnect" className="btn btn-secondary btn-sm settings-danger-action" onClick={disconnectMcp}>
+                      Disconnect
+                    </button>
+                  ) : (
+                    <button id="settings-coros-mcp-connect" className="btn btn-primary btn-sm" onClick={connectMcp} disabled={mcpConnecting}>
+                      {mcpConnecting ? "Waiting for COROS…" : "Connect sleep data"}
+                    </button>
+                  )}
+                </div>
 
-                              {/* Active/Archived status badge — only for non-frozen goals */}
-                              {!isFrozen && (
-                                <span
-                                  className="badge"
-                                  style={{
-                                    background: g.is_active ? "rgba(0,0,0,0.05)" : "var(--color-bg-secondary)",
-                                    color: g.is_active ? "var(--color-success)" : "var(--color-text-muted)",
-                                    border: "1px solid var(--border-color)",
-                                    cursor: "pointer",
-                                  }}
-                                  onClick={() => g.id && toggleActive(g.id)}
-                                >
-                                  {g.is_active ? "Active" : "Archived"}
-                                </span>
-                              )}
+                <div className="settings-sync-facts">
+                  <div>
+                    <span>Last successful sync</span>
+                    <strong>
+                      {syncConfig?.last_sync_at && syncConfig.last_sync_at !== "never"
+                        ? new Date(syncConfig.last_sync_at).toLocaleString(undefined, {
+                            timeZone: "Asia/Bangkok",
+                            timeZoneName: "short",
+                          })
+                        : "Never"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Background interval</span>
+                    <strong>Every {syncConfig?.sync_interval_minutes || 15} minutes</strong>
+                  </div>
+                </div>
+              </section>
 
-                              {/* Recovery Mode badge */}
-                              {g.is_active && raceState === "recovery" && (
-                                <span
-                                  className="badge"
-                                  style={{
-                                    background: "rgba(99,102,241,0.1)",
-                                    color: "#818cf8",
-                                    border: "1px solid rgba(99,102,241,0.25)",
-                                  }}
-                                  title="AI can still access this goal for post-race recovery planning for up to 30 days after the race."
-                                >
-                                  Recovery Mode
-                                </span>
-                              )}
+              <section className="settings-section hover-card" id="settings-profile">
+                <div className="settings-section-heading">
+                  <div>
+                    <h2>Athlete profile</h2>
+                    <p>Biometrics improve training zones, energy estimates, and recovery analysis. Changes save automatically.</p>
+                  </div>
+                </div>
 
-                              {/* Expired badge */}
-                              {g.is_active && raceState === "expired" && (
-                                <span
-                                  className="badge"
-                                  style={{
-                                    background: "rgba(107,114,128,0.1)",
-                                    color: "var(--color-text-muted)",
-                                    border: "1px solid rgba(107,114,128,0.2)",
-                                  }}
-                                  title="Race was over 30 days ago. AI no longer uses this goal. Archive or delete it to clean up."
-                                >
-                                  Expired
-                                </span>
-                              )}
+                <div>
+                  <div className="settings-form-grid is-three-column">
+                    <div className="settings-field">
+                      <label htmlFor="profile-first-name">First name</label>
+                      <input id="profile-first-name" type="text" placeholder="John" value={profile.first_name} onChange={(e) => updateProfileField("first_name", e.target.value)} />
+                    </div>
+                    <div className="settings-field">
+                      <label htmlFor="profile-last-name">Last name</label>
+                      <input id="profile-last-name" type="text" placeholder="Doe" value={profile.last_name} onChange={(e) => updateProfileField("last_name", e.target.value)} />
+                    </div>
+                    <div className="settings-field">
+                      <label htmlFor="profile-nickname">Display name</label>
+                      <input id="profile-nickname" type="text" placeholder="Johnny" value={profile.nickname} onChange={(e) => updateProfileField("nickname", e.target.value)} />
+                    </div>
+                    <div className="settings-field">
+                      <label htmlFor="profile-birthdate">Birthdate</label>
+                      <input id="profile-birthdate" type="date" value={profile.birthdate} onChange={(e) => updateProfileField("birthdate", e.target.value)} />
+                    </div>
+                    <div className="settings-field">
+                      <label id="profile-sex-label">Sex</label>
+                      <SingleSelect
+                        ariaLabel="Sex"
+                        id="profile-sex"
+                        value={profile.sex}
+                        options={[
+                          ...(!profile.sex ? [{ value: "", label: "Select sex" }] : []),
+                          { value: "female", label: "Female" },
+                          { value: "male", label: "Male" },
+                        ]}
+                        onChange={(sex) => updateProfileField("sex", sex)}
+                      />
+                    </div>
+                    <div className="settings-field">
+                      <label htmlFor="profile-height">Height <span>cm</span></label>
+                      <NumberStepper
+                        ariaLabel="Height in centimeters"
+                        id="profile-height"
+                        min={50}
+                        max={300}
+                        placeholder="180"
+                        value={profile.height_cm}
+                        onChange={(heightCm) => updateProfileField("height_cm", heightCm)}
+                      />
+                    </div>
+                    <div className="settings-field">
+                      <label htmlFor="profile-weight">Weight <span>kg</span></label>
+                      <NumberStepper
+                        ariaLabel="Weight in kilograms"
+                        id="profile-weight"
+                        min={20}
+                        max={300}
+                        step={0.1}
+                        placeholder="75.5"
+                        value={profile.weight_kg}
+                        onChange={(weightKg) => updateProfileField("weight_kg", weightKg)}
+                      />
+                    </div>
+                    <div className="settings-field">
+                      <label htmlFor="profile-body-fat">Body fat <span>%</span></label>
+                      <NumberStepper
+                        ariaLabel="Body fat percentage"
+                        id="profile-body-fat"
+                        min={1}
+                        max={80}
+                        step={0.1}
+                        placeholder="15.0"
+                        value={profile.body_fat_pct}
+                        onChange={(bodyFatPct) => updateProfileField("body_fat_pct", bodyFatPct)}
+                      />
+                    </div>
+                  </div>
+                  <div className="settings-sync-facts">
+                    <div>
+                      <span>Max heart rate</span>
+                      <strong>{profile.max_hr_bpm ?? "--"} bpm</strong>
+                    </div>
+                    <div>
+                      <span>Resting heart rate</span>
+                      <strong>{profile.resting_hr_bpm ?? "--"} bpm</strong>
+                    </div>
+                    <div>
+                      <span>Heart rate reserve</span>
+                      <strong>{profile.heart_rate_reserve_bpm ?? "--"} bpm</strong>
+                    </div>
+                  </div>
+                  {profileError && <p className="settings-feedback is-error">{profileError}</p>}
+                </div>
+              </section>
 
-                              {/* Countdown badge for upcoming races */}
-                              {g.is_active && raceState === "upcoming" && g.goal_race_date && daysLeft !== null && (
-                                <span
-                                  className="badge"
-                                  style={{
-                                    background: daysLeft <= 30 ? "rgba(245,158,11,0.12)" : "rgba(52,211,153,0.1)",
-                                    color: daysLeft <= 30 ? "#d97706" : "var(--color-success)",
-                                    border: `1px solid ${daysLeft <= 30 ? "#f59e0b44" : "rgba(52,211,153,0.2)"}`,
-                                  }}
-                                >
-                                  {daysLeft}d to race
-                                </span>
-                              )}
+              <section className="settings-section hover-card" id="settings-coaching">
+                <div className="settings-section-heading">
+                  <div>
+                    <h2>Coaching context</h2>
+                    <p>Define the outcomes and constraints the coach should consider in every recommendation.</p>
+                  </div>
+                </div>
+
+                <div className="settings-subsection" id="settings-goals">
+                  <div className="settings-subsection-heading">
+                    <div>
+                      <h3>Training goals</h3>
+                      <p>Upcoming races, target times, and weekly training capacity.</p>
+                    </div>
+                    {!isAddingGoal && !editingGoalId && (
+                      <button className="btn btn-secondary btn-sm" onClick={startAddGoal}>Add goal</button>
+                    )}
+                  </div>
+
+                  {(isAddingGoal || editingGoalId) && (
+                    <form className="settings-goal-form" onSubmit={(e) => { e.preventDefault(); saveGoal(); }}>
+                      <div className="settings-subsection-heading">
+                        <h3>{editingGoalId ? "Edit training goal" : "New training goal"}</h3>
+                      </div>
+                      <div className="settings-form-grid">
+                        <div className="settings-field">
+                          <label htmlFor="goal-name">Race or event</label>
+                          <input id="goal-name" type="text" placeholder="Boston Marathon" value={goalForm.goal_race_name} onChange={(e) => setGoalForm((g) => ({ ...g, goal_race_name: e.target.value }))} required />
+                        </div>
+                        <div className="settings-field">
+                          <label htmlFor="goal-date">Race date</label>
+                          <input id="goal-date" type="date" value={goalForm.goal_race_date} onChange={(e) => setGoalForm((g) => ({ ...g, goal_race_date: e.target.value }))} />
+                        </div>
+                        <div className="settings-field">
+                          <label id="goal-time-label">Target time</label>
+                          <div className="settings-target-time" aria-labelledby="goal-time-label">
+                            <div className="settings-target-time-part">
+                              <span>Hours</span>
+                              <NumberStepper
+                                ariaLabel="Target hours"
+                                id="goal-time-hours"
+                                min={0}
+                                max={99}
+                                placeholder="0"
+                                value={targetHours}
+                                onChange={(value) => setGoalForm((goal) => ({ ...goal, goal_target_time: updateTargetTime(goal.goal_target_time, 0, value) }))}
+                              />
                             </div>
-
-                            <div style={{
-                              display: "grid",
-                              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                              gap: "var(--space-2)",
-                              marginTop: "var(--space-2)",
-                              fontSize: "var(--text-sm)",
-                              color: "var(--color-text-secondary)",
-                            }}>
-                              {g.goal_race_date && (
-                                <div>
-                                  <span style={{ color: "var(--color-text-muted)" }}>Date:</span>{" "}
-                                  {g.goal_race_date}
-                                  {daysSinceRace !== null && (
-                                    <span style={{ color: "var(--color-text-muted)", marginLeft: 4, fontSize: "var(--text-xs)" }}>
-                                      ({daysSinceRace}d ago)
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                              {g.goal_target_time && (
-                                <div>
-                                  <span style={{ color: "var(--color-text-muted)" }}>Target Time:</span> {g.goal_target_time}
-                                </div>
-                              )}
-                              {g.weekly_training_hours && (
-                                <div>
-                                  <span style={{ color: "var(--color-text-muted)" }}>Weekly Target:</span> {g.weekly_training_hours}h
-                                </div>
-                              )}
+                            <div className="settings-target-time-part">
+                              <span>Minutes</span>
+                              <NumberStepper
+                                ariaLabel="Target minutes"
+                                id="goal-time-minutes"
+                                min={0}
+                                max={59}
+                                placeholder="00"
+                                value={targetMinutes}
+                                onChange={(value) => setGoalForm((goal) => ({ ...goal, goal_target_time: updateTargetTime(goal.goal_target_time, 1, value) }))}
+                              />
                             </div>
-
-                            {/* Recovery window info note */}
-                            {g.is_active && raceState === "recovery" && (
-                              <p style={{
-                                fontSize: "var(--text-xs)",
-                                color: "#818cf8",
-                                marginTop: "var(--space-2)",
-                                padding: "var(--space-2) var(--space-3)",
-                                background: "rgba(99,102,241,0.07)",
-                                borderRadius: "var(--radius-sm)",
-                                borderLeft: "2px solid rgba(99,102,241,0.4)",
-                              }}>
-                                AI coach will use this goal for post-race recovery planning until 30 days after the race date. Archive or delete when done.
-                              </p>
-                            )}
-
-                            {g.is_active && raceState === "expired" && (
-                              <p style={{
-                                fontSize: "var(--text-xs)",
-                                color: "var(--color-text-muted)",
-                                marginTop: "var(--space-2)",
-                                padding: "var(--space-2) var(--space-3)",
-                                background: "rgba(107,114,128,0.07)",
-                                borderRadius: "var(--radius-sm)",
-                                borderLeft: "2px solid rgba(107,114,128,0.3)",
-                              }}>
-                                Race was over 30 days ago — AI no longer includes this goal in its context. Archive or delete to clean up.
-                              </p>
-                            )}
-
-                            {g.goal_description && (
-                              <p style={{
-                                fontSize: "var(--text-xs)",
-                                color: "var(--color-text-secondary)",
-                                marginTop: "var(--space-3)",
-                                borderTop: "1px dashed var(--border-color)",
-                                paddingTop: "var(--space-2)",
-                                fontStyle: "italic",
-                              }}>
-                                &ldquo;{g.goal_description}&rdquo;
-                              </p>
-                            )}
+                            <div className="settings-target-time-part">
+                              <span>Seconds</span>
+                              <NumberStepper
+                                ariaLabel="Target seconds"
+                                id="goal-time-seconds"
+                                min={0}
+                                max={59}
+                                placeholder="00"
+                                value={targetSeconds}
+                                onChange={(value) => setGoalForm((goal) => ({ ...goal, goal_target_time: updateTargetTime(goal.goal_target_time, 2, value) }))}
+                              />
+                            </div>
                           </div>
-
-                          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexShrink: 0 }}>
-                            {/* Hide Edit/Activate for frozen goals — they're read-only for AI recovery */}
-                            {!isFrozen && (
-                              <>
-                                <button
-                                  className="btn btn-secondary btn-sm"
-                                  onClick={() => startEditGoal(g)}
-                                  style={{ padding: "4px 8px", fontSize: "var(--text-xs)" }}
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  className="btn btn-secondary btn-sm"
-                                  onClick={() => g.id && toggleActive(g.id)}
-                                  style={{ padding: "4px 8px", fontSize: "var(--text-xs)" }}
-                                >
-                                  {g.is_active ? "Archive" : "Activate"}
-                                </button>
-                              </>
-                            )}
-                            <button
-                              className="btn btn-danger btn-sm"
-                              onClick={() => g.id && deleteGoal(g.id)}
-                              style={{ padding: "4px 8px", fontSize: "var(--text-xs)" }}
-                            >
-                              Delete
-                            </button>
+                        </div>
+                        <div className="settings-field">
+                          <label htmlFor="goal-hours">Weekly training</label>
+                          <div className="settings-target-time-part">
+                            <span>Hours</span>
+                            <NumberStepper
+                              ariaLabel="Weekly training hours"
+                              id="goal-hours"
+                              min={0}
+                              max={40}
+                              step={0.5}
+                              placeholder="10"
+                              value={goalForm.weekly_training_hours}
+                              onChange={(weekly_training_hours) => setGoalForm((goal) => ({ ...goal, weekly_training_hours }))}
+                            />
                           </div>
                         </div>
                       </div>
-                    );
-                  })
-                )}
-              </div>
-            )}
-
-            {/* Add or Edit Form */}
-            {(isAddingGoal || editingGoalId) && (
-              <form onSubmit={(e) => { e.preventDefault(); saveGoal(); }} style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", border: "1px solid var(--border-color)", padding: "var(--space-4)", borderRadius: "var(--radius-md)", background: "var(--color-bg-secondary)" }}>
-                <h3 style={{ fontSize: "var(--text-base)", fontWeight: "var(--weight-semibold)", marginBottom: "var(--space-2)" }}>
-                  {editingGoalId ? "Edit Training Goal" : "Add New Training Goal"}
-                </h3>
-                
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
-                  <div>
-                    <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                      Target Race / Event Name
-                    </label>
-                    <input
-                      type="text"
-                      className="chat-input"
-                      style={{ fontSize: "var(--text-sm)", width: "100%" }}
-                      placeholder="e.g. Boston Marathon"
-                      value={goalForm.goal_race_name}
-                      onChange={(e) => setGoalForm((g) => ({ ...g, goal_race_name: e.target.value }))}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                      Race Date
-                    </label>
-                    <input
-                      type="date"
-                      className="chat-input"
-                      style={{ fontSize: "var(--text-sm)", width: "100%" }}
-                      value={goalForm.goal_race_date}
-                      onChange={(e) => setGoalForm((g) => ({ ...g, goal_race_date: e.target.value }))}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-3)" }}>
-                  <div>
-                    <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                      Goal Finish Time
-                    </label>
-                    <input
-                      type="text"
-                      className="chat-input"
-                      style={{ fontSize: "var(--text-sm)", width: "100%" }}
-                      placeholder="e.g. 3:59:00"
-                      value={goalForm.goal_target_time}
-                      onChange={(e) => setGoalForm((g) => ({ ...g, goal_target_time: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                      Weekly Training Hours Target
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="40"
-                      step="0.5"
-                      className="chat-input"
-                      style={{ fontSize: "var(--text-sm)", width: "100%" }}
-                      placeholder="e.g. 10"
-                      value={goalForm.weekly_training_hours}
-                      onChange={(e) => setGoalForm((g) => ({ ...g, weekly_training_hours: e.target.value }))}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
-                    Additional Notes for AI Coach
-                  </label>
-                  <textarea
-                    className="chat-input"
-                    rows={3}
-                    style={{ fontSize: "var(--text-sm)", resize: "vertical", fontFamily: "inherit", width: "100%" }}
-                    placeholder="e.g. First marathon, prone to runner's knee, want pacing advice."
-                    value={goalForm.goal_description}
-                    onChange={(e) => setGoalForm((g) => ({ ...g, goal_description: e.target.value }))}
-                  />
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                  <input
-                    type="checkbox"
-                    id="goal-active-checkbox"
-                    checked={goalForm.is_active}
-                    onChange={(e) => setGoalForm((g) => ({ ...g, is_active: e.target.checked }))}
-                    style={{ cursor: "pointer" }}
-                  />
-                  <label htmlFor="goal-active-checkbox" style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", cursor: "pointer" }}>
-                    Keep this training goal active
-                  </label>
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginTop: "var(--space-1)" }}>
-                  <button type="submit" className="btn btn-primary" disabled={goalSaving}>
-                    {goalSaving ? "Saving…" : "Save Goal"}
-                  </button>
-                  <button type="button" className="btn btn-secondary" onClick={cancelGoalForm}>
-                    Cancel
-                  </button>
-                  {goalSaved && (
-                    <span style={{ fontSize: "var(--text-sm)", color: "var(--color-accent-emerald)" }}>
-                      Saved — AI coach updated.
-                    </span>
+                      <div className="settings-field">
+                        <label htmlFor="goal-notes">Goal notes</label>
+                        <textarea id="goal-notes" rows={3} placeholder="Experience, injury considerations, or pacing priorities." value={goalForm.goal_description} onChange={(e) => setGoalForm((g) => ({ ...g, goal_description: e.target.value }))} />
+                      </div>
+                      <label className="settings-check" htmlFor="goal-active-checkbox">
+                        <input id="goal-active-checkbox" type="checkbox" checked={goalForm.is_active} onChange={(e) => setGoalForm((g) => ({ ...g, is_active: e.target.checked }))} />
+                        <span className="settings-check-control" aria-hidden="true">
+                          <svg viewBox="0 0 16 16">
+                            <path d="m3.5 8.25 2.75 2.75 6.25-6.25" />
+                          </svg>
+                        </span>
+                        <span>Keep this goal active</span>
+                      </label>
+                      <div className="settings-actions">
+                        <button type="submit" className="btn btn-primary" disabled={goalSaving}>{goalSaving ? "Saving…" : "Save goal"}</button>
+                        <button type="button" className="btn btn-secondary" onClick={cancelGoalForm}>Cancel</button>
+                        {goalError && <span className="settings-feedback is-error">{goalError}</span>}
+                      </div>
+                    </form>
                   )}
-                  {goalError && (
-                    <span style={{ fontSize: "var(--text-sm)", color: "#ef4444" }}>
-                      {goalError}
-                    </span>
+
+                  {!editingGoalId && (!isAddingGoal || goals.length > 0) && (
+                    <div className="settings-goal-list">
+                      {goalsLoading ? (
+                        <p className="settings-empty">Loading goals…</p>
+                      ) : goals.length === 0 ? (
+                        <div className="settings-empty">
+                          <strong>No training goal yet</strong>
+                          <span>Add a race or fitness target to focus coaching advice.</span>
+                          <button className="btn btn-secondary btn-sm" onClick={startAddGoal}>Configure first goal</button>
+                        </div>
+                      ) : (
+                        [...goals]
+                          .sort((a, b) => {
+                            if (!a.goal_race_date && !b.goal_race_date) return 0;
+                            if (!a.goal_race_date) return 1;
+                            if (!b.goal_race_date) return -1;
+                            return a.goal_race_date.localeCompare(b.goal_race_date);
+                          })
+                          .map((g) => {
+                            const daysLeft = daysUntil(g.goal_race_date);
+                            const raceState = goalRaceState(g.goal_race_date);
+                            const isFrozen = g.is_active && (raceState === "recovery" || raceState === "expired");
+                            return (
+                              <article className={`settings-goal ${g.is_active ? "" : "is-archived"}`} key={g.id}>
+                                <div>
+                                  <div className="settings-title-line">
+                                    <h4>{g.goal_race_name || "General fitness goal"}</h4>
+                                    <span className={`settings-state ${g.is_active && raceState !== "expired" ? "is-connected" : ""}`}>
+                                      {raceState === "recovery" ? "Recovery" : raceState === "expired" ? "Expired" : g.is_active ? "Active" : "Archived"}
+                                    </span>
+                                    {g.is_active && raceState === "upcoming" && daysLeft !== null && (
+                                      <span className={`settings-state ${daysLeft <= 30 ? "is-warning" : ""}`}>{daysLeft} days</span>
+                                    )}
+                                  </div>
+                                  <div className="settings-goal-meta">
+                                    {g.goal_race_date && <span>{g.goal_race_date}</span>}
+                                    {g.goal_target_time && <span>Target {g.goal_target_time}</span>}
+                                    {g.weekly_training_hours && <span>{g.weekly_training_hours} hr / week</span>}
+                                  </div>
+                                  {g.goal_description && <p>{g.goal_description}</p>}
+                                  {isFrozen && (
+                                    <p className="settings-goal-notice">
+                                      {raceState === "recovery"
+                                        ? "Available to the coach for post-race recovery planning for 30 days."
+                                        : "This race is no longer included in coaching context."}
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="settings-goal-actions">
+                                  {!isFrozen && (
+                                    <>
+                                      <button className="btn btn-ghost btn-sm" onClick={() => startEditGoal(g)}>Edit</button>
+                                      <button className="btn btn-ghost btn-sm" onClick={() => g.id && toggleActive(g.id)}>
+                                        {g.is_active ? "Archive" : "Activate"}
+                                      </button>
+                                    </>
+                                  )}
+                                  <button className="btn btn-ghost btn-sm settings-danger-action" onClick={() => g.id && deleteGoal(g.id)}>Delete</button>
+                                </div>
+                              </article>
+                            );
+                          })
+                      )}
+                    </div>
                   )}
+
                 </div>
-              </form>
-            )}
-          </div>
 
-          {/* Training Notes for AI */}
-          <div className="card animate-fade-in" style={{ marginBottom: "var(--space-4)" }} id="settings-training-notes">
-            <div className="card-header" style={{ borderBottom: "1px solid var(--border-color)", paddingBottom: "var(--space-3)", marginBottom: "var(--space-4)" }}>
-              <div>
-                <div className="card-title" style={{ fontSize: "var(--text-base)" }}>AI Training Notes</div>
-                <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: "4px" }}>
-                  Personal preferences and constraints injected into every AI request — rest days, injury history, schedule limits, etc.
-                </p>
-              </div>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-              <div>
-                <label
-                  htmlFor="training-notes-input"
-                  style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}
-                >
-                  Notes
-                </label>
-                <textarea
-                  id="training-notes-input"
-                  className="chat-input"
-                  rows={5}
-                  style={{ fontSize: "var(--text-sm)", resize: "vertical", fontFamily: "inherit", width: "100%", lineHeight: 1.6 }}
-                  placeholder={"e.g.\n- Rest every Sunday — no training\n- Left knee tendinopathy, avoid downhill running\n- Max 10h/week due to work schedule\n- Prefer morning sessions before 7am"}
-                  value={profile.training_notes}
-                  onChange={(e) => setProfile((p) => ({ ...p, training_notes: e.target.value }))}
-                />
-                <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: "6px" }}>
-                  These notes are sent to the AI coach on every conversation. Use plain text or bullet points.
-                </p>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-                <button
-                  id="save-training-notes-btn"
-                  className="btn btn-primary"
-                  onClick={saveProfile}
-                  disabled={profileSaving}
-                >
-                  {profileSaving ? "Saving…" : "Save Notes"}
-                </button>
-                {profileSaved && (
-                  <span style={{ fontSize: "var(--text-sm)", color: "var(--color-accent-emerald)" }}>
-                    Saved — AI coach will use these on the next request.
-                  </span>
-                )}
-                {profileError && (
-                  <span style={{ fontSize: "var(--text-sm)", color: "#ef4444" }}>
-                    {profileError}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* API Sync Configuration */}
-          <div className="card" style={{ marginBottom: "var(--space-4)" }} id="settings-sync">
-            <div className="card-header">
-              <div className="card-title">COROS API Sync</div>
-              {syncConfig?.api_enabled ? (
-                <span className="badge badge-success">Connected</span>
-              ) : (
-                <span className="badge" style={{ background: "rgba(139,149,168,0.1)", color: "var(--color-text-muted)", border: "1px solid var(--border-color)" }}>
-                  Disabled
-                </span>
-              )}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
-              <div>
-                <div className="metric-label">API Status</div>
-                <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-primary)", marginTop: "var(--space-1)" }}>
-                  {syncConfig?.api_enabled ? "Configured" : "Missing Credentials"}
+                <div className="settings-subsection" id="settings-training-notes">
+                  <div className="settings-subsection-heading">
+                    <div>
+                      <h3>Training notes</h3>
+                      <p>Persistent constraints such as injury history, rest days, and schedule limits. Changes save automatically.</p>
+                    </div>
+                  </div>
+                  <div className="settings-field">
+                    <label htmlFor="training-notes-input">Notes used in every coach conversation</label>
+                    <textarea
+                      id="training-notes-input"
+                      rows={5}
+                      placeholder={"- Rest every Sunday\n- Avoid steep downhill running\n- Maximum 10 hours per week"}
+                      value={profile.training_notes}
+                      onChange={(e) => updateProfileField("training_notes", e.target.value)}
+                    />
+                    <span className="settings-help">Use short, factual notes. Do not include information the coach does not need.</span>
+                  </div>
+                  {profileError && <p className="settings-feedback is-error">{profileError}</p>}
                 </div>
-              </div>
+              </section>
 
-              <div>
-                <div className="metric-label">Last Sync</div>
-                <div style={{ fontSize: "var(--text-sm)", color: "var(--color-text-primary)", marginTop: "var(--space-1)" }}>
-                  {syncConfig?.last_sync_at || "Never"}
-                </div>
-              </div>
-            </div>
-            <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: "var(--space-4)" }}>
-              Configure your COROS email and password in the backend .env file.
-            </p>
           </div>
-
-
-          {/* Data Management */}
-          <div className="card" id="settings-data">
-            <div className="card-header">
-              <div className="card-title">Data Management</div>
-            </div>
-            <div style={{ display: "flex", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
-              <button className="btn btn-secondary" id="export-data-btn">Export All Data</button>
-              <button className="btn btn-danger" id="delete-data-btn">Delete All Data</button>
-            </div>
-            <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: "var(--space-3)" }}>
-              Your data is stored locally in PostgreSQL. Raw FIT/TCX files are preserved in the file store.
-              Export downloads a complete backup. Delete is irreversible.
-            </p>
-          </div>
-
         </div>
       </main>
     </div>

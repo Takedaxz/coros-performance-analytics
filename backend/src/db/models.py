@@ -7,6 +7,7 @@ overwritten by app-derived estimates.
 
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Literal
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -21,6 +22,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -78,14 +80,15 @@ class User(Base):
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    timezone: Mapped[str] = mapped_column(String(50), default="UTC")
-    units: Mapped[str] = mapped_column(String(10), default="metric")
+    timezone: Mapped[str] = mapped_column(String(50), default="UTC", server_default="UTC")
+    units: Mapped[str] = mapped_column(String(10), default="metric", server_default="metric")
 
     # Biometrics & Profile
     first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     nickname: Mapped[str | None] = mapped_column(String(100), nullable=True)
     birthdate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    sex: Mapped[Literal["female", "male"] | None] = mapped_column(String(10), nullable=True)
     height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     body_fat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -95,13 +98,15 @@ class User(Base):
     threshold_hr_bpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
     threshold_pace_s_per_km: Mapped[float | None] = mapped_column(Float, nullable=True)
     ftp_w: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    sleep_target_hours: Mapped[float] = mapped_column(Float, default=8.0)
+    sleep_target_hours: Mapped[float] = mapped_column(Float, default=8.0, server_default="8.0")
     training_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     device_preferences: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, server_default=text("now()")
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=datetime.utcnow, server_default=text("now()"), onupdate=datetime.utcnow
     )
 
     devices: Mapped[list["Device"]] = relationship(back_populates="user")
@@ -212,16 +217,19 @@ class Activity(Base):
     vo2max_vendor: Mapped[float | None] = mapped_column(Float, nullable=True)
     running_fitness_vendor: Mapped[float | None] = mapped_column(Float, nullable=True)
     ftp_vendor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    strength_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # App-derived metrics (separate from vendor)
     efficiency_factor_app: Mapped[float | None] = mapped_column(Float, nullable=True)
     cardiac_drift_pct_app: Mapped[float | None] = mapped_column(Float, nullable=True)
     hr_quality_flag: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    postmortem: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Provenance
     source_type: Mapped[str] = mapped_column(Enum(SourceType, name="source_type"), nullable=False)
     source_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     source_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    label_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     parser_version: Mapped[str] = mapped_column(String(20), default="0.1.0")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -259,6 +267,10 @@ class ActivityRecord(Base):
     heart_rate_bpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cadence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     power_w: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ground_time_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stride_length_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stride_ratio_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stride_height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     temperature_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     vertical_speed_mps: Mapped[float | None] = mapped_column(Float, nullable=True)
     grade_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -509,6 +521,7 @@ class ChatSession(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False, default="New Chat")
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -534,3 +547,34 @@ class ChatMessage(Base):
 
     session: Mapped["ChatSession"] = relationship("ChatSession", back_populates="messages")
 
+
+class AppSetting(Base):
+    """Generic encrypted key-value store for server-side settings.
+
+    Values are stored as AES-256-GCM ciphertext (base64-encoded).
+    The application layer is responsible for encryption/decryption.
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, server_default=text("now()"), onupdate=datetime.utcnow
+    )
+
+
+class CorosMcpToken(Base):
+    """OAuth tokens for COROS MCP server integration."""
+
+    __tablename__ = "coros_mcp_tokens"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, server_default=text("now()"), onupdate=datetime.utcnow
+    )

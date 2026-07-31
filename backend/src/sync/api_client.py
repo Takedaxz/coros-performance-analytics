@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import logging
@@ -17,6 +18,14 @@ _MOBILE_TOKEN_TTL_SECONDS = 3600  # 1 hour
 _REDIS_KEY_ACCESS_TOKEN = "coros:token:access"
 _REDIS_KEY_MOBILE_TOKEN = "coros:token:mobile"
 _REDIS_KEY_USER_ID = "coros:token:user_id"
+
+
+def _rate_limit_delay(retry_after: str | None) -> float:
+    try:
+        seconds = float(retry_after) if retry_after is not None else 1.0
+    except ValueError:
+        seconds = 1.0
+    return min(max(seconds, 0.0), 5.0)
 
 
 class CorosApiClientError(Exception):
@@ -156,6 +165,11 @@ class CorosApiClient:
     ) -> dict:
         """GET with automatic token refresh on 401 or API-level token error."""
         resp = await client.get(url, params=params, headers=self._get_auth_headers())
+        if resp.status_code == 429:
+            delay = _rate_limit_delay(resp.headers.get("Retry-After"))
+            logger.warning("coros_api: rate limited, retrying once in %.1fs", delay)
+            await asyncio.sleep(delay)
+            resp = await client.get(url, params=params, headers=self._get_auth_headers())
         
         body = None
         is_token_invalid = resp.status_code == 401
@@ -210,6 +224,76 @@ class CorosApiClient:
 
         return all_activities
 
+    async def fetch_activity_fit_url(self, activity_id: str, sport_type: int) -> str:
+        """Call POST /activity/detail/download to get the S3 FIT file URL."""
+        url = f"{self.base_url}/activity/detail/download"
+        params = {
+            "labelId": activity_id,
+            "sportType": sport_type,
+            "fileType": 4,  # 4 = FIT format
+        }
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            headers = self._get_auth_headers()
+            resp = await client.post(url, params=params, headers=headers)
+            
+            body = None
+            is_token_invalid = resp.status_code == 401
+            
+            if resp.status_code == 200:
+                body = resp.json()
+                if body.get("result") != "0000" and "token" in body.get("message", "").lower():
+                    is_token_invalid = True
+            
+            if is_token_invalid:
+                logger.info("coros_api: refreshing token for FIT download URL")
+                await self._invalidate_token()
+                await self.login()
+                headers = self._get_auth_headers()
+                resp = await client.post(url, params=params, headers=headers)
+                body = None
+
+            resp.raise_for_status()
+            res_json = body if body is not None else resp.json()
+            if res_json.get("result") != "0000":
+                raise CorosApiClientError(f"Failed to get FIT url: {res_json.get('message')}")
+            
+            file_url = res_json.get("data", {}).get("fileUrl")
+            if not file_url:
+                raise CorosApiClientError("Response missing fileUrl")
+            return file_url
+
+    async def fetch_activity_detail(self, activity_id: str, sport_type: int) -> dict:
+        """Fetch an official Team API activity-detail payload."""
+        url = f"{self.base_url}/activity/detail/query"
+        params = {"labelId": activity_id, "sportType": sport_type}
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(url, params=params, headers=self._get_auth_headers())
+                response.raise_for_status()
+                body = response.json()
+        except httpx.HTTPError as exc:
+            raise CorosApiClientError(f"Failed to fetch activity detail: {exc}") from exc
+        if body.get("result") != "0000":
+            raise CorosApiClientError(f"Failed to fetch activity detail: {body.get('message')}")
+        data = body.get("data")
+        return data if isinstance(data, dict) else {}
+
+    async def fetch_activity_feel_type(self, activity_id: str, sport_type: int) -> int | None:
+        """Fetch the end-of-activity RPE stored by COROS's Team API."""
+        detail = await self.fetch_activity_detail(activity_id, sport_type)
+        feel_info = detail.get("sportFeelInfo", {})
+        feel_type = feel_info.get("feelType") if isinstance(feel_info, dict) else None
+        return int(feel_type) if isinstance(feel_type, int) and 1 <= feel_type <= 5 else 0
+
+    async def download_file(self, url: str) -> bytes:
+        """Download raw binary file from URL (e.g. S3)."""
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return resp.content
+
+
     async def fetch_daily_metrics(self, start_day: str, end_day: str) -> list[dict]:
         """Fetch daily health metrics for a date range (YYYYMMDD)."""
         url = f"{self.base_url}/analyse/dayDetail/query"
@@ -230,7 +314,7 @@ class CorosApiClient:
 
             return body.get("data", {}).get("dayList", [])
 
-    async def fetch_analyse(self) -> list[dict]:
+    async def fetch_analyse(self) -> dict:
         """Fetch summary and fitness estimates (VO2max, stamina)."""
         url = f"{self.base_url}/analyse/query"
 
@@ -238,26 +322,21 @@ class CorosApiClient:
             body = await self._get_json(client, url)
 
             if body.get("result") != "0000":
-                return []
+                return {}
 
-            return body.get("data", {}).get("t7dayList", [])
+            return body.get("data", {})
 
-    async def fetch_hrv(self) -> list[dict]:
-        """Fetch recent HRV data from dashboard."""
+    async def fetch_dashboard(self) -> dict:
+        """Fetch the live Training Hub dashboard, including recovery."""
         url = f"{self.base_url}/dashboard/query"
 
         async with httpx.AsyncClient(timeout=30) as client:
             body = await self._get_json(client, url)
 
             if body.get("result") != "0000":
-                return []
+                return {}
 
-            return (
-                body.get("data", {})
-                .get("summaryInfo", {})
-                .get("sleepHrvData", {})
-                .get("sleepHrvList", [])
-            )
+            return body.get("data", {})
 
     def _mobile_encrypt(self, plaintext: str, app_key: str) -> str:
         key = app_key.encode("ascii")
@@ -311,7 +390,7 @@ class CorosApiClient:
             "account": self._mobile_encrypt(self.email, app_key) + "\\n",
             "accountType": 2,
             "appKey": app_key,
-            "clientType": 1,
+            "clientType": 2,
             "hasHrCalibrated": 0,
             "kbValidity": 0,
             "pwd": self._mobile_encrypt(self._md5(self.password), app_key) + "\\n",
