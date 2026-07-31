@@ -34,7 +34,8 @@ cp .env.example .env
 Open `.env` and fill in **at minimum** these values:
 
 ```env
-# Who you are — determines your stable user ID automatically
+# Keep OWNER_USER_ID unchanged after the first sync.
+OWNER_USER_ID=00000000-0000-0000-0000-000000000000
 OWNER_EMAIL=your@email.com
 OWNER_TIMEZONE=Asia/Bangkok   # your local timezone
 OWNER_UNITS=metric            # metric | imperial
@@ -84,7 +85,7 @@ uv run uvicorn src.main:app --reload --host 127.0.0.1 --port 8000
 > [!NOTE]
 > On first startup, the server automatically:
 > - Creates all database tables
-> - Seeds your owner user row (derived from `OWNER_EMAIL`)
+> - Seeds your owner user row using `OWNER_USER_ID`
 >
 > No migrations to run manually.
 
@@ -168,6 +169,6 @@ docker compose down -v
 | Symptom | Fix |
 |---|---|
 | `Connection refused` on port 5432 | `docker compose up -d` — Postgres is not running |
-| `ForeignKeyViolationError` on sync | Check `OWNER_EMAIL` in `.env`, then restart the backend |
+| `ForeignKeyViolationError` on sync | Check `OWNER_USER_ID` in `.env`, then restart the backend |
 | Backend says `Address already in use` | Another process owns port 8000: `lsof -ti:8000 \| xargs kill` |
 | Frontend cannot reach backend | Confirm backend is on port 8000 and running |

@@ -94,7 +94,7 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
             ...prev,
             isSyncing: false,
             message: "",
-            error: null,
+            error: prev.error ?? "Sync connection lost",
           }));
         }
       );

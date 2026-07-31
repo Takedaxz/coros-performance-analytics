@@ -1,12 +1,9 @@
 """Application configuration loaded from environment variables."""
 
-import uuid
+from uuid import UUID
 
-from pydantic import Field, computed_field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-# Stable UUID5 namespace for deriving per-installation user IDs.
-_USER_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")  # uuid.NAMESPACE_URL
 
 
 class Settings(BaseSettings):
@@ -25,7 +22,8 @@ class Settings(BaseSettings):
     raw_file_store_path: str = "./data/raw_files"
 
     # --- Owner (single-user installation) ---
-    # Set OWNER_EMAIL in your .env file.  All other owner fields are optional.
+    # Keep the legacy ID when upgrading. New installations may set a unique UUID.
+    owner_user_id: UUID = UUID(int=0)
     owner_email: str = "you@example.com"
     owner_timezone: str = "UTC"
     owner_units: str = "metric"  # "metric" | "imperial"
@@ -55,16 +53,6 @@ class Settings(BaseSettings):
     openai_compat_api_key: str = ""
     openai_compat_base_url: str = "https://gen.ai.kku.ac.th/okmd/api/v1"
     openai_compat_model: str = "gemini-2.5-flash-lite"
-
-    @computed_field  # type: ignore[misc]
-    @property
-    def owner_user_id(self) -> str:
-        """Stable UUID5 (UUID แบบ deterministic จาก namespace + email) derived from owner_email.
-
-        Different email → different ID automatically.
-        Override with OWNER_USER_ID env var if you need a specific value.
-        """
-        return str(uuid.uuid5(_USER_NS, self.owner_email))
 
     @property
     def is_production(self) -> bool:

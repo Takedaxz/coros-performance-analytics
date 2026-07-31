@@ -8,10 +8,5 @@ from src.config import get_settings
 
 
 def get_owner_id() -> str:
-    """Return the stable user ID for the installation owner.
-
-    The value is derived from ``OWNER_EMAIL`` (or ``owner_email`` in .env)
-    via UUID5 (UUID แบบ deterministic จาก namespace + email), so it changes
-    automatically when the email changes and never requires manual UUID management.
-    """
-    return get_settings().owner_user_id
+    """Return the configured stable user ID for the installation owner."""
+    return str(get_settings().owner_user_id)

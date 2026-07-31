@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 " ON CONFLICT (id) DO NOTHING"
             ),
             {
-                "id": settings.owner_user_id,
+                "id": str(settings.owner_user_id),
                 "email": settings.owner_email,
                 "tz": settings.owner_timezone,
                 "units": settings.owner_units,
