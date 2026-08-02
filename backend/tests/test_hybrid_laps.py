@@ -110,9 +110,20 @@ def test_structured_run_uses_coros_workout_step_labels() -> None:
     raw_detail = {
         "lapList": [
             {
+                "type": 10,
+                "lapItemList": [
+                    {"exerciseType": 1, "mode": 4, "time": 3000, "distance": 6484},
+                    {"exerciseType": 1, "mode": 4, "time": 3000, "distance": 6485},
+                    {"exerciseType": 2, "mode": 2, "time": 1000, "distance": 4662},
+                    {"exerciseType": 2, "mode": 2, "time": 1000, "distance": 4662},
+                ],
+            },
+            {
+                "type": 2,
                 "lapItemList": [
                     {"exerciseType": 1, "mode": 4, "time": 6000, "distance": 12969},
                     {"exerciseType": 2, "mode": 2, "time": 2000, "distance": 9324},
+                    {"exerciseType": 2, "mode": 2, "time": 1000, "distance": 4662},
                     {"exerciseType": 4, "mode": 3, "time": 6198, "distance": 10115},
                     {"exerciseType": 3, "mode": 5, "time": 18920, "distance": 22605},
                 ]
@@ -124,7 +135,8 @@ def test_structured_run_uses_coros_workout_step_labels() -> None:
 
     assert [lap.lap_trigger for lap in laps] == [
         "coros_warmup",
-        "coros_training",
+        "coros_run",
+        "coros_run",
         "coros_rest",
         "coros_cooldown",
     ]

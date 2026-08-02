@@ -860,7 +860,7 @@ export default function SettingsPage() {
                       value={profile.training_notes}
                       onChange={(e) => updateProfileField("training_notes", e.target.value)}
                     />
-                    <span className="settings-help">Use short, factual notes. Do not include information the coach does not need.</span>
+                    <span className="settings-help">Use short, factual notes.</span>
                   </div>
                   {profileError && <p className="settings-feedback is-error">{profileError}</p>}
                 </div>

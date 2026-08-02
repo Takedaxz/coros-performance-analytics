@@ -29,11 +29,11 @@ const WEEKLY_ACTIVITY_METRICS: WeeklyActivityMetric[] = ["distance", "duration",
 
 const WEEKLY_ACTIVITY_CONFIG: Record<
   WeeklyActivityMetric,
-  { label: string; color: string }
+  { label: string }
 > = {
-  distance: { label: "Distance (km)", color: "#21E6A5" },
-  duration: { label: "Duration", color: "#5B8DEF" },
-  load: { label: "Training Load", color: "#F0B63C" },
+  distance: { label: "Distance (km)" },
+  duration: { label: "Duration" },
+  load: { label: "Training Load" },
 };
 
 interface PersonalRecord {
@@ -321,6 +321,11 @@ export default function DashboardPage() {
   const todayLoad = todayActivities.reduce((sum, a) => sum + (a.training_load_vendor || 0), 0);
   const isRelativeChart = selectedMetrics.length > 1;
   const selectedMetric = selectedMetrics[0];
+  const weeklyMetricColor = (metric: WeeklyActivityMetric): string => {
+    const index = selectedMetrics.indexOf(metric);
+    if (index <= 0) return "var(--color-accent-primary)";
+    return index === 1 ? "var(--color-text-secondary)" : "var(--color-text-disabled)";
+  };
   const dailyAverage = weeklyMetricTotals[selectedMetric] / 7;
   const activeDays = rawWeeklyActivityData.filter((day) =>
     selectedMetrics.some((metric) => day[metric] > 0),
@@ -360,7 +365,7 @@ export default function DashboardPage() {
 
           {/* Main Integrated Layout Grid (Reference-Inspired) */}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 360px) 1fr", gap: "var(--space-5)", marginBottom: "var(--space-6)" }}>
-            {/* Left Panel: Recovery and Strain Rings + 2x2 Bento Grid */}
+            {/* Left Panel: Recovery and Strain Rings + Daily Telemetry */}
             <div
               className="hover-card"
               style={{
@@ -370,7 +375,6 @@ export default function DashboardPage() {
                 padding: "var(--space-6)",
                 display: "flex",
                 flexDirection: "column",
-                justifyContent: "space-between",
                 gap: "var(--space-5)",
               }}
             >
@@ -412,161 +416,62 @@ export default function DashboardPage() {
                 </p>
               </div>
 
-              {/* 2x2 Bento Grid (Refined Radial Edge Gradients & Circular Badges) */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                {/* Load */}
-                <div
-                  className="hover-card"
-                  style={{
-                    background: "radial-gradient(circle at top left, rgba(240, 211, 72, 0.22) 0%, var(--color-bg-secondary) 75%)",
-                    border: "1px solid rgba(240, 211, 72, 0.25)",
-                    borderRadius: "16px",
-                    padding: "var(--space-4)",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between",
-                    minHeight: "125px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(240, 211, 72, 0.18)", color: "var(--color-status-moderate)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 3z" />
-                      </svg>
+              <section className="daily-telemetry" aria-label="Daily telemetry">
+                <header className="daily-telemetry-header">
+                  <span>Daily telemetry</span>
+                </header>
+                <div className="daily-telemetry-grid">
+                  <div className="daily-telemetry-reading">
+                    <div>
+                      <span>Load</span>
+                      <small>{`${Math.round(weeklyMetricTotals.load)} total · 7d`}</small>
                     </div>
-                    <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", color: "var(--color-text-primary)", textTransform: "uppercase" }}>LOAD</span>
+                    <strong>{Math.round(todayLoad)}</strong>
                   </div>
 
-                  <div style={{ marginTop: "8px" }}>
-                    <div style={{ fontSize: "28px", fontWeight: 800, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
-                      {Math.round(todayLoad)}
-                    </div>
-                    <div style={{ marginTop: "6px" }}>
-                      <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", background: "var(--color-badge-bg)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
-                        {`${Math.round(weeklyMetricTotals.load)} / 7 days`}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Resting HR */}
-                <div
-                  className="hover-card"
-                  style={{
-                    background: "radial-gradient(circle at top left, rgba(255, 77, 98, 0.22) 0%, var(--color-bg-secondary) 75%)",
-                    border: "1px solid rgba(255, 77, 98, 0.25)",
-                    borderRadius: "16px",
-                    padding: "var(--space-4)",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between",
-                    minHeight: "125px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(255, 77, 98, 0.18)", color: "var(--color-status-critical)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                      </svg>
-                    </div>
-                    <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", color: "var(--color-text-primary)", textTransform: "uppercase" }}>RESTING HR</span>
-                  </div>
-
-                  <div style={{ marginTop: "8px" }}>
-                    <div style={{ fontSize: "28px", fontWeight: 800, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
-                      {latestHealth.resting_hr_bpm ? `${latestHealth.resting_hr_bpm}` : "--"}
-                    </div>
-                    <div style={{ marginTop: "6px" }}>
-                      <span style={{ fontSize: "11px", fontWeight: 600, color: restingHrDelta === null ? "var(--color-text-muted)" : restingHrDelta > 0 ? "var(--color-status-critical)" : "var(--color-status-positive)", background: "var(--color-badge-bg)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
+                  <div className="daily-telemetry-reading">
+                    <div>
+                      <span>Resting HR</span>
+                      <small className={restingHrDelta !== null && restingHrDelta > 0 ? "is-alert" : ""}>
                         {restingHrDelta === null
-                          ? "no baseline data"
+                          ? "No baseline data"
                           : `${restingHrDelta >= 0 ? "+" : ""}${restingHrDelta.toFixed(1)} vs avg`}
-                      </span>
+                      </small>
                     </div>
-                  </div>
-                </div>
-
-                {/* Steps */}
-                <div
-                  className="hover-card"
-                  style={{
-                    background: "radial-gradient(circle at top left, rgba(33, 230, 165, 0.22) 0%, var(--color-bg-secondary) 75%)",
-                    border: "1px solid rgba(33, 230, 165, 0.25)",
-                    borderRadius: "16px",
-                    padding: "var(--space-4)",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between",
-                    minHeight: "125px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(33, 230, 165, 0.18)", color: "var(--color-accent-primary)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M8 4.5c0 1.4-.9 2.5-2 2.5s-2-1.1-2-2.5S4.9 2 6 2s2 1.1 2 2.5ZM20 10.5c0 1.4-.9 2.5-2 2.5s-2-1.1-2-2.5S16.9 8 18 8s2 1.1 2 2.5ZM7 9l3 2 2-2 2 3-3 2-2-1-2 4" />
-                      </svg>
-                    </div>
-                    <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", color: "var(--color-text-primary)", textTransform: "uppercase" }}>STEPS</span>
+                    <strong>{latestHealth.resting_hr_bpm || "--"}<em>bpm</em></strong>
                   </div>
 
-                  <div style={{ marginTop: "8px" }}>
-                    <div style={{ fontSize: "28px", fontWeight: 800, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
-                      {latestStepsHealth?.steps?.toLocaleString() || "--"}
-                    </div>
-                    <div style={{ marginTop: "6px" }}>
-                      <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", background: "var(--color-badge-bg)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
+                  <div className="daily-telemetry-reading">
+                    <div>
+                      <span>Steps</span>
+                      <small>
                         {latestStepsHealth
                           ? new Date(`${latestStepsHealth.date}T00:00:00`).toLocaleDateString(
                               "en-US",
-                              { month: "short", day: "numeric" }
+                              { month: "short", day: "numeric" },
                             )
-                          : "no daily data"}
-                      </span>
+                          : "No daily data"}
+                      </small>
                     </div>
-                  </div>
-                </div>
-
-                {/* Calories */}
-                <div
-                  className="hover-card"
-                  style={{
-                    background: "radial-gradient(circle at top left, rgba(45, 155, 240, 0.22) 0%, var(--color-bg-secondary) 75%)",
-                    border: "1px solid rgba(45, 155, 240, 0.25)",
-                    borderRadius: "16px",
-                    padding: "var(--space-4)",
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "space-between",
-                    minHeight: "125px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(45, 155, 240, 0.18)", color: "var(--color-accent-exertion)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                      </svg>
-                    </div>
-                    <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.08em", color: "var(--color-text-primary)", textTransform: "uppercase" }}>CALORIES</span>
+                    <strong>{latestStepsHealth?.steps?.toLocaleString() || "--"}</strong>
                   </div>
 
-                  <div style={{ marginTop: "8px" }}>
-                    <div style={{ fontSize: "28px", fontWeight: 800, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
-                      {latestStepsHealth?.active_calories_kcal?.toLocaleString() || "--"}
+                  <div className="daily-telemetry-reading">
+                    <div>
+                      <span>Active energy</span>
+                      <small>{latestStepsHealth ? "Today" : "No daily data"}</small>
                     </div>
-                    <div style={{ marginTop: "6px" }}>
-                      <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", background: "var(--color-badge-bg)", padding: "3px 10px", borderRadius: "12px", display: "inline-block" }}>
-                        {latestStepsHealth ? "today's calories" : "no daily data"}
-                      </span>
-                    </div>
+                    <strong>{latestStepsHealth?.active_calories_kcal?.toLocaleString() || "--"}<em>kcal</em></strong>
                   </div>
                 </div>
-              </div>
+              </section>
+
             </div>
 
             {/* Right Main Column */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+            <div className="dashboard-performance-column">
               {/* Top Split Row: Sleep Card (Left) & VO2 Gauge Card (Right) */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "var(--space-5)" }}>
+              <div className="dashboard-performance-top">
                 <SleepCard
                   dateStr={latestSleep?.sleep_start
                     ? new Date(latestSleep.sleep_start).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
@@ -593,95 +498,23 @@ export default function DashboardPage() {
               </div>
 
               {/* Bottom: Weekly Activity Bar Chart */}
-              <div
-                className="hover-card"
-                style={{
-                  background: "var(--color-bg-card)",
-                  border: "1px solid var(--border-color)",
-                  borderRadius: "20px",
-                  padding: "var(--space-4) var(--space-5) var(--space-4)",
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "var(--space-3)",
-                }}
-              >
-                {/* Header & metric selector */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "var(--space-4)", flexWrap: "wrap" }}>
-                  <div style={{ minWidth: 0 }}>
-                    <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                      WEEKLY ACTIVITY
-                    </span>
-                    <div style={{ display: "flex", alignItems: "center", columnGap: "16px", rowGap: "8px", marginTop: "10px", flexWrap: "wrap" }}>
-                      {selectedMetrics.map((metric) => (
-                        <span key={metric} style={{ display: "inline-flex", alignItems: "center", gap: "7px", whiteSpace: "nowrap" }}>
-                          <span
-                            aria-hidden="true"
-                            style={{ width: 10, height: 10, borderRadius: 5, background: WEEKLY_ACTIVITY_CONFIG[metric].color }}
-                          />
-                          <span style={{ color: "var(--color-text-muted)", fontSize: "12px", fontWeight: 650 }}>
-                            {WEEKLY_ACTIVITY_CONFIG[metric].label}
-                          </span>
-                        </span>
-                      ))}
-                      <span style={{ color: "var(--color-text-secondary)", fontSize: "12px", fontWeight: 650 }}>
-                        Best <strong style={{ color: "var(--color-text-primary)", fontWeight: 750 }}>{bestDay.day}</strong>
-                      </span>
-                      <span style={{ color: "var(--color-text-secondary)", fontSize: "12px", fontWeight: 650 }}>
-                        Active <strong style={{ color: "var(--color-text-primary)", fontWeight: 750 }}>{activeDays}/7</strong>
-                      </span>
-                      {isRelativeChart && (
-                        <span style={{ color: "var(--color-text-muted)", fontSize: "10px", fontWeight: 750, letterSpacing: "0.06em" }}>
-                          REL
-                        </span>
-                      )}
-                    </div>
+              <section className="hover-card performance-instrument weekly-instrument">
+                <header className="weekly-instrument-header">
+                  <div>
+                    <span className="instrument-eyebrow">Weekly activity</span>
                   </div>
-
-                  <details style={{ position: "relative", zIndex: 5 }}>
-                    <summary
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        listStyle: "none",
-                        background: "var(--color-surface-secondary)",
-                        color: "var(--color-text-primary)",
-                        border: "1px solid var(--border-color)",
-                        borderRadius: "999px",
-                        padding: "8px 12px",
-                        fontSize: "11px",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                        userSelect: "none",
-                      }}
-                    >
-                      <span style={{ display: "inline-flex", gap: "4px" }} aria-hidden="true">
+                  <details className="weekly-metric-selector">
+                    <summary>
+                      <span className="weekly-selector-signals" aria-hidden="true">
                         {selectedMetrics.map((metric) => (
-                          <span key={metric} style={{ width: 8, height: 8, borderRadius: 4, background: WEEKLY_ACTIVITY_CONFIG[metric].color }} />
+                          <span key={metric} style={{ background: weeklyMetricColor(metric) }} />
                         ))}
                       </span>
                       {metricSelectorLabel}
-                      <span aria-hidden="true" style={{ fontSize: "12px", color: "var(--color-text-muted)" }}>⌄</span>
+                      <span aria-hidden="true">⌄</span>
                     </summary>
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "calc(100% + 8px)",
-                        right: 0,
-                        width: 225,
-                        display: "grid",
-                        gap: "4px",
-                        padding: "8px",
-                        background: "var(--color-popover)",
-                        border: "1px solid var(--border-color)",
-                        borderRadius: "18px",
-                        boxShadow: "var(--shadow-md)",
-                      }}
-                    >
-                      <div style={{ padding: "4px 8px 6px", color: "var(--color-text-muted)", fontSize: "10px", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                        Metrics
-                      </div>
+                    <div className="weekly-metric-menu">
+                      <div className="instrument-eyebrow">Metrics</div>
                       {WEEKLY_ACTIVITY_METRICS.map((metric) => {
                         const isSelected = selectedMetrics.includes(metric);
                         return (
@@ -692,33 +525,12 @@ export default function DashboardPage() {
                             aria-pressed={isSelected}
                             aria-disabled={isSelected && selectedMetrics.length === 1}
                             onClick={() => toggleWeeklyMetric(metric)}
-                            style={{
-                              width: "100%",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "10px",
-                              minHeight: "38px",
-                              padding: "8px 10px",
-                              color: "var(--color-text-primary)",
-                              borderRadius: "10px",
-                              fontSize: "12px",
-                              fontWeight: 650,
-                              lineHeight: 1.2,
-                              textAlign: "left",
-                              cursor: isSelected && selectedMetrics.length === 1 ? "not-allowed" : "pointer",
-                            }}
+                            style={{ cursor: isSelected && selectedMetrics.length === 1 ? "not-allowed" : "pointer" }}
                           >
                             <span
+                              className="weekly-metric-check"
                               aria-hidden="true"
-                              style={{
-                                width: 16,
-                                height: 16,
-                                display: "grid",
-                                placeItems: "center",
-                                borderRadius: 8,
-                                color: "#08110e",
-                                background: isSelected ? WEEKLY_ACTIVITY_CONFIG[metric].color : "var(--color-overlay-medium)",
-                              }}
+                              style={{ background: isSelected ? weeklyMetricColor(metric) : "var(--color-overlay-medium)" }}
                             >
                               {isSelected && (
                                 <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
@@ -732,10 +544,29 @@ export default function DashboardPage() {
                       })}
                     </div>
                   </details>
+                </header>
+
+                <div className="weekly-instrument-overview">
+                  <div className="instrument-primary-reading">
+                    <span>{WEEKLY_ACTIVITY_CONFIG[selectedMetric].label}</span>
+                    <strong>{formatWeeklyMetric(selectedMetric, weeklyMetricTotals[selectedMetric])}</strong>
+                  </div>
+                  <div><span>Best day</span><strong>{bestDay.day}</strong></div>
+                  <div><span>Active days</span><strong>{activeDays}/7</strong></div>
                 </div>
 
-                {/* Recharts Rounded Bar Chart (Rolling 7 Days Ending Today) */}
-                <ResponsiveContainer width="100%" height={230}>
+                <div className="weekly-instrument-legend">
+                  {selectedMetrics.map((metric) => (
+                    <span key={metric}>
+                      <i style={{ background: weeklyMetricColor(metric) }} />
+                      {WEEKLY_ACTIVITY_CONFIG[metric].label}
+                    </span>
+                  ))}
+                  {isRelativeChart && <strong>Relative scale</strong>}
+                </div>
+
+                <div className="weekly-instrument-chart">
+                <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 200 }}>
                   <BarChart data={weeklyActivityData} margin={{ top: 6, right: 8, left: 0, bottom: 0 }} barGap={2}>
                     <CartesianGrid strokeDasharray="2 6" stroke="var(--color-chart-grid)" vertical={false} />
                     <XAxis dataKey="day" tick={{ fill: "var(--color-text-muted)", fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} dy={4} height={22} interval="equidistantPreserveStart" />
@@ -782,14 +613,14 @@ export default function DashboardPage() {
                         key={metric}
                         dataKey={isRelativeChart ? `${metric}Relative` : metric}
                         name={WEEKLY_ACTIVITY_CONFIG[metric].label}
-                        radius={[10, 10, 0, 0]}
-                        barSize={selectedMetrics.length === 1 ? 42 : 26}
+                        radius={[4, 4, 0, 0]}
+                        barSize={selectedMetrics.length === 1 ? 34 : 18}
                         isAnimationActive={false}
                       >
                         {weeklyActivityData.map((entry) => (
                           <Cell
                             key={`${metric}-${entry.dateStr}`}
-                            fill={WEEKLY_ACTIVITY_CONFIG[metric].color}
+                            fill={weeklyMetricColor(metric)}
                             fillOpacity={entry.isToday ? 1 : 0.78}
                           />
                         ))}
@@ -797,7 +628,8 @@ export default function DashboardPage() {
                     ))}
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
+                </div>
+              </section>
             </div>
           </div>
 

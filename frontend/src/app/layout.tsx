@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
-import Script from "next/script";
 import "../styles/globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-body" });
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
+const themeInitScript = `try {
+  const theme = localStorage.getItem("coros-theme") === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+} catch (error) {
+  console.warn("theme_preference_load_failed", { error });
+}`;
 
 export const metadata: Metadata = {
   title: "COROS Core — Personal Performance",
@@ -26,17 +32,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body>
-        <Script id="theme-init" strategy="beforeInteractive">
-          {`try {
-            const theme = localStorage.getItem("coros-theme") === "light" ? "light" : "dark";
-            document.documentElement.dataset.theme = theme;
-            document.documentElement.style.colorScheme = theme;
-          } catch (error) {
-            console.warn("theme_preference_load_failed", { error });
-          }
-          `}
-        </Script>
         {children}
       </body>
     </html>

@@ -279,7 +279,10 @@ def _detail_activity_laps(activity: Activity, raw_detail: dict) -> list[Activity
     is_ride = activity.sport == SportType.RIDE
     items = [
         item
-        for item in _coros_detail_lap_items(raw_detail, 2 if is_swim or is_ride else None)
+        for item in _coros_detail_lap_items(
+            raw_detail,
+            2 if is_running or is_swim or is_ride else None,
+        )
         if _nonnegative_number(item.get("mode")) != 16
     ]
     if is_ride and not any(
@@ -332,7 +335,7 @@ def _detail_activity_laps(activity: Activity, raw_detail: dict) -> list[Activity
         workout_step_trigger = (
             {
                 1: "coros_warmup",
-                2: "coros_training",
+                2: "coros_run" if is_running else "coros_training",
                 3: "coros_cooldown",
                 4: "coros_rest",
             }.get(int(exercise_type))

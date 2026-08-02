@@ -235,7 +235,12 @@ from src.sync.sync_manager import _detail_activity_laps
 from src.parsers.fit_parser import parse_fit_file
 
 logger = logging.getLogger(__name__)
-RUNNING_DYNAMICS_PARSER_VERSION = "0.2.0"
+RUNNING_DYNAMICS_PARSER_VERSION = "0.3.1"
+RUNNING_DYNAMICS_READY_VERSIONS = {
+    "0.2.0",
+    "0.3.0",
+    RUNNING_DYNAMICS_PARSER_VERSION,
+}
 
 
 async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -> None:
@@ -266,15 +271,24 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
         and bool(lap_count)
         and bool(unlabeled_lap_count)
     )
+    needs_phase_refresh = (
+        activity.sport in {"run", "trail_run"}
+        and bool(lap_count)
+        and activity.parser_version != RUNNING_DYNAMICS_PARSER_VERSION
+    )
     needs_running_dynamics = (
         activity.sport in {"run", "trail_run"}
         and bool(records_count)
-        and activity.parser_version != RUNNING_DYNAMICS_PARSER_VERSION
+        and activity.parser_version not in RUNNING_DYNAMICS_READY_VERSIONS
     )
     has_complete_fit_data = (
         records_count > 0 and not rebuild_multisport and not needs_running_dynamics
     )
-    if (has_complete_fit_data and not needs_step_labels) or not activity.label_id:
+    if (
+        has_complete_fit_data
+        and not needs_step_labels
+        and not needs_phase_refresh
+    ) or not activity.label_id:
         return
 
     settings = get_settings()
@@ -302,10 +316,15 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
                     exc,
                 )
 
-        if records_count > 0 and needs_step_labels and not needs_running_dynamics:
+        if (
+            records_count > 0
+            and (needs_step_labels or needs_phase_refresh)
+            and not needs_running_dynamics
+        ):
             if detail_laps:
                 await db.execute(delete(ActivityLap).where(ActivityLap.activity_id == activity.id))
                 db.add_all(detail_laps)
+                activity.parser_version = RUNNING_DYNAMICS_PARSER_VERSION
                 await db.commit()
             return
 
@@ -364,11 +383,11 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
                         else fit_lap.lap_trigger
                     )
                 detail_lap.avg_cadence = detail_lap.avg_cadence or fit_lap.avg_cadence
-        if rebuild_multisport:
+        if rebuild_multisport or (needs_phase_refresh and detail_laps):
             await db.execute(delete(ActivityLap).where(ActivityLap.activity_id == activity.id))
         if rebuild_multisport or needs_running_dynamics:
             await db.execute(delete(ActivityRecord).where(ActivityRecord.activity_id == activity.id))
-        if not lap_count or rebuild_multisport:
+        if not lap_count or rebuild_multisport or (needs_phase_refresh and detail_laps):
             db.add_all(detail_laps or db_laps)
 
         fit_records.sort(key=lambda record: record.timestamp)

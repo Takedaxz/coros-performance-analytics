@@ -99,7 +99,6 @@ const LAP_TYPE_LABELS: Record<NonNullable<ActivityLap["lap_type"]>, string> = {
 };
 
 interface ActivityLapGroup {
-  lapType?: ActivityLap["lap_type"];
   laps: ActivityLap[];
   summary: ActivityLap;
 }
@@ -140,25 +139,6 @@ function summarizeLapGroup(laps: ActivityLap[]): ActivityLap {
     avg_power_w: weightedLapAverage(laps, "avg_power_w"),
     avg_cadence: weightedLapAverage(laps, "avg_cadence"),
   };
-}
-
-function groupConsecutiveLaps(
-  laps: ActivityLap[],
-  shouldGroup: boolean,
-): ActivityLapGroup[] {
-  const groups: Array<{ lapType?: ActivityLap["lap_type"]; laps: ActivityLap[] }> = [];
-  for (const lap of laps) {
-    const previous = groups[groups.length - 1];
-    if (shouldGroup && lap.lap_type != null && previous?.lapType === lap.lap_type) {
-      previous.laps.push(lap);
-    } else {
-      groups.push({ lapType: lap.lap_type, laps: [lap] });
-    }
-  }
-  return groups.map((group) => ({
-    ...group,
-    summary: summarizeLapGroup(group.laps),
-  }));
 }
 
 interface StrengthDetail {
@@ -1098,7 +1078,10 @@ export default function ActivityDetailPage() {
       ["warmup", "training", "cooldown", "rest"].includes(lap.lap_type ?? ""),
     )
   );
-  const lapGroups = groupConsecutiveLaps(activity.laps, hasStructuredLapPhases);
+  const lapGroups: ActivityLapGroup[] = activity.laps.map((lap) => ({
+    laps: [lap],
+    summary: lap,
+  }));
   const swimLapNumbers = Object.fromEntries(
     lapGroups
       .filter(({ summary }) => summary.lap_type !== "rest")
