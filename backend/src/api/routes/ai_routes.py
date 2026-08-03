@@ -46,11 +46,11 @@ def _ai_enabled() -> bool:
 def _active_model() -> str:
     """Return the model identifier for the currently active backend."""
     st = get_settings()
-    if bool(st.openai_compat_api_key):
-        return f"openai_compat:{st.openai_compat_model}"
     if bool(st.gemini_api_key):
         return f"gemini:{st.gemini_model}"
-    return st.openai_compat_model
+    if bool(st.openai_compat_api_key):
+        return f"openai_compat:{st.openai_compat_model}"
+    return f"gemini:{st.gemini_model}"
 
 
 class ChatMessage(BaseModel):

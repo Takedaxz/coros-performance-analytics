@@ -238,10 +238,10 @@ export default function FitnessPage() {
                     </div>
                       <div className="training-pace-zone-grid">
                         {guide.zones.map((zone) => (
-                          <div key={zone.code} style={{ background: `radial-gradient(circle at 0 0, ${zone.glow}, transparent 68%), var(--color-surface-secondary)`, border: `1px solid ${zone.glow}`, borderRadius: "12px", padding: "12px" }}>
+                          <div className="training-pace-zone" key={zone.code} style={{ background: `radial-gradient(circle at 0 0, ${zone.glow}, transparent 68%), var(--color-surface-secondary)`, border: `1px solid ${zone.glow}`, borderRadius: "12px", padding: "12px" }}>
                             <span className="mono" style={{ color: zone.color, fontSize: "11px", fontWeight: 700 }}>{zone.code}</span>
-                            <span style={{ display: "block", color: "var(--color-text-secondary)", fontSize: "11px", marginTop: "2px" }}>{zone.label}</span>
-                            <strong className="mono" style={{ display: "block", color: "var(--color-text-primary)", fontSize: "16px", marginTop: "var(--space-2)" }}>{zone.pace}</strong>
+                            <span className="training-pace-zone-label" style={{ display: "block", color: "var(--color-text-secondary)", fontSize: "11px", marginTop: "2px" }}>{zone.label}</span>
+                            <strong className="mono training-pace-zone-value" style={{ display: "block", color: "var(--color-text-primary)", fontSize: "16px", marginTop: "var(--space-2)" }}>{zone.pace}</strong>
                           </div>
                         ))}
                       </div>

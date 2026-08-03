@@ -370,7 +370,7 @@ export default function ActivitiesPage() {
 
         <div className="page-body">
           {/* Overall Activity Insights Grid */}
-          <div className="metrics-grid" style={{ marginBottom: "var(--space-6)" }}>
+          <div className="metrics-grid activity-summary-grid" style={{ marginBottom: "var(--space-6)" }}>
             <div className="card" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               <span className="card-title">Total Distance</span>
               <div className="card-value">
@@ -440,7 +440,7 @@ export default function ActivitiesPage() {
                       <Link
                         key={activity.id}
                         href={`/activities/${activity.id}?sport=${encodeURIComponent(activity.sport)}`}
-                        className="activity-card-item"
+                        className="activity-card-item activities-log-card"
                         style={{
                           display: "grid",
                           gridTemplateColumns: "40px minmax(0, 1fr) auto",
@@ -462,11 +462,11 @@ export default function ActivitiesPage() {
                         >
                           <span style={{ display: "flex", transform: "scale(0.8)" }}><SportIcon sport={activity.sport} /></span>
                         </div>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "14px", fontWeight: 750 }}>
+                        <div className="activity-card-content" style={{ minWidth: 0 }}>
+                          <div className="activity-card-title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "14px", fontWeight: 750 }}>
                             {activity.title || sportVisual.label}
                           </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(64px, max-content))", gap: "4px 16px", marginTop: "5px", fontVariantNumeric: "tabular-nums" }}>
+                          <div className="activity-card-metrics" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(64px, max-content))", gap: "4px 16px", marginTop: "5px", fontVariantNumeric: "tabular-nums" }}>
                             {metrics.map(([label, value]) => (
                               <span key={label} style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
                                 <span style={{ color: "var(--color-text-muted)", fontSize: "8px", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>{label}</span>
@@ -475,7 +475,7 @@ export default function ActivitiesPage() {
                             ))}
                           </div>
                         </div>
-                        <div style={{ textAlign: "right", color: "var(--color-text-secondary)", fontSize: "11px", fontVariantNumeric: "tabular-nums" }}>
+                        <div className="activity-card-date" style={{ textAlign: "right", color: "var(--color-text-secondary)", fontSize: "11px", fontVariantNumeric: "tabular-nums" }}>
                           <strong style={{ display: "block", color: "var(--color-text-primary)", fontSize: "12px" }}>
                             {startedAt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
                           </strong>

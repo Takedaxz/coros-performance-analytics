@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _FALLBACK_MODELS: list[str] = [
-    "gemini-3.5-flash",       # newer flash — separate quota pool from 2.5
-    "gemini-2.5-flash-lite",  # lightest 2.5 tier, rarely exhausted
-    "gemini-3.1-pro",         # pro-tier, separate quota
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash", 
 ]
 
 _RATE_LIMIT_TERMS: frozenset[str] = frozenset(["429", "exhausted", "quota", "limit", "demand"])
@@ -133,10 +133,11 @@ def get_client() -> genai.Client | None:
 def list_models() -> list[str]:
     """Return available direct Gemini models."""
     return [
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
         "gemini-3.5-flash",
-        "gemini-3.1-pro-preview",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash",
     ]
 
 

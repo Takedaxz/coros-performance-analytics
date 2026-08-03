@@ -26,25 +26,25 @@ def list_provider_models() -> list[dict[str, Any]]:
     """Return provider groups with available models."""
     providers: list[dict[str, Any]] = []
 
-    if _openai_compat_ready():
-        raw_models = openai_compat_client.list_models()
-        providers.append({
-            "id": "openai_compat",
-            "name": "OpenAI-Compatible Gateway (KKU OKMD)",
-            "models": [
-                {"id": f"openai_compat:{m}", "name": m}
-                for m in raw_models
-            ],
-        })
-
     if _gemini_ready():
         gem_models = gemini_client.list_models()
         providers.append({
             "id": "gemini",
-            "name": "Google Gemini Direct",
+            "name": "Google Gemini",
             "models": [
                 {"id": f"gemini:{m}", "name": m}
                 for m in gem_models
+            ],
+        })
+
+    if _openai_compat_ready():
+        raw_models = openai_compat_client.list_models()
+        providers.append({
+            "id": "openai_compat",
+            "name": "OKMD OpenAI-Compatible",
+            "models": [
+                {"id": f"openai_compat:{m}", "name": m}
+                for m in raw_models
             ],
         })
 

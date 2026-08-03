@@ -72,9 +72,8 @@ export default function FitnessScoresPanel({ fitness }: FitnessScoresPanelProps)
 
       {/* Threshold Parameters Grid */}
       <div
+        className="fitness-threshold-grid"
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
           gap: "8px",
           borderTop: "1px solid var(--border-color)",
           paddingTop: "var(--space-3)",

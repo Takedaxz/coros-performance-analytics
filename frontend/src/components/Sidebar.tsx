@@ -164,7 +164,7 @@ export default function Sidebar() {
           <span className="brand-word-secondary">Core</span>
         </h1>
       </div>
-      <nav className="sidebar-nav">
+      <nav aria-label="Primary navigation" className="sidebar-nav">
         {NAV_SECTIONS.map((section) => (
           <div className="nav-section" key={section.label}>
             <div className="nav-section-label">{section.label}</div>
@@ -173,6 +173,7 @@ export default function Sidebar() {
                 key={item.href}
                 href={item.href}
                 className={`nav-link ${pathname === item.href ? "active" : ""}`}
+                title={item.label}
               >
                 {item.icon}
                 <span>{item.label}</span>

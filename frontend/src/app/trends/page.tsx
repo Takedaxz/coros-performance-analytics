@@ -171,7 +171,7 @@ function DistributionPanel({
       {segments.length === 0 ? (
         <p style={{ marginTop: "var(--space-6)", color: "var(--color-text-muted)", fontSize: "13px" }}>{emptyMessage}</p>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(145px, 0.8fr) minmax(0, 1.2fr)", gap: "var(--space-4)", alignItems: "center", marginTop: "var(--space-5)" }}>
+        <div className="distribution-panel-grid" style={{ gap: "var(--space-4)", alignItems: "center", marginTop: "var(--space-5)" }}>
           <div style={{ minWidth: 0 }}>
             <ResponsiveContainer width="100%" height={164}>
               <PieChart>
@@ -445,7 +445,7 @@ export default function TrendsPage() {
           {/* Daily Activity Volume Section — Two Separated Graphs */}
           <div style={{ marginBottom: "var(--space-6)" }}>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "var(--space-5)" }}>
+            <div className="responsive-grid responsive-auto-grid" style={{ gap: "var(--space-5)" }}>
               {/* Left Graph: Daily Steps */}
               <section className="card" id="chart-daily-steps" style={{ minWidth: 0 }}>
                 <div className="card-header">

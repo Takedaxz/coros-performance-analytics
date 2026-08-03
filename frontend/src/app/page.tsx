@@ -143,7 +143,8 @@ export default function DashboardPage() {
               <div
                 aria-busy="true"
                 aria-label="Loading dashboard"
-                style={{ display: "grid", gridTemplateColumns: "minmax(300px, 360px) 1fr", gap: "var(--space-5)" }}
+                className="responsive-grid dashboard-primary-grid"
+                style={{ gap: "var(--space-5)" }}
               >
                 <div className="card no-hover" style={{ minHeight: 650, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "var(--space-5)" }}>
                   <div>
@@ -364,7 +365,7 @@ export default function DashboardPage() {
         <div className="page-body">
 
           {/* Main Integrated Layout Grid (Reference-Inspired) */}
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 360px) 1fr", gap: "var(--space-5)", marginBottom: "var(--space-6)" }}>
+          <div className="responsive-grid dashboard-primary-grid" style={{ gap: "var(--space-5)", marginBottom: "var(--space-6)" }}>
             {/* Left Panel: Recovery and Strain Rings + Daily Telemetry */}
             <div
               className="hover-card"
@@ -636,7 +637,7 @@ export default function DashboardPage() {
           {/* COROS Annual Load Heatmap Panel */}
           <TrainingHeatmapPanel activities={data.activities} />
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "var(--space-5)" }}>
+          <div className="responsive-grid responsive-auto-grid" style={{ gap: "var(--space-5)" }}>
             {/* Recent Activities */}
             <div className="card" id="recent-activities">
               <div className="card-header">
@@ -655,7 +656,7 @@ export default function DashboardPage() {
                     <Link
                       key={activity.id}
                       href={`/activities/${activity.id}?sport=${encodeURIComponent(activity.sport)}`}
-                      className="activity-card-item"
+                      className="activity-card-item dashboard-activity-card"
                       style={{
                         display: "grid",
                         gridTemplateColumns: "76px minmax(0, 1fr) auto",
@@ -676,7 +677,7 @@ export default function DashboardPage() {
                       >
                         <SportIcon sport={activity.sport} />
                       </div>
-                      <div style={{ minWidth: 0 }}>
+                      <div className="dashboard-activity-content" style={{ minWidth: 0 }}>
                         <div style={{ minWidth: 0 }}>
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "14px", fontWeight: 750 }}>
                             {activity.title || activity.sport}
@@ -686,7 +687,7 @@ export default function DashboardPage() {
                           {activity.distance_m ? formatDistance(activity.distance_m) : sportVisual.label} · {activity.elapsed_time_s ? formatDuration(activity.elapsed_time_s) : "--"}
                         </span>
                       </div>
-                      <div style={{ textAlign: "right", color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums" }}>
+                      <div className="dashboard-activity-date" style={{ textAlign: "right", color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums" }}>
                         <strong style={{ display: "block", color: "var(--color-text-primary)", fontSize: "12px" }}>
                           {startedAt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
                         </strong>

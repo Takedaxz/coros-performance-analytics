@@ -53,7 +53,7 @@ def test_list_provider_models(monkeypatch) -> None:
     from src.ai import list_provider_models, gemini_client, openai_compat_client
 
     monkeypatch.setattr(openai_compat_client, "list_models", lambda: ["claude-sonnet-4.6"])
-    monkeypatch.setattr(gemini_client, "list_models", lambda: ["gemini-2.5-flash"])
+    monkeypatch.setattr(gemini_client, "list_models", lambda: ["gemini-3.5-flash"])
 
     # Ensure ready flags are true for testing
     from src import ai
@@ -62,8 +62,8 @@ def test_list_provider_models(monkeypatch) -> None:
 
     providers = list_provider_models()
     assert len(providers) == 2
-    assert providers[0]["id"] == "openai_compat"
-    assert providers[0]["models"][0]["id"] == "openai_compat:claude-sonnet-4.6"
-    assert providers[1]["id"] == "gemini"
-    assert providers[1]["models"][0]["id"] == "gemini:gemini-2.5-flash"
+    assert providers[0]["id"] == "gemini"
+    assert providers[0]["models"][0]["id"] == "gemini:gemini-3.5-flash"
+    assert providers[1]["id"] == "openai_compat"
+    assert providers[1]["models"][0]["id"] == "openai_compat:claude-sonnet-4.6"
 
