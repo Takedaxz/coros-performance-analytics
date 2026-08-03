@@ -1,6 +1,6 @@
 """COROS MCP OAuth routes.
 
-Handles the browser-based OAuth flow that lets the user authorize COROS Analytics
+Handles the browser-based OAuth flow that lets the user authorize COROS Core
 to call the COROS MCP server without using the Mobile API.
 
 Flow:
@@ -349,7 +349,7 @@ def _result_page(
 </head>
 <body>
   <main class="card">
-    <div class="brand"><span class="brand-mark"></span>COROS Analytics</div>
+    <div class="brand"><span class="brand-mark"></span>COROS Core</div>
     <div class="status" aria-hidden="true">
       <svg viewBox="0 0 24 24">{icon}</svg>
     </div>

@@ -61,7 +61,7 @@ async def dynamic_register_client(
     client_secret for confidential clients).
     """
     payload = {
-        "client_name": "COROS Analytics",
+        "client_name": "COROS Core",
         "redirect_uris": [redirect_uri],
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],

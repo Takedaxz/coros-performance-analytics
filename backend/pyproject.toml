@@ -1,5 +1,5 @@
 [project]
-name = "coros-analytics"
+name = "coros-core"
 version = "0.1.0"
 description = "Personal COROS health and performance analytics backend"
 requires-python = ">=3.12"

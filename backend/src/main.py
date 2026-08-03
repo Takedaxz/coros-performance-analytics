@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(
-    title="COROS Analytics",
+    title="COROS Core",
     description="Personal COROS health and performance analytics API",
     version="0.1.0",
     lifespan=lifespan,
