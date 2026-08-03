@@ -40,3 +40,30 @@ def test_stream_uses_selected_model(monkeypatch) -> None:
 
     assert list(openai_compat_client.ask_coach_stream("Question", "Context", model="model-b")) == []
     assert requested["model"] == "model-b"
+
+
+def test_resolve_model_prefixes() -> None:
+    from src.ai import resolve_model
+
+    assert resolve_model("openai_compat:claude-sonnet-4.6") == ("openai_compat", "claude-sonnet-4.6")
+    assert resolve_model("gemini:gemini-3.5-flash") == ("gemini", "gemini-3.5-flash")
+
+
+def test_list_provider_models(monkeypatch) -> None:
+    from src.ai import list_provider_models, gemini_client, openai_compat_client
+
+    monkeypatch.setattr(openai_compat_client, "list_models", lambda: ["claude-sonnet-4.6"])
+    monkeypatch.setattr(gemini_client, "list_models", lambda: ["gemini-2.5-flash"])
+
+    # Ensure ready flags are true for testing
+    from src import ai
+    monkeypatch.setattr(ai, "_openai_compat_ready", lambda: True)
+    monkeypatch.setattr(ai, "_gemini_ready", lambda: True)
+
+    providers = list_provider_models()
+    assert len(providers) == 2
+    assert providers[0]["id"] == "openai_compat"
+    assert providers[0]["models"][0]["id"] == "openai_compat:claude-sonnet-4.6"
+    assert providers[1]["id"] == "gemini"
+    assert providers[1]["models"][0]["id"] == "gemini:gemini-2.5-flash"
+

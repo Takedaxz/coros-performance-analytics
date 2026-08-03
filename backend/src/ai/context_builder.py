@@ -246,8 +246,11 @@ def _split_lines(
         if isinstance(source_lap_index, int) and source_lap_index != current_source_lap:
             current_source_lap = source_lap_index
             phase_split_index = 0
-            label, _ = _lap_label(useful_laps[source_lap_index])
-            lines.append(f"phase {source_lap_index + 1} {label}:")
+            if 0 <= source_lap_index < len(useful_laps):
+                label, _ = _lap_label(useful_laps[source_lap_index])
+                lines.append(f"phase {source_lap_index + 1} {label}:")
+            else:
+                lines.append(f"phase {source_lap_index + 1}:")
         phase_split_index += 1
         speed = split.get("avg_speed_mps")
         distance = split.get("distance_m")

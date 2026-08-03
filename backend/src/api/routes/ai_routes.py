@@ -18,6 +18,8 @@ from src.ai import (
     generate_postmortem,
     generate_postmortem_stream,
     list_models,
+    list_provider_models,
+    resolve_model,
 )
 from src.ai.context_builder import build_plan_context, build_training_context
 from src.config import get_settings
@@ -36,17 +38,19 @@ settings = get_settings()
 def _ai_enabled() -> bool:
     """Return True if at least one AI backend is fully configured."""
     st = get_settings()
-    compat_ready = st.openai_compat_enabled and bool(st.openai_compat_api_key)
-    gemini_ready = st.gemini_enabled and bool(st.gemini_api_key)
+    compat_ready = bool(st.openai_compat_api_key)
+    gemini_ready = bool(st.gemini_api_key)
     return compat_ready or gemini_ready
 
 
 def _active_model() -> str:
     """Return the model identifier for the currently active backend."""
     st = get_settings()
-    if st.openai_compat_enabled and st.openai_compat_api_key:
-        return st.openai_compat_model
-    return st.gemini_model
+    if bool(st.openai_compat_api_key):
+        return f"openai_compat:{st.openai_compat_model}"
+    if bool(st.gemini_api_key):
+        return f"gemini:{st.gemini_model}"
+    return st.openai_compat_model
 
 
 class ChatMessage(BaseModel):
@@ -472,8 +476,20 @@ class SessionUpdateRequest(BaseModel):
     model_name: str | None = None
 
 
+class ModelItem(BaseModel):
+    id: str
+    name: str
+
+
+class ProviderGroup(BaseModel):
+    id: str
+    name: str
+    models: list[ModelItem]
+
+
 class ModelsResponse(BaseModel):
     models: list[str]
+    providers: list[ProviderGroup] = []
     default_model: str
 
 
@@ -486,16 +502,23 @@ class MessageItem(BaseModel):
 
 async def _validated_model(model_name: str | None) -> str:
     model = model_name or _active_model()
-    if model not in await asyncio.to_thread(list_models):
-        raise HTTPException(status_code=400, detail="Model is not available from the AI provider.")
-    return model
+    available_models = await asyncio.to_thread(list_models)
+    if model in available_models:
+        return model
+    _, clean_model = resolve_model(model)
+    if any(m.endswith(f":{clean_model}") or m == clean_model for m in available_models):
+        return model
+    raise HTTPException(status_code=400, detail="Model is not available from the AI provider.")
 
 
 @router.get("/models", response_model=ModelsResponse)
 async def get_models() -> ModelsResponse:
     """Return models available from the active AI provider."""
+    provider_groups = await asyncio.to_thread(list_provider_models)
+    flat_models = await asyncio.to_thread(list_models)
     return ModelsResponse(
-        models=await asyncio.to_thread(list_models),
+        models=flat_models,
+        providers=[ProviderGroup(**g) for g in provider_groups],
         default_model=_active_model(),
     )
 

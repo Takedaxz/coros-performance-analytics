@@ -110,7 +110,7 @@ def distance_splits(
         splits.append(
             {
                 "lap_index": len(splits),
-                "source_lap_index": lap_end_index if lap_end_distances else None,
+                "source_lap_index": lap_end_index if lap_end_distances and lap_end_index < len(lap_end_distances) else None,
                 "elapsed_s": elapsed_s,
                 "distance_m": distance_m,
                 "avg_hr_bpm": round(sum(heart_rates) / len(heart_rates))

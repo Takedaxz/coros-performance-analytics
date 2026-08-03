@@ -135,3 +135,39 @@ def test_run_splits_restart_inside_each_workout_phase() -> None:
 
     assert phase_counts == [4, 5, 2]
     assert any("dist=410m" in line for line in lines)
+
+
+def test_split_lines_handles_source_lap_index_out_of_bounds() -> None:
+    start = datetime(2026, 7, 29, 15, 15)
+    activity = Activity(
+        id="act-bounds-test",
+        sport="run",
+        start_time=start,
+        elapsed_time_s=600,
+        distance_m=2_000,
+    )
+    laps = [
+        ActivityLap(
+            activity_id=activity.id,
+            lap_index=1,
+            start_time=start,
+            elapsed_s=300,
+            distance_m=1_500,
+        )
+    ]
+    records = [
+        ActivityRecord(
+            activity_id=activity.id,
+            timestamp=start + timedelta(seconds=dist / 3),
+            elapsed_s=dist / 3,
+            distance_m=float(dist),
+            speed_mps=3,
+            heart_rate_bpm=150,
+        )
+        for dist in range(0, 2_001, 10)
+    ]
+
+    # Must not raise IndexError
+    lines = _split_lines(activity, laps, records)
+    assert isinstance(lines, list)
+

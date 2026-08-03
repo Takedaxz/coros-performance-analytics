@@ -124,10 +124,20 @@ def retry_generator_with_backoff(
 
 
 def get_client() -> genai.Client | None:
-    """Get the initialized Gemini client if enabled."""
-    if not settings.gemini_enabled or not settings.gemini_api_key:
+    """Get the initialized Gemini client if API key is configured."""
+    if not settings.gemini_api_key:
         return None
     return genai.Client(api_key=settings.gemini_api_key)
+
+
+def list_models() -> list[str]:
+    """Return available direct Gemini models."""
+    return [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +211,12 @@ def _stream_with_model_fallback(
 # Public API
 # ---------------------------------------------------------------------------
 
-def ask_coach(question: str, context: str, history: list[dict] = None) -> str:
+def ask_coach(
+    question: str,
+    context: str,
+    history: list[dict] = None,
+    model: str | None = None,
+) -> str:
     """Ask the AI coach a question, given the user's data context and conversation history."""
     client = get_client()
     if not client:
@@ -216,10 +231,11 @@ def ask_coach(question: str, context: str, history: list[dict] = None) -> str:
         history_str += "\n"
 
     prompt = f"{context}\n\n{history_str}Athlete Question:\n{question}"
+    target_model = model or settings.gemini_model
 
-    def build_request(model: str) -> types.GenerateContentResponse:
+    def build_request(m: str) -> types.GenerateContentResponse:
         return client.models.generate_content(
-            model=model,
+            model=m,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=COACH_SYSTEM_PROMPT,
@@ -228,7 +244,7 @@ def ask_coach(question: str, context: str, history: list[dict] = None) -> str:
         )
 
     try:
-        response = _call_with_model_fallback(client, build_request, settings.gemini_model, "ask_coach")
+        response = _call_with_model_fallback(client, build_request, target_model, "ask_coach")
         return response.text or "No response from AI."
     except Exception:
         logger.exception("Error communicating with AI (ask_coach)")
@@ -239,6 +255,7 @@ def ask_coach_stream(
     question: str,
     context: str,
     history: list[dict[str, str]] | None = None,
+    model: str | None = None,
 ) -> Iterator[str]:
     """Stream questions to the AI coach."""
     client: genai.Client | None = get_client()
@@ -255,10 +272,11 @@ def ask_coach_stream(
         history_str += "\n"
 
     prompt: str = f"{context}\n\n{history_str}Athlete Question:\n{question}"
+    target_model: str = model or settings.gemini_model
 
-    def build_request(model: str) -> Iterator[types.GenerateContentResponse]:
+    def build_request(m: str) -> Iterator[types.GenerateContentResponse]:
         return client.models.generate_content_stream(
-            model=model,
+            model=m,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=COACH_SYSTEM_PROMPT,
@@ -267,7 +285,7 @@ def ask_coach_stream(
         )
 
     try:
-        for chunk in _stream_with_model_fallback(client, build_request, settings.gemini_model, "ask_coach_stream"):
+        for chunk in _stream_with_model_fallback(client, build_request, target_model, "ask_coach_stream"):
             if chunk.text:
                 yield chunk.text
     except Exception:
@@ -275,15 +293,17 @@ def ask_coach_stream(
         yield "Error communicating with AI."
 
 
-def generate_briefing(context: str) -> str:
+def generate_briefing(context: str, model: str | None = None) -> str:
     """Generate a weekly briefing."""
     client = get_client()
     if not client:
         return "AI features are disabled."
 
-    def build_request(model: str) -> types.GenerateContentResponse:
+    target_model = model or settings.gemini_model
+
+    def build_request(m: str) -> types.GenerateContentResponse:
         return client.models.generate_content(
-            model=model,
+            model=m,
             contents=context,
             config=types.GenerateContentConfig(
                 system_instruction=WEEKLY_BRIEFING_PROMPT,
@@ -292,23 +312,24 @@ def generate_briefing(context: str) -> str:
         )
 
     try:
-        response = _call_with_model_fallback(client, build_request, settings.gemini_model, "briefing")
+        response = _call_with_model_fallback(client, build_request, target_model, "briefing")
         return response.text or "Failed to generate briefing."
     except Exception as e:
         return f"Error: {str(e)}"
 
 
-def generate_postmortem(context: str, activity_context: str) -> str:
+def generate_postmortem(context: str, activity_context: str, model: str | None = None) -> str:
     """Generate a postmortem for a specific activity."""
     client = get_client()
     if not client:
         return "AI features are disabled."
 
     prompt = f"{context}\n\nActivity Details:\n{activity_context}"
+    target_model = model or settings.gemini_model
 
-    def build_request(model: str) -> types.GenerateContentResponse:
+    def build_request(m: str) -> types.GenerateContentResponse:
         return client.models.generate_content(
-            model=model,
+            model=m,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=POSTMORTEM_PROMPT,
@@ -317,13 +338,13 @@ def generate_postmortem(context: str, activity_context: str) -> str:
         )
 
     try:
-        response = _call_with_model_fallback(client, build_request, settings.gemini_model, "postmortem")
+        response = _call_with_model_fallback(client, build_request, target_model, "postmortem")
         return response.text or "Failed to generate postmortem."
     except Exception as e:
         return f"Error: {str(e)}"
 
 
-def generate_postmortem_stream(context: str, activity_context: str) -> Iterator[str]:
+def generate_postmortem_stream(context: str, activity_context: str, model: str | None = None) -> Iterator[str]:
     """Stream a postmortem analysis chunk by chunk."""
     client = get_client()
     if not client:
@@ -331,10 +352,11 @@ def generate_postmortem_stream(context: str, activity_context: str) -> Iterator[
         return
 
     prompt = f"{context}\n\nActivity Details:\n{activity_context}"
+    target_model = model or settings.gemini_model
 
     try:
         response_stream = client.models.generate_content_stream(
-            model=settings.gemini_model,
+            model=target_model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=POSTMORTEM_PROMPT,
@@ -346,5 +368,6 @@ def generate_postmortem_stream(context: str, activity_context: str) -> Iterator[
                 yield chunk.text
     except Exception as e:
         yield f"Error: {str(e)}"
+
 
 

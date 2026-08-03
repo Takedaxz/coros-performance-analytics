@@ -98,8 +98,15 @@ type Session = {
   updated_at: string;
 };
 
+type ProviderGroup = {
+  id: string;
+  name: string;
+  models: { id: string; name: string }[];
+};
+
 type ModelsResponse = {
   models: string[];
+  providers?: ProviderGroup[];
   default_model: string;
 };
 
@@ -148,6 +155,7 @@ export default function AiPage() {
   const [planDaysBack, setPlanDaysBack] = useState(7);
   const [planDaysForward, setPlanDaysForward] = useState(14);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [providers, setProviders] = useState<ProviderGroup[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -193,11 +201,13 @@ export default function AiPage() {
       .then((res) => res.ok ? res.json() : Promise.reject())
       .then((data: ModelsResponse) => {
         setAvailableModels(data.models);
+        setProviders(data.providers ?? []);
         setDefaultModel(data.default_model);
         setSelectedModel((current) => current || data.default_model);
       })
       .catch(() => {
         setAvailableModels([]);
+        setProviders([]);
       });
   }, []);
 
@@ -567,9 +577,23 @@ export default function AiPage() {
                 onChange={(event) => handleModelChange(event.target.value)}
                 disabled={isLoading || availableModels.length === 0}
               >
-                {availableModels.map((model) => (
-                  <option key={model} value={model}>{model}</option>
-                ))}
+                {providers.length > 0 ? (
+                  providers.map((provider) => (
+                    <optgroup key={provider.id} label={provider.name}>
+                      {provider.models.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))
+                ) : (
+                  availableModels.map((model) => (
+                    <option key={model} value={model}>
+                      {model.includes(":") ? model.split(":", 2)[1] : model}
+                    </option>
+                  ))
+                )}
               </select>
             </label>
             <div className="ai-link-context">
