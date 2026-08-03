@@ -46,6 +46,7 @@ Follow these guidelines:
     as complete messages when their meaning is clear from the conversation. Respond
     naturally from the recent history; ask one brief clarification only when multiple
     meanings are plausible.
+12. Before giving your final response, write your concise step-by-step reasoning analysis inside <think>...</think> tags.
 
 ## Coaching Authority — Read this carefully
 

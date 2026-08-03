@@ -113,10 +113,26 @@ def ask_coach_stream(
             messages=messages,  # type: ignore[arg-type]
             stream=True,
         )
+        in_thinking = False
         for chunk in stream:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+            if not chunk.choices:
+                continue
+            delta_obj = chunk.choices[0].delta
+            reasoning = getattr(delta_obj, "reasoning_content", None)
+            content = delta_obj.content
+
+            if reasoning:
+                if not in_thinking:
+                    yield "<think>"
+                    in_thinking = True
+                yield reasoning
+            elif content:
+                if in_thinking:
+                    yield "</think>\n"
+                    in_thinking = False
+                yield content
+        if in_thinking:
+            yield "</think>\n"
     except Exception:
         logger.exception("OpenAI-compat ask_coach_stream failed")
         yield "Error communicating with AI."

@@ -73,10 +73,10 @@ def retry_with_backoff(
             return func(*args, **kwargs)
         except Exception as e:
             kind = _classify_error(str(e))
-            if attempt == max_retries or kind == "permanent":
-                logger.error(
-                    "Gemini API call failed permanently: %s (attempt %d/%d)",
-                    e, attempt + 1, max_retries + 1,
+            if attempt == max_retries or kind in ("permanent", "rate_limit"):
+                logger.warning(
+                    "Gemini API call [%s] advancing to model fallback: %s",
+                    kind, e,
                 )
                 raise
             logger.warning(
@@ -109,10 +109,10 @@ def retry_generator_with_backoff(
             return
         except Exception as e:
             kind = _classify_error(str(e))
-            if attempt == max_retries or kind == "permanent":
-                logger.error(
-                    "Gemini API stream call failed permanently: %s (attempt %d/%d)",
-                    e, attempt + 1, max_retries + 1,
+            if attempt == max_retries or kind in ("permanent", "rate_limit"):
+                logger.warning(
+                    "Gemini API stream call [%s] advancing to model fallback: %s",
+                    kind, e,
                 )
                 raise
             logger.warning(
@@ -286,9 +286,32 @@ def ask_coach_stream(
         )
 
     try:
+        in_thinking = False
         for chunk in _stream_with_model_fallback(client, build_request, target_model, "ask_coach_stream"):
-            if chunk.text:
-                yield chunk.text
+            if not chunk.candidates or not chunk.candidates[0].content or not chunk.candidates[0].content.parts:
+                if chunk.text:
+                    if in_thinking:
+                        yield "</think>\n"
+                        in_thinking = False
+                    yield chunk.text
+                continue
+
+            for part in chunk.candidates[0].content.parts:
+                is_thought = getattr(part, "thought", False)
+                text_content = getattr(part, "text", "")
+                if is_thought and text_content:
+                    if not in_thinking:
+                        yield "<think>"
+                        in_thinking = True
+                    yield text_content
+                elif text_content:
+                    if in_thinking:
+                        yield "</think>\n"
+                        in_thinking = False
+                    yield text_content
+
+        if in_thinking:
+            yield "</think>\n"
     except Exception:
         logger.exception("Error communicating with AI (ask_coach_stream)")
         yield "Error communicating with AI."

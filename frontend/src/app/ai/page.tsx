@@ -89,6 +89,90 @@ function XIcon() {
   );
 }
 
+function parseThinkingAndAnswer(rawContent: string): { thinking: string | null; answer: string; isThinkingActive: boolean } {
+  if (!rawContent.includes("<think>")) {
+    return { thinking: null, answer: rawContent, isThinkingActive: false };
+  }
+
+  const thinkStartIndex = rawContent.indexOf("<think>");
+  const thinkEndIndex = rawContent.indexOf("</think>");
+
+  if (thinkEndIndex !== -1) {
+    const thinking = rawContent.slice(thinkStartIndex + 7, thinkEndIndex).trim();
+    const answer = (rawContent.slice(0, thinkStartIndex) + rawContent.slice(thinkEndIndex + 8)).trim();
+    return { thinking: thinking || null, answer, isThinkingActive: false };
+  }
+
+  const thinking = rawContent.slice(thinkStartIndex + 7).trim();
+  const answer = rawContent.slice(0, thinkStartIndex).trim();
+  return { thinking: thinking || null, answer, isThinkingActive: true };
+}
+
+function ThinkingAccordion({ thinking, isThinkingActive }: { thinking: string; isThinkingActive: boolean }) {
+  const [isOpen, setIsOpen] = useState(isThinkingActive);
+
+  useEffect(() => {
+    if (isThinkingActive) {
+      setIsOpen(true);
+    }
+  }, [isThinkingActive]);
+
+  return (
+    <details
+      className="ai-thinking-accordion"
+      open={isOpen}
+      onToggle={(e) => setIsOpen(e.currentTarget.open)}
+      style={{
+        marginBottom: "var(--space-3)",
+        border: "1px solid var(--border-color)",
+        borderRadius: "var(--radius-md)",
+        background: "var(--color-surface-secondary)",
+        overflow: "hidden",
+        fontSize: "var(--text-xs)",
+      }}
+    >
+      <summary
+        style={{
+          padding: "var(--space-2) var(--space-3)",
+          cursor: "pointer",
+          userSelect: "none",
+          fontWeight: 500,
+          color: "var(--color-text-muted)",
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--space-2)",
+        }}
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+          🧠 {isThinkingActive ? "Thinking..." : "Thought process"}
+        </span>
+        {isThinkingActive && (
+          <span className="chat-loading-dots" aria-label="Thinking in progress">
+            <span className="chat-loading-dot" />
+            <span className="chat-loading-dot" />
+            <span className="chat-loading-dot" />
+          </span>
+        )}
+      </summary>
+      <div
+        style={{
+          padding: "var(--space-3)",
+          borderTop: "1px solid var(--border-color)",
+          color: "var(--color-text-secondary)",
+          fontFamily: "var(--font-mono)",
+          fontSize: "11px",
+          lineHeight: "1.5",
+          whiteSpace: "pre-wrap",
+          maxHeight: "240px",
+          overflowY: "auto",
+        }}
+      >
+        {thinking}
+      </div>
+    </details>
+  );
+}
+
 type Session = {
   id: string;
   title: string;
@@ -840,12 +924,16 @@ export default function AiPage() {
                             </div>
                           );
                         }
+                        const { thinking, answer, isThinkingActive } = parseThinkingAndAnswer(msg.content);
                         return (
                           <div key={idx} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
                             <div className="avatar-sq ai" aria-label={msg.content === "" && isLoading ? "AI Coach is thinking" : "AI Coach"}>
                               <AiGlyph />
                             </div>
                             <div className="ai-text">
+                              {thinking && (
+                                <ThinkingAccordion thinking={thinking} isThinkingActive={isThinkingActive} />
+                              )}
                               {msg.content === "" && isLoading ? (
                                 <span className="ai-thinking-status" style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
                                   thinking
@@ -853,11 +941,11 @@ export default function AiPage() {
                                     <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
                                   </span>
                                 </span>
-                              ) : (
+                              ) : answer ? (
                                 <div className="markdown-body">
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content.replaceAll(" -- ", " — ")}</ReactMarkdown>
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{answer.replaceAll(" -- ", " — ")}</ReactMarkdown>
                                 </div>
-                              )}
+                              ) : null}
                               {isErrorMsg && (
                                 <div style={{ marginTop: "var(--space-3)" }}>
                                   <button id="retry-btn" className="btn btn-secondary btn-sm" onClick={handleRetry} disabled={isLoading} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>

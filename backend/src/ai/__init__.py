@@ -101,7 +101,15 @@ def ask_coach(
 ) -> str:
     provider, clean_model = resolve_model(model)
     if provider == "gemini":
-        return gemini_client.ask_coach(question, context, history, model=clean_model)
+        try:
+            res = gemini_client.ask_coach(question, context, history, model=clean_model)
+            if res and not res.startswith("Error"):
+                return res
+        except Exception as e:
+            logger.warning("Gemini ask_coach failed, attempting fallback to OKMD: %s", e)
+        if _openai_compat_ready():
+            return openai_compat_client.ask_coach(question, context, history)
+        return "Error communicating with AI."
     return openai_compat_client.ask_coach(question, context, history)
 
 
@@ -113,7 +121,20 @@ def ask_coach_stream(
 ) -> Iterator[str]:
     provider, clean_model = resolve_model(model)
     if provider == "gemini":
-        yield from gemini_client.ask_coach_stream(question, context, history, model=clean_model)
+        yielded_any = False
+        try:
+            for chunk in gemini_client.ask_coach_stream(question, context, history, model=clean_model):
+                if chunk and not chunk.startswith("Error communicating"):
+                    yielded_any = True
+                    yield chunk
+                elif not yielded_any and chunk.startswith("Error communicating"):
+                    raise RuntimeError(chunk)
+        except Exception as e:
+            logger.warning("Gemini ask_coach_stream failed (%s) — attempting fallback to OKMD", e)
+            if not yielded_any and _openai_compat_ready():
+                yield from openai_compat_client.ask_coach_stream(question, context, history)
+            elif not yielded_any:
+                yield "Error communicating with AI."
     else:
         yield from openai_compat_client.ask_coach_stream(question, context, history, model=clean_model)
 
