@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from bisect import bisect_left
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
@@ -241,6 +242,7 @@ from src.config import get_settings
 from src.db.credential_store import load_coros_credentials
 from src.sync.api_client import CorosApiClient, CorosApiClientError
 from src.sync.sync_manager import _detail_activity_laps
+from src.metrics.derived import EfficiencyMetrics, compute_efficiency
 from src.parsers.fit_parser import parse_fit_file
 
 logger = logging.getLogger(__name__)
@@ -250,6 +252,46 @@ RUNNING_DYNAMICS_READY_VERSIONS = {
     "0.3.0",
     RUNNING_DYNAMICS_PARSER_VERSION,
 }
+
+
+def _efficiency_from_records(records: Sequence[ActivityRecord]) -> EfficiencyMetrics:
+    """Compute efficiency from stored records.
+
+    Speed and HR must stay index-aligned because compute_efficiency zips them
+    positionally, so a sample is dropped unless both channels are present.
+    """
+    paired_samples = [
+        (record.speed_mps, record.heart_rate_bpm)
+        for record in records
+        if record.speed_mps is not None and record.heart_rate_bpm is not None
+    ]
+    return compute_efficiency(
+        [speed for speed, _ in paired_samples],
+        [hr for _, hr in paired_samples],
+    )
+
+
+async def _backfill_efficiency(db: AsyncSession, activity: Activity) -> None:
+    """Derive efficiency for activities whose records were stored before it was computed.
+
+    Runs once per activity: hr_quality_flag is set even when the data is too thin,
+    so a second view does not re-query the records.
+    """
+    if activity.efficiency_factor_app is not None or activity.hr_quality_flag is not None:
+        return
+    record_result = await db.execute(
+        select(ActivityRecord)
+        .where(ActivityRecord.activity_id == activity.id)
+        .order_by(ActivityRecord.timestamp)
+    )
+    records = list(record_result.scalars().all())
+    if not records:
+        return
+    efficiency = _efficiency_from_records(records)
+    activity.efficiency_factor_app = efficiency.efficiency_factor
+    activity.cardiac_drift_pct_app = efficiency.cardiac_drift_pct
+    activity.hr_quality_flag = efficiency.hr_quality_flag
+    await db.commit()
 
 
 async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -> None:
@@ -298,6 +340,7 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
         and not needs_step_labels
         and not needs_phase_refresh
     ) or not activity.label_id:
+        await _backfill_efficiency(db, activity)
         return
 
     settings = get_settings()
@@ -427,6 +470,12 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
             for r in fit_records
         ]
         db.add_all(db_records)
+
+        efficiency = _efficiency_from_records(db_records)
+        activity.efficiency_factor_app = efficiency.efficiency_factor
+        activity.cardiac_drift_pct_app = efficiency.cardiac_drift_pct
+        activity.hr_quality_flag = efficiency.hr_quality_flag
+
         activity.parser_version = RUNNING_DYNAMICS_PARSER_VERSION
         await db.commit()
         logger.info(f"on_demand_fit: populated {len(db_records)} records and {len(db_laps)} laps for activity {activity.id}")

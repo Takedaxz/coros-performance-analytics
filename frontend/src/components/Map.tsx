@@ -9,10 +9,14 @@ interface RoutePoint {
   lat: number;
   lng: number;
   elapsed_s?: number;
+  heart_rate_bpm?: number;
+  speed_mps?: number;
 }
 
 interface MapProps {
   points: RoutePoint[];
+  showTelemetryPopup?: boolean;
+  onExpand?: () => void;
 }
 
 type PlaybackSpeed = 25 | 50 | 100;
@@ -41,7 +45,15 @@ function formatReplayTime(seconds: number): string {
   return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
-export default function Map({ points }: MapProps) {
+function formatPacePopup(speedMps?: number): string {
+  if (!speedMps || speedMps <= 0) return "--";
+  const paceSecsPerKm = 1000 / speedMps;
+  const min = Math.floor(paceSecsPerKm / 60);
+  const sec = Math.round(paceSecsPerKm % 60);
+  return `${min}:${sec.toString().padStart(2, "0")} /km`;
+}
+
+export default function Map({ points, showTelemetryPopup = true, onExpand }: MapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const elapsedLabelRef = useRef<HTMLSpanElement>(null);
   const progressInputRef = useRef<HTMLInputElement>(null);
@@ -62,12 +74,24 @@ export default function Map({ points }: MapProps) {
   });
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<PlaybackSpeed>(25);
+  const showTelemetryPopupRef = useRef(showTelemetryPopup);
 
   const timedPoints = points.filter(isTimedPoint);
   const replayDuration = timedPoints.length > 1
     ? Math.max(0, timedPoints[timedPoints.length - 1].elapsed_s - timedPoints[0].elapsed_s)
     : 0;
   const canReplay = replayDuration > 0;
+
+  useEffect(() => {
+    showTelemetryPopupRef.current = showTelemetryPopup;
+    if (runnerMarkerRef.current) {
+      if (showTelemetryPopup) {
+        renderPlayback(playbackRef.current.elapsedSeconds);
+      } else {
+        runnerMarkerRef.current.closePopup();
+      }
+    }
+  }, [showTelemetryPopup]);
 
   const renderPlayback = (elapsedSeconds: number): void => {
     const replayPoints = timedPointsRef.current;
@@ -82,6 +106,30 @@ export default function Map({ points }: MapProps) {
 
     progressLineRef.current.setLatLngs([...completedPoints, currentPoint]);
     runnerMarkerRef.current.setLatLng(currentPoint);
+
+    if (showTelemetryPopupRef.current) {
+      const paceStr = formatPacePopup(position.speed_mps);
+      const hrStr = position.heart_rate_bpm != null ? `${position.heart_rate_bpm} bpm` : "--";
+      const popupHtml = `<div class="runner-telemetry-content"><div class="runner-telemetry-item"><span class="runner-telemetry-label">Pace</span><strong class="runner-telemetry-value">${paceStr}</strong></div><div class="runner-telemetry-item"><span class="runner-telemetry-label">HR</span><strong class="runner-telemetry-value">${hrStr}</strong></div></div>`;
+
+      if (!runnerMarkerRef.current.getPopup()) {
+        runnerMarkerRef.current.bindPopup(popupHtml, {
+          autoPan: false,
+          closeButton: false,
+          closeOnClick: false,
+          className: "runner-telemetry-popup",
+          offset: [0, -8],
+        });
+      } else {
+        runnerMarkerRef.current.setPopupContent(popupHtml);
+      }
+      if (!runnerMarkerRef.current.isPopupOpen()) {
+        runnerMarkerRef.current.openPopup();
+      }
+    } else {
+      runnerMarkerRef.current.closePopup();
+    }
+
     if (elapsedLabelRef.current) {
       elapsedLabelRef.current.textContent = `${formatReplayTime(elapsedSeconds)} / ${formatReplayTime(durationRef.current)}`;
     }
@@ -262,20 +310,33 @@ export default function Map({ points }: MapProps) {
 
       const startPoint = latLngs[0];
       const endPoint = latLngs[latLngs.length - 1];
+      const totalDurationStr = durationRef.current > 0 ? formatReplayTime(durationRef.current) : undefined;
+
+      const startPopupHtml = `<div class="route-marker-popup-content start-marker"><div class="route-marker-header"><span class="route-marker-dot start-dot"></span><strong>Start</strong></div><span class="route-marker-sub">0:00 elapsed</span></div>`;
+      const finishPopupHtml = `<div class="route-marker-popup-content finish-marker"><div class="route-marker-header"><span class="route-marker-dot finish-dot"></span><strong>Finish</strong></div>${totalDurationStr ? `<span class="route-marker-sub">${totalDurationStr} total</span>` : ""}</div>`;
+
       L.circleMarker(startPoint, {
         radius: 6,
         fillColor: "#2D9BF0",
         fillOpacity: 1,
         color: "#131A1E",
         weight: 2,
-      }).addTo(map).bindPopup("Start");
+      }).addTo(map).bindPopup(startPopupHtml, {
+        className: "route-marker-popup",
+        autoPan: false,
+        offset: [0, -6],
+      });
       L.circleMarker(endPoint, {
         radius: 6,
         fillColor: "#F0D348",
         fillOpacity: 1,
         color: "#131A1E",
         weight: 2,
-      }).addTo(map).bindPopup("Finish");
+      }).addTo(map).bindPopup(finishPopupHtml, {
+        className: "route-marker-popup",
+        autoPan: false,
+        offset: [0, -6],
+      });
 
       if (normalizedTimedPoints.length > 1) {
         const replayStart: [number, number] = [
@@ -299,7 +360,17 @@ export default function Map({ points }: MapProps) {
       }
 
       requestAnimationFrame(() => {
-        if (isMounted && mapInstanceRef.current) mapInstanceRef.current.invalidateSize();
+        if (isMounted && mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+          const zoomInBtn = container.querySelector(".leaflet-control-zoom-in");
+          const zoomOutBtn = container.querySelector(".leaflet-control-zoom-out");
+          if (zoomInBtn) {
+            zoomInBtn.innerHTML = `<svg viewBox="0 0 512 512" width="13" height="13" aria-hidden="true"><path d="M256 112v288M112 256h288" stroke="currentColor" stroke-width="44" stroke-linecap="round" fill="none"/></svg>`;
+          }
+          if (zoomOutBtn) {
+            zoomOutBtn.innerHTML = `<svg viewBox="0 0 512 512" width="13" height="13" aria-hidden="true"><path d="M112 256h288" stroke="currentColor" stroke-width="44" stroke-linecap="round" fill="none"/></svg>`;
+          }
+        }
       });
     });
 
@@ -325,18 +396,34 @@ export default function Map({ points }: MapProps) {
         ref={mapContainerRef}
         className="activity-route-map"
       />
-      <button
-        aria-label="Reset map view"
-        className="activity-route-reset"
-        onClick={resetMapView}
-        title="Show full route"
-        type="button"
-      >
-        <svg aria-hidden="true" viewBox="0 0 20 20">
-          <path d="M7 3H3v4M13 3h4v4M17 13v4h-4M7 17H3v-4" />
-          <circle cx="10" cy="10" r="2.25" />
-        </svg>
-      </button>
+      <div className="activity-route-map-actions">
+        <button
+          aria-label="Reset map view"
+          className="activity-route-reset"
+          onClick={resetMapView}
+          title="Show full route"
+          type="button"
+        >
+          <svg viewBox="0 0 512 512" aria-hidden="true">
+            <circle cx="256" cy="256" r="144" stroke="currentColor" strokeWidth="36" fill="none" />
+            <circle cx="256" cy="256" r="44" fill="currentColor" />
+            <path d="M256 64v48M256 400v48M64 256h48M400 256h48" stroke="currentColor" strokeWidth="36" strokeLinecap="round" />
+          </svg>
+        </button>
+        {onExpand && (
+          <button
+            aria-label="Expand map view"
+            className="activity-route-reset"
+            onClick={onExpand}
+            title="Expand to full screen"
+            type="button"
+          >
+            <svg viewBox="0 0 512 512" aria-hidden="true">
+              <path d="M384 224V128H288M384 128L272 240M128 288v96h96M128 384l112-112" stroke="currentColor" strokeWidth="36" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            </svg>
+          </button>
+        )}
+      </div>
       {canReplay && (
         <div className="route-replay-controls" aria-label="Route replay controls">
           <input
@@ -359,13 +446,12 @@ export default function Map({ points }: MapProps) {
               onClick={isPlaying ? pause : play}
             >
               {isPlaying ? (
-                <svg viewBox="0 0 20 20" aria-hidden="true">
-                  <rect x="5" y="4" width="3.5" height="12" rx="1" />
-                  <rect x="11.5" y="4" width="3.5" height="12" rx="1" />
+                <svg viewBox="0 0 512 512" aria-hidden="true">
+                  <path d="M144 96h80v320h-80zM288 96h80v320h-80z" fill="currentColor" />
                 </svg>
               ) : (
-                <svg viewBox="0 0 20 20" aria-hidden="true">
-                  <path d="M6 4.5 15 10 6 15.5Z" />
+                <svg viewBox="0 0 512 512" aria-hidden="true">
+                  <path d="M128 96v320l288-160z" fill="currentColor" />
                 </svg>
               )}
             </button>
@@ -376,9 +462,8 @@ export default function Map({ points }: MapProps) {
               title="Restart"
               onClick={restart}
             >
-              <svg viewBox="0 0 20 20" aria-hidden="true">
-                <path d="M4.5 6.5A7 7 0 1 1 3 12" />
-                <path d="M4.5 2.5v4h-4" />
+              <svg viewBox="0 0 512 512" aria-hidden="true">
+                <path d="M400 256A144 144 0 1 1 364 154M400 96v72h-72" stroke="currentColor" strokeWidth="36" strokeLinecap="round" strokeLinejoin="round" fill="none" />
               </svg>
             </button>
             <span ref={elapsedLabelRef} className="route-replay-time">

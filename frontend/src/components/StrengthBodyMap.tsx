@@ -104,7 +104,16 @@ export default function StrengthBodyMap({ exercises }: StrengthBodyMapProps) {
   });
 
   const maximumLoad = Math.max(1, ...Object.values(loads));
-  const activeAreas = areas.filter((area) => loads[area] > 0);
+  const activeAreas = areas
+    .filter((area) => loads[area] > 0)
+    .sort((a, b) => loads[b] - loads[a]);
+
+  const intensityColor = (area: BodyArea): string => {
+    const ratio = loads[area] / maximumLoad;
+    if (ratio >= 0.85) return `rgba(255, 77, 98, 0.9)`;
+    if (ratio >= 0.55) return `rgba(255, 140, 60, 0.85)`;
+    return `rgba(255, 196, 60, 0.8)`;
+  };
 
   return (
     <section className="strength-body-heatmap" tabIndex={0}>
@@ -115,8 +124,21 @@ export default function StrengthBodyMap({ exercises }: StrengthBodyMapProps) {
       </div>
       <div className="strength-body-hover-details">
         {activeAreas.length > 0 ? activeAreas.map((area) => (
-          <span key={area}>{AREA_NAMES[area]} · {loads[area]} sets</span>
-        )) : <span>COROS did not provide body-region segments.</span>}
+          <span key={area}>
+            <span
+              aria-hidden="true"
+              className="strength-dot"
+              style={{
+                background: intensityColor(area),
+                boxShadow: `0 0 5px ${intensityColor(area)}`,
+              }}
+            />
+            {AREA_NAMES[area]}
+            <em style={{ fontStyle: "normal", opacity: 0.55, fontWeight: 400, fontSize: 10 }}>
+              {loads[area]} set{loads[area] !== 1 ? "s" : ""}
+            </em>
+          </span>
+        )) : <span>No body-region data provided.</span>}
       </div>
     </section>
   );

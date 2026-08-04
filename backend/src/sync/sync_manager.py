@@ -30,6 +30,7 @@ from src.db.models import (
     User,
 )
 from src.sync.api_client import CorosApiClient, CorosApiClientError
+from src.metrics.anomaly import check_daily_health_anomalies
 from src.metrics.baselines import compute_rolling_baseline, compute_zscore
 from src.metrics.derived import compute_daily_strain, compute_recovery_score
 
@@ -1164,6 +1165,13 @@ async def _upsert_activities(
     return count
 
 
+def _history_upto(
+    series: dict[date_type, float], day: date_type, window: int = 30
+) -> list[float]:
+    """Values on or before `day`, chronologically ordered with the most recent last."""
+    return [value for date_key, value in sorted(series.items()) if date_key <= day][-window:]
+
+
 async def _upsert_daily_health(
     db: AsyncSession, user_id: str, daily: list[dict], hrv: list[dict]
 ) -> int:
@@ -1176,6 +1184,16 @@ async def _upsert_daily_health(
         hrv_value = _number(h.get("avgSleepHrv"))
         if dt and hrv_value is not None:
             hrv_by_date[dt] = hrv_value
+
+    # Build RHR baseline from the incoming daily data batch
+    rhr_by_date: dict[date_type, float] = {}
+    for entry in daily:
+        entry_date = _parse_date(entry.get("happenDay"))
+        entry_rhr = _number(entry.get("rhr"))
+        if entry_date and entry_rhr:
+            rhr_by_date[entry_date] = entry_rhr
+    valid_rhrs = list(rhr_by_date.values())
+    rhr_7d_sma = int(sum(valid_rhrs) / len(valid_rhrs)) if valid_rhrs else None
 
     for item in daily:
         dt = _parse_date(item.get("happenDay"))
@@ -1197,21 +1215,42 @@ async def _upsert_daily_health(
             if dt - timedelta(days=6) <= day <= dt
         ]
         hrv_7d_sma = round(sum(hrv_window) / len(hrv_window), 1) if hrv_window else None
-        
-        # Build RHR baseline from the incoming daily data batch
-        rhr_by_date = {
-            _parse_date(d.get("happenDay")): d.get("rhr") 
-            for d in daily if _parse_date(d.get("happenDay")) and d.get("rhr")
-        }
-        valid_rhrs = [val for val in rhr_by_date.values() if val is not None]
-        rhr_7d_sma = int(sum(valid_rhrs) / len(valid_rhrs)) if valid_rhrs else None
 
         # Calculate a true readiness score based on HRV, RHR, and Fatigue
         rhr_val = item.get("rhr")
         tired_rate = item.get("tiredRate", 0)
-        
+
+        # Individualized baselines drive the z-scores and anomaly flags the AI coach reads.
+        hrv_baseline = compute_rolling_baseline(_history_upto(hrv_by_date, dt))
+        rhr_baseline = compute_rolling_baseline(_history_upto(rhr_by_date, dt))
+        hrv_zscore = (
+            compute_zscore(hrv_val, hrv_baseline)
+            if hrv_val is not None and hrv_baseline is not None
+            else None
+        )
+        anomalies = check_daily_health_anomalies(
+            hrv=hrv_val,
+            rhr=rhr_val,
+            sleep_hours=None,
+            hrv_baseline_mean=hrv_baseline.mean if hrv_baseline else None,
+            hrv_baseline_std=hrv_baseline.std_dev if hrv_baseline else None,
+            rhr_baseline_mean=rhr_baseline.mean if rhr_baseline else None,
+            rhr_baseline_std=rhr_baseline.std_dev if rhr_baseline else None,
+            sleep_baseline_mean=None,
+            sleep_baseline_std=None,
+        )
+        anomaly_flags = {
+            result.metric_name: {
+                "severity": result.severity,
+                "direction": result.direction,
+                "zscore": result.zscore,
+                "message": result.message,
+            }
+            for result in anomalies
+        } or None
+
         readiness_score = 100.0
-        
+
         # 1. HRV component (+ points if higher than baseline, - if lower)
         if hrv_val and hrv_7d_sma and hrv_7d_sma > 0:
             hrv_ratio = hrv_val / hrv_7d_sma
@@ -1253,8 +1292,10 @@ async def _upsert_daily_health(
                 resting_hr_bpm=item.get("rhr"),
                 overnight_hrv_avg_ms=hrv_val,
                 hrv_7d_sma=hrv_7d_sma,
+                hrv_zscore=hrv_zscore,
                 readiness_score_app=readiness,
                 strain_score_app=strain,
+                anomaly_flags=anomaly_flags,
                 source_type=SourceType.API_OFFICIAL,
             )
             db.add(health)
@@ -1262,8 +1303,10 @@ async def _upsert_daily_health(
             health.resting_hr_bpm = item.get("rhr") or health.resting_hr_bpm
             health.overnight_hrv_avg_ms = hrv_val or health.overnight_hrv_avg_ms
             health.hrv_7d_sma = hrv_7d_sma or health.hrv_7d_sma
+            health.hrv_zscore = hrv_zscore
             health.readiness_score_app = readiness or health.readiness_score_app
             health.strain_score_app = strain
+            health.anomaly_flags = anomaly_flags
         count += 1
 
         # Sleep sessions are now handled in _upsert_sleep

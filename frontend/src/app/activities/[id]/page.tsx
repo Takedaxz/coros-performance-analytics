@@ -662,6 +662,24 @@ export default function ActivityDetailPage() {
   const [expandedTriathlonLeg, setExpandedTriathlonLeg] = useState<string | null>(null);
   const [selectedDynamicsMetrics, setSelectedDynamicsMetrics] =
     useState<RunningDynamicsKey[]>(["cadence"]);
+  const [showTelemetryPopup, setShowTelemetryPopup] = useState(true);
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMapExpanded(false);
+      }
+    };
+    if (isMapExpanded) {
+      window.addEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "hidden";
+    }
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "";
+    };
+  }, [isMapExpanded]);
   const sampledRoutePoints = useMemo(() => {
     const routePoints = records
       .filter((record) => record.position_lat != null && record.position_long != null)
@@ -669,6 +687,8 @@ export default function ActivityDetailPage() {
         lat: record.position_lat!,
         lng: record.position_long!,
         elapsed_s: record.elapsed_s,
+        heart_rate_bpm: record.heart_rate_bpm,
+        speed_mps: record.speed_mps,
       }));
     const routeSampleRate = Math.max(1, Math.floor(routePoints.length / 600));
     return routePoints.filter(
@@ -1202,7 +1222,7 @@ export default function ActivityDetailPage() {
             {hasHeartRateData && (
               heartRateZones.length > 0 ? (
                 <>
-                  <Line yAxisId="hr" type="linear" dataKey="hr" stroke="var(--color-text-muted)" strokeWidth={2} dot={false} name="Heart Rate" />
+                  <Line yAxisId="hr" type="linear" dataKey="hr" stroke="var(--color-text-muted)" strokeWidth={2} dot={false} name="Heart Rate" tooltipType="none" />
                   {heartRateZones.map((zone) => (
                     <Line key={zone.key} yAxisId="hr" type="linear" dataKey={`hr_${zone.key}`} stroke={zone.color} strokeWidth={2.5} dot={false} connectNulls={false} name={zone.label} />
                   ))}
@@ -1226,7 +1246,7 @@ export default function ActivityDetailPage() {
       <div className="activity-zone-charts" id="chart-pace-hr">
         <div className="activity-zone-overview-grid">
           {hasPaceData && (
-            <section className="card no-hover activity-zone-card">
+            <section className="card activity-zone-card">
               <div className="activity-zone-header">
                 <div>
                   <span className="card-title">Pace</span>
@@ -1251,7 +1271,7 @@ export default function ActivityDetailPage() {
                     {activity.avg_speed_mps != null && activity.avg_speed_mps > 0 && (
                       <ReferenceLine y={1000 / activity.avg_speed_mps} stroke="var(--color-status-critical)" strokeDasharray="4 4" />
                     )}
-                    {paceZones.length > 0 && <Line type="linear" dataKey="pace" stroke="var(--color-text-muted)" strokeWidth={2} dot={false} name="Pace" />}
+                    {paceZones.length > 0 && <Line type="linear" dataKey="pace" stroke="var(--color-text-muted)" strokeWidth={2} dot={false} name="Pace" tooltipType="none" />}
                     {paceZones.length ? paceZones.map((zone) => (
                       <Line key={zone.key} type="linear" dataKey={`pace_${zone.key}`} stroke={zone.color} strokeWidth={2.5} dot={false} connectNulls={false} name={zone.label} />
                     )) : (
@@ -1265,7 +1285,7 @@ export default function ActivityDetailPage() {
           )}
 
           {hasHeartRateData && (
-            <section className="card no-hover activity-zone-card">
+            <section className="card activity-zone-card">
               <div className="activity-zone-header">
                 <div>
                   <span className="card-title">Heart Rate</span>
@@ -1286,7 +1306,7 @@ export default function ActivityDetailPage() {
                     {activity.avg_hr_bpm != null && (
                       <ReferenceLine y={activity.avg_hr_bpm} stroke="var(--color-status-critical)" strokeDasharray="4 4" />
                     )}
-                    {heartRateZones.length > 0 && <Line type="linear" dataKey="hr" stroke="var(--color-text-muted)" strokeWidth={2} dot={false} name="Heart Rate" />}
+                    {heartRateZones.length > 0 && <Line type="linear" dataKey="hr" stroke="var(--color-text-muted)" strokeWidth={2} dot={false} name="Heart Rate" tooltipType="none" />}
                     {heartRateZones.length ? heartRateZones.map((zone) => (
                       <Line key={zone.key} type="linear" dataKey={`hr_${zone.key}`} stroke={zone.color} strokeWidth={2.5} dot={false} connectNulls={false} name={zone.label} />
                     )) : (
@@ -1301,7 +1321,7 @@ export default function ActivityDetailPage() {
         </div>
 
         {visibleDynamicsMetrics.length > 0 && (
-          <section className="card no-hover activity-zone-card running-dynamics-card">
+          <section className="card activity-zone-card running-dynamics-card">
             <div className="activity-zone-header">
               <div>
                 <span className="card-title">Running Dynamics</span>
@@ -1418,7 +1438,7 @@ export default function ActivityDetailPage() {
           )}
 
           {strength && (
-            <div className="card no-hover breakdown-card" style={{ marginTop: "var(--space-6)", marginBottom: "var(--space-6)" }}>
+            <div className="card breakdown-card" style={{ marginTop: "var(--space-6)", marginBottom: "var(--space-6)" }}>
               <BreakdownHeader
                 title="Strength Breakdown"
                 description="Exercise volume and set execution"
@@ -1484,9 +1504,69 @@ export default function ActivityDetailPage() {
                 <div className="card" id="chart-route" style={{ display: "flex", flexDirection: "column" }}>
                   <div className="card-header">
                     <span className="card-title">GPS Route Overlay</span>
+                    <button
+                      type="button"
+                      className={`route-replay-button route-replay-toggle-popup${showTelemetryPopup ? " is-active" : ""}`}
+                      aria-pressed={showTelemetryPopup}
+                      title={showTelemetryPopup ? "Hide Pace & HR popup on green marker" : "Show Pace & HR popup on green marker"}
+                      onClick={() => setShowTelemetryPopup((prev) => !prev)}
+                    >
+                      <svg viewBox="0 0 512 512" aria-hidden="true" style={{ width: 13, height: 13, marginRight: 4 }}>
+                        <path d="M464 256H368l-56 160L200 96l-56 160H48" stroke="currentColor" strokeWidth="36" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                      </svg>
+                      Pace &amp; HR
+                    </button>
                   </div>
                   <div style={{ flex: 1, position: "relative", minHeight: "260px", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-                    <Map key={activityId} points={sampledRoutePoints} />
+                    <Map key={activityId} points={sampledRoutePoints} showTelemetryPopup={showTelemetryPopup} onExpand={() => setIsMapExpanded(true)} />
+                  </div>
+                </div>
+              )}
+
+              {isMapExpanded && (
+                <div
+                  className="map-expanded-modal-backdrop"
+                  onClick={() => setIsMapExpanded(false)}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Expanded GPS Route Map"
+                >
+                  <div
+                    className="map-expanded-modal-container"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="map-expanded-modal-header">
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <span className="card-title" style={{ fontSize: "13px" }}>GPS Route Overlay</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <button
+                          type="button"
+                          className={`route-replay-button route-replay-toggle-popup${showTelemetryPopup ? " is-active" : ""}`}
+                          aria-pressed={showTelemetryPopup}
+                          onClick={() => setShowTelemetryPopup((prev) => !prev)}
+                        >
+                          <svg viewBox="0 0 512 512" aria-hidden="true" style={{ width: 13, height: 13, marginRight: 4 }}>
+                            <path d="M464 256H368l-56 160L200 96l-56 160H48" stroke="currentColor" strokeWidth="36" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                          </svg>
+                          Pace &amp; HR
+                        </button>
+                        <button
+                          type="button"
+                          className="route-replay-button route-replay-icon-button"
+                          aria-label="Close expanded map view"
+                          title="Close (Esc)"
+                          onClick={() => setIsMapExpanded(false)}
+                        >
+                          <svg viewBox="0 0 512 512" aria-hidden="true" style={{ width: 14, height: 14 }}>
+                            <path d="M400 112L112 400M112 112l288 288" stroke="currentColor" strokeWidth="40" strokeLinecap="round" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="map-expanded-modal-body">
+                      <Map key={`${activityId}-expanded`} points={sampledRoutePoints} showTelemetryPopup={showTelemetryPopup} />
+                    </div>
                   </div>
                 </div>
               )}
@@ -1515,7 +1595,7 @@ export default function ActivityDetailPage() {
 
           {/* Laps Table */}
           {isTriathlon && (
-            <div className="card no-hover breakdown-card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
+            <div className="card breakdown-card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
               <BreakdownHeader
                 title="Triathlon Breakdown"
                 description="Leg performance with transition timing"
@@ -1645,7 +1725,7 @@ export default function ActivityDetailPage() {
           )}
 
           {activity.sport !== "strength" && !isTriathlon && activity.laps.length > 0 && (
-            <div className="card no-hover breakdown-card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
+            <div className="card breakdown-card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
               <BreakdownHeader
                 title={isHyrox ? "Station Breakdown" : "Split Breakdown"}
                 description={
@@ -1864,7 +1944,7 @@ export default function ActivityDetailPage() {
           )}
 
           {/* AI Performance Coach Analysis */}
-          <div className="card no-hover ai-analysis-card" id="ai-analysis-card">
+          <div className="card ai-analysis-card" id="ai-analysis-card">
             <div className="ai-analysis-header">
               <div className="ai-analysis-heading">
                 <span className="ai-analysis-icon">

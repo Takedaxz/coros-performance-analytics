@@ -2,12 +2,16 @@ export interface TimedRoutePoint {
   lat: number;
   lng: number;
   elapsed_s: number;
+  heart_rate_bpm?: number;
+  speed_mps?: number;
 }
 
 export interface RoutePosition {
   lat: number;
   lng: number;
   segmentIndex: number;
+  heart_rate_bpm?: number;
+  speed_mps?: number;
 }
 
 export function routePositionAt(
@@ -31,9 +35,20 @@ export function routePositionAt(
   const segmentDuration = end.elapsed_s - start.elapsed_s;
   const progress = segmentDuration > 0 ? (elapsed - start.elapsed_s) / segmentDuration : 1;
 
+  const hr = start.heart_rate_bpm != null && end.heart_rate_bpm != null
+    ? Math.round(start.heart_rate_bpm + (end.heart_rate_bpm - start.heart_rate_bpm) * progress)
+    : start.heart_rate_bpm ?? end.heart_rate_bpm;
+
+  const speed = start.speed_mps != null && end.speed_mps != null
+    ? start.speed_mps + (end.speed_mps - start.speed_mps) * progress
+    : start.speed_mps ?? end.speed_mps;
+
   return {
     lat: start.lat + (end.lat - start.lat) * progress,
     lng: start.lng + (end.lng - start.lng) * progress,
     segmentIndex,
+    heart_rate_bpm: hr,
+    speed_mps: speed,
   };
 }
+
