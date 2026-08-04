@@ -6,6 +6,7 @@ import PageTitle from "@/components/PageTitle";
 import NumberStepper from "@/components/NumberStepper";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { WaveThinkingText } from "@/components/WaveThinkingText";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -144,15 +145,8 @@ function ThinkingAccordion({ thinking, isThinkingActive }: { thinking: string; i
         }}
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-          🧠 {isThinkingActive ? "Thinking..." : "Thought process"}
+          🧠 {isThinkingActive ? <WaveThinkingText text="Thinking" /> : "Thought process"}
         </span>
-        {isThinkingActive && (
-          <span className="chat-loading-dots" aria-label="Thinking in progress">
-            <span className="chat-loading-dot" />
-            <span className="chat-loading-dot" />
-            <span className="chat-loading-dot" />
-          </span>
-        )}
       </summary>
       <div
         style={{
@@ -935,12 +929,7 @@ export default function AiPage() {
                                 <ThinkingAccordion thinking={thinking} isThinkingActive={isThinkingActive} />
                               )}
                               {msg.content === "" && isLoading ? (
-                                <span className="ai-thinking-status" style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
-                                  thinking
-                                  <span className="chat-loading-dots" aria-label="Loading">
-                                    <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
-                                  </span>
-                                </span>
+                                <WaveThinkingText text="thinking" />
                               ) : answer ? (
                                 <div className="markdown-body">
                                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{answer.replaceAll(" -- ", " — ")}</ReactMarkdown>
@@ -962,12 +951,7 @@ export default function AiPage() {
                         <div className="msg-row ai-row msg-enter">
                           <div className="avatar-sq ai" aria-label="AI Coach is thinking"><AiGlyph /></div>
                           <div className="ai-text">
-                            <span className="ai-thinking-status" style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
-                              thinking
-                              <span className="chat-loading-dots" aria-label="Loading">
-                                <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
-                              </span>
-                            </span>
+                            <WaveThinkingText text="thinking" />
                           </div>
                         </div>
                       )}

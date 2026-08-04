@@ -20,6 +20,7 @@ import StrengthBodyMap from "@/components/StrengthBodyMap";
 import { getSportVisual, SportIcon } from "@/components/SportActivityIcon";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { WaveThinkingText } from "@/components/WaveThinkingText";
 
 const Map = dynamic(() => import("@/components/Map"), { ssr: false });
 
@@ -1865,12 +1866,7 @@ export default function ActivityDetailPage() {
               <div className="msg-row ai-row ai-analysis-thinking">
                 <div className="avatar-sq ai" aria-label="AI Coach is analyzing"><AiGlyph /></div>
                 <div className="ai-text">
-                  <span className="ai-thinking-status" style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", paddingTop: "2px" }}>
-                    evaluating splits & physiological recovery
-                    <span className="chat-loading-dots" aria-label="Loading">
-                      <span className="chat-loading-dot" /><span className="chat-loading-dot" /><span className="chat-loading-dot" />
-                    </span>
-                  </span>
+                  <WaveThinkingText text="evaluating splits & physiological recovery" />
                 </div>
               </div>
             )}
