@@ -2,42 +2,116 @@ import type { ReactNode } from "react";
 
 export type SportVisual = { label: string; background: string; color: string };
 
-export function getSportVisual(sport: string): SportVisual {
-  const visuals: Record<string, SportVisual> = {
-    run: { label: "Run", background: "rgba(33, 230, 165, 0.14)", color: "var(--color-accent-primary)" },
-    trail_run: { label: "Trail Run", background: "rgba(33, 230, 165, 0.14)", color: "var(--color-accent-primary)" },
-    ride: { label: "Ride", background: "rgba(240, 211, 72, 0.14)", color: "var(--color-status-moderate)" },
-    swim: { label: "Swim", background: "rgba(45, 155, 240, 0.14)", color: "var(--color-accent-exertion)" },
-    hike: { label: "Hike", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
-    walk: { label: "Walk", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
-    strength: { label: "Strength", background: "rgba(255, 77, 98, 0.14)", color: "var(--color-status-critical)" },
-  };
+// Icons8 CDN icon URLs — unified mapping for all sport types
+export const SPORT_ICON_URLS: Record<string, string> = {
+  run: "https://img.icons8.com/liquid-glass/96/running.png",
+  treadmill: "https://img.icons8.com/?size=100&id=LOSlMRj2tj2O&format=png&color=000000",
+  trail_run: "https://img.icons8.com/liquid-glass/96/trekking.png",
+  ride: "https://img.icons8.com/liquid-glass/96/bicycle.png",
+  swim: "https://img.icons8.com/liquid-glass/96/swimming.png",
+  hike: "https://img.icons8.com/liquid-glass/96/mountain.png",
+  walk: "https://img.icons8.com/liquid-glass/96/walking.png",
+  strength: "https://img.icons8.com/liquid-glass/96/dumbbell.png",
+  hyrox: "https://img.icons8.com/?size=100&id=aZCcxa9TqPy7&format=png&color=000000",
+  cardio: "https://img.icons8.com/?size=100&id=aZCcxa9TqPy7&format=png&color=000000",
+  multisport: "https://img.icons8.com/?size=100&id=aZCcxa9TqPy7&format=png&color=000000",
+  yoga: "https://img.icons8.com/liquid-glass/96/yoga.png",
+  other: "https://img.icons8.com/liquid-glass/96/activity.png",
+};
 
-  return visuals[sport] || {
-    label: sport.replace(/_/g, " "),
+const SPORT_VISUALS: Record<string, SportVisual> = {
+  run: { label: "Run", background: "rgba(33, 230, 165, 0.14)", color: "var(--color-accent-primary)" },
+  treadmill: { label: "Treadmill", background: "rgba(33, 230, 165, 0.14)", color: "var(--color-accent-primary)" },
+  trail_run: { label: "Trail Run", background: "rgba(120, 200, 80, 0.14)", color: "#6dbf43" },
+  ride: { label: "Ride", background: "rgba(240, 211, 72, 0.14)", color: "var(--color-status-moderate)" },
+  swim: { label: "Swim", background: "rgba(45, 155, 240, 0.14)", color: "var(--color-accent-exertion)" },
+  hike: { label: "Hike", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
+  walk: { label: "Walk", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
+  strength: { label: "Strength", background: "rgba(255, 77, 98, 0.14)", color: "var(--color-status-critical)" },
+  hyrox: { label: "Hyrox / Hybrid", background: "rgba(147, 100, 240, 0.14)", color: "#9364f0" },
+  cardio: { label: "Cardio", background: "rgba(240, 140, 60, 0.14)", color: "#f08c3c" },
+  yoga: { label: "Yoga", background: "rgba(240, 150, 200, 0.14)", color: "#e06cba" },
+  multisport: { label: "Multisport", background: "rgba(147, 100, 240, 0.14)", color: "#9364f0" },
+  other: { label: "Activity", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
+};
+
+/**
+ * Resolves a normalized sport key from activity sport string, title, or subsport code.
+ */
+export function resolveSportKey(sport?: string, title?: string, subsport?: string): string {
+  const s = (sport || "").toLowerCase();
+  const t = (title || "").toLowerCase();
+  const sub = (subsport || "").toString();
+
+  // Keyword / Subsport detections
+  if (t.includes("treadmill") || t.includes("indoor run") || sub === "101") return "treadmill";
+  if (t.includes("hyrox") || t.includes("hybrid") || sub === "1200") return "hyrox";
+  if (t.includes("yoga") || sub === "904" || sub === "905") return "yoga";
+  if (t.includes("cardio") || t.includes("skierg") || sub === "400" || sub === "701") return "cardio";
+  if (t.includes("hike") || sub === "104" || sub === "1000") return "hike";
+  if (t.includes("trail") || sub === "102") return "trail_run";
+
+  // Enum sport mappings
+  if (s === "run" || s === "running") return "run";
+  if (s === "treadmill") return "treadmill";
+  if (s === "trail_run") return "trail_run";
+  if (s === "ride" || s === "cycling" || s === "bike") return "ride";
+  if (s === "swim" || s === "swimming") return "swim";
+  if (s === "walk" || s === "walking") return "walk";
+  if (s === "hike" || s === "hiking") return "hike";
+  if (s === "strength" || s === "gym") return "strength";
+  if (s === "multisport") return "hyrox";
+
+  return s || "other";
+}
+
+export function getSportVisual(sport: string, title?: string, subsport?: string): SportVisual {
+  const key = resolveSportKey(sport, title, subsport);
+  return SPORT_VISUALS[key] || {
+    label: (title || sport || "Activity").replace(/_/g, " "),
     background: "rgba(165, 175, 180, 0.14)",
     color: "var(--color-text-secondary)",
   };
 }
 
-export function SportIcon({ sport }: { sport: string }): ReactNode {
-  const svgProps = {
-    width: 24,
-    height: 24,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 2,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    "aria-hidden": true,
-  };
+export function SportIcon({
+  sport,
+  title,
+  subsport,
+  size = 24,
+  color,
+}: {
+  sport: string;
+  title?: string;
+  subsport?: string;
+  size?: number;
+  color?: string;
+}): ReactNode {
+  const visual = getSportVisual(sport, title, subsport);
+  const iconColor = color || visual.color;
+  const key = resolveSportKey(sport, title, subsport);
+  const iconUrl = SPORT_ICON_URLS[key] ?? SPORT_ICON_URLS.other;
 
-  if (sport === "ride") return <svg {...svgProps}><circle cx="18.5" cy="17.5" r="3.5" /><circle cx="5.5" cy="17.5" r="3.5" /><circle cx="15" cy="5" r="1" /><path d="M12 17.5V14l-3-3 4-3 2 3h4" /><path d="M5.5 17.5 9 7h3" /></svg>;
-  if (sport === "swim") return <svg {...svgProps}><path d="M2 18c.6.4 1.2.8 2.5.8 2.5 0 2.5-1.6 5-1.6s2.5 1.6 5 1.6 2.5-1.6 5-1.6c1.3 0 1.9.4 2.5.8" /><path d="M2 22c.6.4 1.2.8 2.5.8 2.5 0 2.5-1.6 5-1.6s2.5 1.6 5 1.6 2.5-1.6 5-1.6c1.3 0 1.9.4 2.5.8" /><circle cx="7" cy="8" r="2" /><path d="m9 12 3-2 3 3" /></svg>;
-  if (sport === "strength") return <svg {...svgProps}><path d="m6.5 6.5 11 11" /><path d="m21 21-1.5-1.5" /><path d="m3 3 1.5 1.5" /><path d="m18 22 4-4" /><path d="m2 6 4-4" /><path d="m3 10 7-7" /><path d="m14 21 7-7" /></svg>;
-  if (sport === "hike" || sport === "trail_run") return <svg {...svgProps}><path d="m3 20 5-8 4 5 3-4 6 7" /><path d="m15 7 1.5 1.5L18 7" /><circle cx="12" cy="6" r="2" /></svg>;
-  if (sport === "walk") return <svg {...svgProps}><circle cx="12" cy="4" r="2" /><path d="m10 22 1-8-4-3 2-4 3 2 3-2 2 4-4 3 1 8" /></svg>;
-  if (sport === "run") return <svg {...svgProps}><circle cx="15" cy="5" r="2" /><path d="m13 9-2 4 3 2-2 5" /><path d="m13 9 3 3 4 1" /><path d="m11 13-4 4" /></svg>;
-  return <svg {...svgProps}><path d="M3 12h4l2-6 4 12 2-6h6" /></svg>;
+  return (
+    <span
+      className="sport-activity-icon"
+      aria-label={sport || title || "sport icon"}
+      style={{
+        width: `${size}px`,
+        height: `${size}px`,
+        display: "inline-block",
+        verticalAlign: "middle",
+        backgroundColor: iconColor,
+        WebkitMaskImage: `url("${iconUrl}")`,
+        maskImage: `url("${iconUrl}")`,
+        WebkitMaskSize: "contain",
+        maskSize: "contain",
+        WebkitMaskPosition: "center",
+        maskPosition: "center",
+        WebkitMaskRepeat: "no-repeat",
+        maskRepeat: "no-repeat",
+        flexShrink: 0,
+      }}
+    />
+  );
 }

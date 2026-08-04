@@ -270,10 +270,14 @@ export default function DashboardPage() {
       ]
     : [];
 
-  // Build rolling 7-day chronological bar chart data ending TODAY
+  // Build current week bar chart data starting from MONDAY (Mon - Sun)
   const today = new Date();
+  const currentDayOfWeek = today.getDay(); // 0: Sun, 1: Mon, ..., 6: Sat
+  const distanceToMonday = (currentDayOfWeek + 6) % 7;
+  const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - distanceToMonday);
+
   const rawWeeklyActivityData = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (6 - i));
+    const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, "0");
     const dayNum = String(d.getDate()).padStart(2, "0");
@@ -291,7 +295,7 @@ export default function DashboardPage() {
       distance: distanceKm,
       duration: durationHours,
       load,
-      isToday: i === 6,
+      isToday: d.toDateString() === today.toDateString(),
     };
   });
 
@@ -651,7 +655,7 @@ export default function DashboardPage() {
                   </p>
                 ) : data.activities.slice(0, 5).map((activity) => {
                   const startedAt = new Date(activity.start_time);
-                  const sportVisual = getSportVisual(activity.sport);
+                  const sportVisual = getSportVisual(activity.sport, activity.title, activity.subsport);
                   return (
                     <Link
                       key={activity.id}
@@ -675,7 +679,7 @@ export default function DashboardPage() {
                         aria-label={sportVisual.label}
                         style={{ height: "56px", borderRadius: "14px", display: "flex", justifyContent: "center", alignItems: "center", background: sportVisual.background, color: sportVisual.color }}
                       >
-                        <SportIcon sport={activity.sport} />
+                        <SportIcon sport={activity.sport} title={activity.title} subsport={activity.subsport} />
                       </div>
                       <div className="dashboard-activity-content" style={{ minWidth: 0 }}>
                         <div style={{ minWidth: 0 }}>

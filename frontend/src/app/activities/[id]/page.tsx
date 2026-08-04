@@ -916,22 +916,22 @@ export default function ActivityDetailPage() {
   }
 
   const isRun = ["run", "trail_run"].includes(activity.sport);
-  const heartRateZones = activity.threshold_hr_bpm
-    ? buildHeartRateZones(activity.threshold_hr_bpm)
-    : [];
-  const paceZones = isRun && activity.threshold_pace_s_per_km
-    ? buildPaceZones(activity.threshold_pace_s_per_km)
-    : [];
   const heartRateValues = records.flatMap((record) =>
     record.heart_rate_bpm != null ? [record.heart_rate_bpm] : [],
   );
+  const maxHeartRate = activity.max_hr_bpm
+    ?? (heartRateValues.length ? Math.max(...heartRateValues) : undefined);
+  const DEFAULT_LTHR = 173;
+  const effectiveThresholdHr = activity.threshold_hr_bpm ?? DEFAULT_LTHR;
+  const heartRateZones = buildHeartRateZones(effectiveThresholdHr);
+  const paceZones = isRun && activity.threshold_pace_s_per_km
+    ? buildPaceZones(activity.threshold_pace_s_per_km)
+    : [];
   const paceValues = records.flatMap((record) =>
     record.speed_mps != null && record.speed_mps > 0
       ? [1000 / record.speed_mps]
       : [],
   );
-  const maxHeartRate = activity.max_hr_bpm
-    ?? (heartRateValues.length ? Math.max(...heartRateValues) : undefined);
   const heartRateZoneSummary = summarizeTrainingZones(heartRateValues, heartRateZones);
   const paceZoneSummary = summarizeTrainingZones(paceValues, paceZones);
   const paceChartCeiling = paceZones[0]?.min
@@ -1104,7 +1104,7 @@ export default function ActivityDetailPage() {
         return [["Bike speed", (speed * 3.6).toFixed(1), "km/h"] as ActivityMetric];
       })
     : [];
-  const sportVisual = getSportVisual(activity.sport);
+  const sportVisual = getSportVisual(activity.sport, activity.title, activity.subsport);
   const activityTime = new Date(activity.start_time).toLocaleString(undefined, {
     weekday: "short",
     month: "short",
@@ -1173,23 +1173,51 @@ export default function ActivityDetailPage() {
           : []),
       ];
   const combinedTelemetryCard = hasTelemetryData && (
-    <div className={`card${strength ? "" : " telemetry-card-standalone"}`} id="chart-hr-speed" style={{ marginBottom: strength ? 0 : "var(--space-6)" }}>
-      <div className="card-header">
-        <span className="card-title">Heart Rate & Speed Telemetry</span>
+    <div className={`card activity-zone-card${strength ? "" : " telemetry-card-standalone"}`} id="chart-hr-speed" style={{ marginBottom: strength ? 0 : "var(--space-6)" }}>
+      <div className="activity-zone-header">
+        <div>
+          <span className="card-title">Heart Rate & Speed Telemetry</span>
+          {hasHeartRateData && <span className="activity-zone-unit" style={{ marginLeft: "8px" }}>bpm</span>}
+          {hasSpeedData && <span className="activity-zone-unit" style={{ marginLeft: "6px", color: "var(--color-text-primary)", fontWeight: 700 }}>• km/h</span>}
+        </div>
+        <div className="activity-zone-stats">
+          {hasHeartRateData && maxHeartRate != null && <span>Max HR <strong className="mono">{maxHeartRate}</strong></span>}
+          {hasHeartRateData && activity.avg_hr_bpm != null && <span>Avg HR <strong className="mono">{activity.avg_hr_bpm}</strong></span>}
+          {hasSpeedData && activity.avg_speed_mps != null && activity.avg_speed_mps > 0 && (
+            <span>Avg Speed <strong className="mono" style={{ color: "var(--color-text-primary)" }}>{(activity.avg_speed_mps * 3.6).toFixed(1)} km/h</strong></span>
+          )}
+        </div>
       </div>
       <div className="telemetry-chart">
         <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 360 }}>
-          <LineChart data={chartData} margin={{ top: 16, right: 8, bottom: 16, left: 8 }}>
+          <LineChart data={chartData} margin={{ top: 16, right: 12, bottom: 16, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
             <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
             {hasHeartRateData && <YAxis yAxisId="hr" width={72} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} bpm`} axisLine={false} domain={["dataMin - 10", "dataMax + 10"]} />}
-            {hasSpeedData && <YAxis yAxisId="speed" orientation="right" width={64} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} km/h`} axisLine={false} />}
+            {hasSpeedData && <YAxis yAxisId="speed" orientation="right" width={68} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-primary)", fontSize: 11, fontWeight: 700 }} tickFormatter={(value: number) => `${Math.round(value)} km/h`} axisLine={false} />}
             <Tooltip labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`} />
-            {hasHeartRateData && <Line yAxisId="hr" type="monotone" dataKey="hr" stroke="var(--color-status-critical)" strokeWidth={2} dot={false} name="Heart Rate (bpm)" />}
-            {hasSpeedData && <Line yAxisId="speed" type="monotone" dataKey="speed" stroke="var(--color-accent-primary)" strokeWidth={2} dot={false} name="Speed (km/h)" />}
+            {hasHeartRateData && activity.avg_hr_bpm != null && (
+              <ReferenceLine yAxisId="hr" y={activity.avg_hr_bpm} stroke="var(--color-status-critical)" strokeDasharray="4 4" />
+            )}
+            {hasHeartRateData && (
+              heartRateZones.length > 0 ? (
+                <>
+                  <Line yAxisId="hr" type="linear" dataKey="hr" stroke="var(--color-text-muted)" strokeWidth={2} dot={false} name="Heart Rate" />
+                  {heartRateZones.map((zone) => (
+                    <Line key={zone.key} yAxisId="hr" type="linear" dataKey={`hr_${zone.key}`} stroke={zone.color} strokeWidth={2.5} dot={false} connectNulls={false} name={zone.label} />
+                  ))}
+                </>
+              ) : (
+                <Line yAxisId="hr" type="monotone" dataKey="hr" stroke="var(--color-status-critical)" strokeWidth={2.5} dot={false} name="Heart Rate (bpm)" />
+              )
+            )}
+            {hasSpeedData && <Line yAxisId="speed" type="monotone" dataKey="speed" stroke="var(--color-text-primary)" strokeWidth={2.5} dot={false} name="Speed (km/h)" />}
           </LineChart>
         </ResponsiveContainer>
       </div>
+      {hasHeartRateData && heartRateZoneSummary.length > 0 && (
+        <ZoneDistribution zones={heartRateZoneSummary} />
+      )}
     </div>
   );
   const runTelemetryCards = isRun
@@ -1362,7 +1390,7 @@ export default function ActivityDetailPage() {
         <div className="page-body">
           <div className="activity-detail-identity">
             <span className="activity-detail-icon" style={{ background: sportVisual.background, color: sportVisual.color }}>
-              <SportIcon sport={activity.sport} />
+              <SportIcon sport={activity.sport} title={activity.title} subsport={activity.subsport} />
             </span>
             <div>
               <h1>{activity.title || sportVisual.label}</h1>

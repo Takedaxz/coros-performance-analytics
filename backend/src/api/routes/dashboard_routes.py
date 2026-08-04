@@ -155,6 +155,8 @@ async def training_load_trend(
             func.sum(Activity.training_load_vendor).label("total_load"),
             func.count(Activity.id).label("activity_count"),
             func.string_agg(cast(Activity.sport, String), ",").label("sports"),
+            func.sum(Activity.distance_m).label("total_distance_m"),
+            func.sum(Activity.elapsed_time_s).label("total_duration_s"),
         )
         .where(Activity.start_time >= cutoff)
         .group_by(func.date(Activity.start_time))
@@ -167,6 +169,8 @@ async def training_load_trend(
             "total_load": r.total_load or 0,
             "activity_count": r.activity_count,
             "sports": list(dict.fromkeys(r.sports.split(","))) if r.sports else [],
+            "total_distance_m": r.total_distance_m or 0,
+            "total_duration_s": r.total_duration_s or 0,
         }
         for r in rows
     ]

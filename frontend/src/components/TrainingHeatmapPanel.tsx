@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import type { ActivitySummary } from "@/lib/types";
 
 export type SportColorCategory = "strength" | "trail" | "run" | "cycle" | "swim" | "other";
@@ -12,6 +12,7 @@ interface HeatmapDay {
   load: number;
   activityCount: number;
   sports: SportColorCategory[];
+  sportLoads?: Partial<Record<SportColorCategory, number>>;
   distanceKm: number;
   durationMins: number;
 }
@@ -25,6 +26,8 @@ interface BackendLoadItem {
   total_load: number;
   activity_count: number;
   sports?: string[];
+  total_distance_m?: number;
+  total_duration_s?: number;
 }
 
 const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
@@ -38,6 +41,36 @@ const SPORT_COLORS: Record<SportColorCategory, string> = {
   other: "#A0AEC0",
 };
 
+const SPORT_LABELS: Record<SportColorCategory, string> = {
+  strength: "Strength",
+  trail: "Trail Run",
+  run: "Running",
+  cycle: "Cycling",
+  swim: "Swimming",
+  other: "Other",
+};
+
+function formatDateNice(dateStr: string): string {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dateObj = new Date(y, m - 1, d);
+  return dateObj.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatMinsToHours(mins: number): string {
+  if (mins <= 0) return "0m";
+  const hrs = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  if (hrs > 0 && remMins > 0) return `${hrs}h ${remMins}m`;
+  if (hrs > 0) return `${hrs}h`;
+  return `${remMins}m`;
+}
+
 function normalizeSportCategory(sportStr: string, titleStr: string = ""): SportColorCategory {
   const s = (sportStr || "").toLowerCase();
   const t = (titleStr || "").toLowerCase();
@@ -49,28 +82,83 @@ function normalizeSportCategory(sportStr: string, titleStr: string = ""): SportC
   return "other";
 }
 
+interface TooltipPos {
+  x: number;
+  y: number;
+  isLeftEdge: boolean;
+  isRightEdge: boolean;
+  isTopEdge: boolean;
+  containerWidth: number;
+}
+
 export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatmapPanelProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredDay, setHoveredDay] = useState<HeatmapDay | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<TooltipPos | null>(null);
   const [yearlyLoadData, setYearlyLoadData] = useState<BackendLoadItem[]>([]);
 
-  // Fetch authentic historical training load records directly from backend API
+  const handleCellHover = (item: HeatmapDay, e: React.MouseEvent<HTMLSpanElement>) => {
+    setHoveredDay(item);
+    if (containerRef.current) {
+      const squareRect = e.currentTarget.getBoundingClientRect();
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const containerWidth = containerRect.width;
+
+      const cellCenterX = squareRect.left - containerRect.left + squareRect.width / 2;
+      const cellTopY = squareRect.top - containerRect.top;
+      const cellBottomY = squareRect.bottom - containerRect.top;
+
+      // Detect edge boundaries to prevent tooltip clipping
+      const isLeftEdge = cellCenterX < 130;
+      const isRightEdge = cellCenterX > containerWidth - 130;
+      const isTopEdge = cellTopY < 110;
+
+      setTooltipPos({
+        x: cellCenterX,
+        y: isTopEdge ? cellBottomY + 8 : cellTopY - 8,
+        isLeftEdge,
+        isRightEdge,
+        isTopEdge,
+        containerWidth,
+      });
+    }
+  };
+
+  const handleCellLeave = () => {
+    setHoveredDay(null);
+    setTooltipPos(null);
+  };
+
+  // Fetch 1-year aggregated load data from backend training load endpoint
   useEffect(() => {
-    async function fetchYearlyLoad() {
+    async function loadYearlyData() {
       try {
         const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
         const res = await fetch(`${apiBase}/api/dashboard/training-load?days=365`);
         if (res.ok) {
-          const json = await res.json();
-          setYearlyLoadData(json);
+          const data = await res.json();
+          setYearlyLoadData(Array.isArray(data) ? data : data.days || []);
         }
       } catch (err) {
-        console.error("Failed to fetch training load history:", err);
+        console.warn("Failed to fetch yearly training load history:", err);
       }
     }
-    fetchYearlyLoad();
+    loadYearlyData();
   }, []);
 
-  // Map backend load items by YYYY-MM-DD
+  // Map frontend activities into date lookup
+  const activityMap = useMemo(() => {
+    const map: Record<string, ActivitySummary[]> = {};
+    for (const a of activities) {
+      if (!a.start_time) continue;
+      const dStr = a.start_time.split("T")[0];
+      if (!map[dStr]) map[dStr] = [];
+      map[dStr].push(a);
+    }
+    return map;
+  }, [activities]);
+
+  // Map backend fallback load items into date lookup
   const backendLoadMap = useMemo(() => {
     const map: Record<string, BackendLoadItem> = {};
     for (const item of yearlyLoadData) {
@@ -79,29 +167,16 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
     return map;
   }, [yearlyLoadData]);
 
-  // Map 7-day activity array by YYYY-MM-DD for sport category precision
-  const activityMap = useMemo(() => {
-    const map: Record<string, ActivitySummary[]> = {};
-    for (const act of activities) {
-      if (!act.start_time) continue;
-      const dateKey = act.start_time.split("T")[0];
-      if (!map[dateKey]) map[dateKey] = [];
-      map[dateKey].push(act);
-    }
-    return map;
-  }, [activities]);
-
-  // Generate 52 calendar weeks (Monday -> Sunday) ending with current week
+  // Compute 52-week 7x52 grid array ending today
   const heatmapData = useMemo(() => {
     const today = new Date();
-    today.setHours(23, 59, 59, 999);
-    const currentDayOfWeek = (today.getDay() + 6) % 7; // Convert Sun=0 to Mon=0 (Wed = 2)
+    today.setHours(0, 0, 0, 0);
 
-    // Calculate Monday of current week
-    const currentWeekMon = new Date(today.getFullYear(), today.getMonth(), today.getDate() - currentDayOfWeek);
+    const dayOfWeekToday = (today.getDay() + 6) % 7; // 0=Mon, 6=Sun
+    const totalDaysToDisplay = 51 * 7 + (dayOfWeekToday + 1);
 
-    // Start date is 51 weeks before current week Monday (52 weeks total)
-    const startDate = new Date(currentWeekMon.getFullYear(), currentWeekMon.getMonth(), currentWeekMon.getDate() - 51 * 7);
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - (totalDaysToDisplay - 1));
 
     const days: HeatmapDay[] = [];
 
@@ -121,28 +196,39 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
 
         let load = 0;
         let activityCount = 0;
+        let distM = 0;
+        let durS = 0;
         const sportsSet = new Set<SportColorCategory>();
+        const sportLoads: Partial<Record<SportColorCategory, number>> = {};
 
         if (!isFuture) {
           if (dayActs.length > 0) {
             load = dayActs.reduce((sum, a) => sum + (a.training_load_vendor || 0), 0);
             activityCount = dayActs.length;
+            distM = dayActs.reduce((sum, a) => sum + (a.distance_m || 0), 0);
+            durS = dayActs.reduce((sum, a) => sum + (a.elapsed_time_s || 0), 0);
             for (const a of dayActs) {
-              sportsSet.add(normalizeSportCategory(a.sport, a.title || ""));
+              const cat = normalizeSportCategory(a.sport, a.title || "");
+              sportsSet.add(cat);
+              const actLoad = a.training_load_vendor || 0;
+              sportLoads[cat] = (sportLoads[cat] || 0) + actLoad;
             }
           } else if (realLoadItem) {
             load = Math.round(realLoadItem.total_load || 0);
             activityCount = realLoadItem.activity_count || 1;
+            distM = realLoadItem.total_distance_m || 0;
+            durS = realLoadItem.total_duration_s || 0;
             const rawSports = realLoadItem.sports || [];
+            const perSportLoad = rawSports.length > 0 ? load / rawSports.length : load;
             for (const s of rawSports) {
-              sportsSet.add(normalizeSportCategory(s));
+              const cat = normalizeSportCategory(s);
+              sportsSet.add(cat);
+              sportLoads[cat] = (sportLoads[cat] || 0) + perSportLoad;
             }
           }
         }
 
         const sports = Array.from(sportsSet);
-        const totalDistM = dayActs.reduce((sum, a) => sum + (a.distance_m || 0), 0);
-        const totalDurS = dayActs.reduce((sum, a) => sum + (a.elapsed_time_s || 0), 0);
 
         days.push({
           dateStr,
@@ -151,8 +237,9 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
           load,
           activityCount,
           sports,
-          distanceKm: Math.round((totalDistM / 1000) * 10) / 10,
-          durationMins: Math.round(totalDurS / 60),
+          sportLoads,
+          distanceKm: Math.round((distM / 1000) * 10) / 10,
+          durationMins: Math.round(durS / 60),
         });
       }
     }
@@ -174,21 +261,66 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
     return labels;
   }, []);
 
-  // Compute cell background color / multi-sport conic gradient pie slice (Inspired by CorosLink)
+  // Compute peak (maximum) daily load independently for each sport category
+  const maxLoadPerSport = useMemo(() => {
+    const maxes: Record<SportColorCategory, number> = {
+      strength: 40,
+      trail: 40,
+      run: 40,
+      cycle: 40,
+      swim: 40,
+      other: 40,
+    };
+
+    for (const day of heatmapData) {
+      if (!day.sportLoads) continue;
+      for (const [catStr, loadVal] of Object.entries(day.sportLoads)) {
+        const cat = catStr as SportColorCategory;
+        if (loadVal && loadVal > (maxes[cat] || 0)) {
+          maxes[cat] = loadVal;
+        }
+      }
+    }
+
+    return maxes;
+  }, [heatmapData]);
+
+  // Helper to apply dynamic alpha to hex colors based on sport-specific max load
+  const getScaledColor = (cat: SportColorCategory, sportLoad: number) => {
+    const hexColor = SPORT_COLORS[cat] || "#21E6A5";
+    const maxSportLoad = maxLoadPerSport[cat] || 40;
+    const h = hexColor.replace("#", "");
+    if (h.length === 6) {
+      const r = parseInt(h.substring(0, 2), 16);
+      const g = parseInt(h.substring(2, 4), 16);
+      const b = parseInt(h.substring(4, 6), 16);
+      // Scale load relative to max load of this specific sport category
+      // alpha ranges from 0.28 (pale/faded for low load) to 1.0 (full vibrant saturation for peak load)
+      const ratio = Math.min(1, Math.max(0, sportLoad / maxSportLoad));
+      const alpha = 0.28 + 0.72 * Math.pow(ratio, 0.6);
+      return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})`;
+    }
+    return hexColor;
+  };
+
+  // Compute cell background color / multi-sport conic gradient pie slice with per-sport intensity scaling
   const getCellBackground = (day: HeatmapDay) => {
     if (day.load === 0 || day.sports.length === 0) return "var(--color-overlay-subtle)";
 
-    // Single sport -> solid sport color with intensity
+    // Single sport -> sport color with per-sport load intensity
     if (day.sports.length === 1) {
-      return SPORT_COLORS[day.sports[0]] || "#21E6A5";
+      const cat = day.sports[0];
+      const catLoad = day.sportLoads?.[cat] ?? day.load;
+      return getScaledColor(cat, catLoad);
     }
 
-    // Multiple sports on the same day -> equal pie slice conic gradient (CorosLink style!)
+    // Multiple sports on the same day -> equal pie slice conic gradient with per-sport load intensity
     const sliceAngle = 360 / day.sports.length;
     const stops = day.sports.map((cat, idx) => {
       const start = idx * sliceAngle;
       const end = (idx + 1) * sliceAngle;
-      const color = SPORT_COLORS[cat] || "#21E6A5";
+      const catLoad = day.sportLoads?.[cat] ?? (day.load / day.sports.length);
+      const color = getScaledColor(cat, catLoad);
       return `${color} ${start}deg ${end}deg`;
     });
 
@@ -197,8 +329,10 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
 
   return (
     <div
+      ref={containerRef}
       className="hover-card"
       style={{
+        position: "relative",
         background: "var(--color-bg-card)",
         border: "1px solid var(--border-color)",
         borderRadius: "var(--radius-md)",
@@ -206,6 +340,113 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
         marginBottom: "var(--space-6)",
       }}
     >
+      {/* Custom Popup Tooltip */}
+      {hoveredDay && tooltipPos && (() => {
+        let transformX = "-50%";
+        let leftPos = `${tooltipPos.x}px`;
+
+        if (tooltipPos.isRightEdge) {
+          transformX = "-100%";
+          leftPos = `${Math.min(tooltipPos.containerWidth - 16, tooltipPos.x + 12)}px`;
+        } else if (tooltipPos.isLeftEdge) {
+          transformX = "0%";
+          leftPos = `${Math.max(16, tooltipPos.x - 12)}px`;
+        }
+
+        const transformY = tooltipPos.isTopEdge ? "0%" : "-100%";
+
+        return (
+          <div
+            key={hoveredDay.dateStr}
+            style={{
+              position: "absolute",
+              left: leftPos,
+              top: `${tooltipPos.y}px`,
+              transform: `translate(${transformX}, ${transformY})`,
+              pointerEvents: "none",
+              zIndex: 50,
+            }}
+          >
+            <div
+              style={{
+                background: "var(--color-surface-elevated, #181B22)",
+                border: "1px solid var(--border-color, rgba(255, 255, 255, 0.15))",
+                borderRadius: "10px",
+                padding: "10px 14px",
+                boxShadow: "0 12px 32px rgba(0, 0, 0, 0.5), 0 0 16px rgba(33, 230, 165, 0.15)",
+                minWidth: "180px",
+                maxWidth: "240px",
+                whiteSpace: "nowrap",
+                backdropFilter: "blur(12px)",
+                animation: "tooltip-pop-in 120ms cubic-bezier(0.16, 1, 0.3, 1)",
+                transformOrigin: tooltipPos.isRightEdge
+                  ? "bottom right"
+                  : tooltipPos.isLeftEdge
+                  ? "bottom left"
+                  : "bottom center",
+              }}
+            >
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)", letterSpacing: "0.02em", marginBottom: "4px" }}>
+                {formatDateNice(hoveredDay.dateStr)}
+              </div>
+
+              {hoveredDay.load > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
+                    <span style={{ fontSize: "20px", fontWeight: 800, color: "var(--color-accent-primary, #21E6A5)", lineHeight: 1 }}>
+                      {hoveredDay.load}
+                    </span>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      Training Load
+                    </span>
+                  </div>
+
+                  {hoveredDay.sports.length > 0 && (
+                    <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginTop: "2px" }}>
+                      {hoveredDay.sports.map((sport) => (
+                        <span
+                          key={sport}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            padding: "2px 8px",
+                            borderRadius: "12px",
+                            fontSize: "10px",
+                            fontWeight: 700,
+                            background: `${SPORT_COLORS[sport]}1A`,
+                            color: SPORT_COLORS[sport],
+                            border: `1px solid ${SPORT_COLORS[sport]}40`,
+                          }}
+                        >
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: SPORT_COLORS[sport] }} />
+                          {SPORT_LABELS[sport] || sport}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "3px", fontSize: "11px", color: "var(--color-text-secondary)", paddingTop: "6px", borderTop: "1px solid var(--border-color)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                      <span>Distance:</span>
+                      <strong style={{ color: "var(--color-text-primary)" }}>{hoveredDay.distanceKm > 0 ? `${hoveredDay.distanceKm} km` : "—"}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
+                      <span>Duration:</span>
+                      <strong style={{ color: "var(--color-text-primary)" }}>{hoveredDay.durationMins > 0 ? formatMinsToHours(hoveredDay.durationMins) : "—"}</strong>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: "12px", color: "var(--color-text-muted)", fontWeight: 500 }}>
+                  Rest day (No load)
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Header Row */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)", flexWrap: "wrap", gap: "12px" }}>
         <div>
@@ -245,8 +486,8 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
                 return (
                   <span
                     key={dIdx}
-                    onMouseEnter={() => setHoveredDay(item)}
-                    onMouseLeave={() => setHoveredDay(null)}
+                    onMouseEnter={(e) => handleCellHover(item, e)}
+                    onMouseLeave={handleCellLeave}
                     style={{
                       width: "11px",
                       height: "11px",
@@ -258,7 +499,6 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
                       boxShadow: hoveredDay?.dateStr === item.dateStr ? "0 0 8px rgba(33, 230, 165, 0.9)" : "none",
                       zIndex: hoveredDay?.dateStr === item.dateStr ? 10 : 1,
                     }}
-                    title={`${item.dateStr}: ${item.load > 0 ? `${item.load} load (${item.sports.join(", ")})` : "Rest day"}`}
                   />
                 );
               })}
@@ -304,3 +544,4 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
     </div>
   );
 }
+

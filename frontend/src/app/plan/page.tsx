@@ -174,7 +174,7 @@ export default function TrainingPlanPage() {
                         <span className="plan-calendar-date">{date.getDate()}</span>
                         <span className="plan-calendar-entries">
                           {plans.slice(0, 2).map((event) => {
-                            const sportVisual = getSportVisual(event.event_type);
+                            const sportVisual = getSportVisual(event.event_type, event.summary);
                             return (
                               <span
                                 className="plan-calendar-entry planned"

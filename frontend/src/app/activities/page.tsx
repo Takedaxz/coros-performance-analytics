@@ -85,6 +85,7 @@ function formatPace(speedMps: number, sport: string): string {
 
 const SPORT_LABELS: Record<string, string> = {
   run: "Run",
+  treadmill: "Treadmill Run",
   trail_run: "Trail Run",
   ride: "Ride",
   swim: "Swim",
@@ -425,7 +426,7 @@ export default function ActivitiesPage() {
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   {activities.map((activity) => {
                     const startedAt = new Date(activity.start_time);
-                    const sportVisual = getSportVisual(activity.sport);
+                    const sportVisual = getSportVisual(activity.sport, activity.title, activity.subsport);
                     const metrics = [
                       ["Distance", activity.distance_m != null ? formatDistance(activity.distance_m) : "--"],
                       ["Duration", activity.elapsed_time_s != null ? formatDuration(activity.elapsed_time_s) : "--"],
@@ -460,7 +461,7 @@ export default function ActivitiesPage() {
                           aria-label={sportVisual.label}
                           style={{ height: "40px", borderRadius: "12px", display: "flex", justifyContent: "center", alignItems: "center", background: sportVisual.background, color: sportVisual.color }}
                         >
-                          <span style={{ display: "flex", transform: "scale(0.8)" }}><SportIcon sport={activity.sport} /></span>
+                          <span style={{ display: "flex", transform: "scale(0.8)" }}><SportIcon sport={activity.sport} title={activity.title} subsport={activity.subsport} /></span>
                         </div>
                         <div className="activity-card-content" style={{ minWidth: 0 }}>
                           <div className="activity-card-title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "14px", fontWeight: 750 }}>

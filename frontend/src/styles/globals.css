@@ -1710,6 +1710,10 @@ a:hover {
   filter: brightness(1.15);
 }
 
+.sport-activity-icon {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
 /* Skeleton Animation Shimmer */
 @keyframes skeleton-shimmer {
   0% {
@@ -5139,6 +5143,17 @@ table.data-table .lap-split-table tr:hover td {
   45% {
     transform: translateY(0);
     opacity: 0.65;
+  }
+}
+
+@keyframes tooltip-pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 

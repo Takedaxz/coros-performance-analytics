@@ -1040,19 +1040,37 @@ async def _upsert_activities(
 
         raw_sport = item.get("sportType", 0)
 
-        # Quick map for Coros sport types to our enum
-        if raw_sport in (100, 101, 102, 103, 8, 9, 10, 11):
+        # COROS sport type integer → our enum.
+        # Modern codes (v2 API, 3-digit): confirmed via community reverse-engineering.
+        # Legacy codes (v1 API / FIT-era, 1-2 digit): present on older syncs.
+        if raw_sport in (100, 103):
+            # 100 = Outdoor Road Run, 103 = Track Run
             sport_enum = SportType.RUN
-        elif raw_sport in (200, 201, 2, 3):
+        elif raw_sport in (101, 9):
+            # 101 = Indoor Run / Treadmill, 9 = Indoor Run (legacy)
+            sport_enum = SportType.RUN
+        elif raw_sport in (102, 8):
+            # 102 = Trail Run (modern), 8 = Trail Running (legacy)
+            sport_enum = SportType.TRAIL_RUN
+        elif raw_sport in (200, 201, 203, 204, 3, 10):
+            # 200 = Road Bike, 201 = Indoor Bike, 203 = Gravel, 204 = MTB
+            # 3 = Cycling (legacy), 10 = Indoor Cycling (legacy)
             sport_enum = SportType.RIDE
-        elif raw_sport in (300, 301, 5):
+        elif raw_sport in (300, 301, 4):
+            # 300 = Pool Swim, 301 = Open Water, 4 = Swimming (legacy)
             sport_enum = SportType.SWIM
-        elif raw_sport in (402, 4):
-            sport_enum = SportType.STRENGTH
-        elif raw_sport in (10000, 10001):
-            sport_enum = SportType.MULTISPORT
-        elif raw_sport in (12, 13):
+        elif raw_sport in (900, 5, 2):
+            # 900 = Walk (modern), 5 = Walk/Hike (legacy), 2 = Road Run (legacy — use walk as safe default)
             sport_enum = SportType.WALK
+        elif raw_sport in (1000, 1001, 13):
+            # Hike (community-observed), 13 = Outdoor Cardio/Hike (legacy)
+            sport_enum = SportType.HIKE
+        elif raw_sport in (402, 11):
+            # 402 = Strength Training (modern), 11 = Strength (legacy)
+            sport_enum = SportType.STRENGTH
+        elif raw_sport in (10000, 10001, 12):
+            # 10000/10001 = Triathlon / Multisport, 12 = Cardio/Gym (legacy)
+            sport_enum = SportType.MULTISPORT
         else:
             sport_enum = SportType.OTHER
 

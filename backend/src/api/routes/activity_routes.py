@@ -148,7 +148,16 @@ async def list_activities(
 
     conditions: list[ColumnElement[bool]] = []
     if sport:
-        conditions.append(Activity.sport == sport)
+        if sport == "treadmill":
+            conditions.append(
+                or_(
+                    Activity.subsport == "101",
+                    Activity.title.ilike("%treadmill%"),
+                    Activity.title.ilike("%indoor run%"),
+                )
+            )
+        else:
+            conditions.append(Activity.sport == sport)
 
     bounds = _period_bounds(period, period_value)
     if bounds:
@@ -559,7 +568,9 @@ async def get_activity(
         "strength_detail": activity.strength_detail,
         "postmortem": activity.postmortem,
         "source_type": activity.source_type,
-        "threshold_hr_bpm": fitness.lactate_threshold_hr if fitness else None,
+        "threshold_hr_bpm": (
+            fitness.lactate_threshold_hr if (fitness and fitness.lactate_threshold_hr) else 173
+        ),
         "threshold_pace_s_per_km": (
             fitness.lactate_threshold_pace_s_per_km if fitness else None
         ),
