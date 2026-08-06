@@ -5,6 +5,7 @@ import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import SingleSelect from "@/components/SingleSelect";
 import NumberStepper from "@/components/NumberStepper";
+import CustomDatePicker from "@/components/CustomDatePicker";
 import type { SyncStatus } from "@/lib/types";
 
 interface UserGoal {
@@ -591,7 +592,12 @@ export default function SettingsPage() {
                     </div>
                     <div className="settings-field">
                       <label htmlFor="profile-birthdate">Birthdate</label>
-                      <input id="profile-birthdate" type="date" value={profile.birthdate} onChange={(e) => updateProfileField("birthdate", e.target.value)} />
+                      <CustomDatePicker
+                        id="profile-birthdate"
+                        value={profile.birthdate}
+                        onChange={(val) => updateProfileField("birthdate", val)}
+                        placeholder="Select birthdate"
+                      />
                     </div>
                     <div className="settings-field">
                       <label id="profile-sex-label">Sex</label>
@@ -695,7 +701,12 @@ export default function SettingsPage() {
                         </div>
                         <div className="settings-field">
                           <label htmlFor="goal-date">Race date</label>
-                          <input id="goal-date" type="date" value={goalForm.goal_race_date} onChange={(e) => setGoalForm((g) => ({ ...g, goal_race_date: e.target.value }))} />
+                          <CustomDatePicker
+                            id="goal-date"
+                            value={goalForm.goal_race_date}
+                            onChange={(val) => setGoalForm((g) => ({ ...g, goal_race_date: val }))}
+                            placeholder="Select race date"
+                          />
                         </div>
                         <div className="settings-field">
                           <label id="goal-time-label">Target time</label>

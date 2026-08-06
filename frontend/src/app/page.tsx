@@ -327,9 +327,9 @@ export default function DashboardPage() {
   const isRelativeChart = selectedMetrics.length > 1;
   const selectedMetric = selectedMetrics[0];
   const weeklyMetricColor = (metric: WeeklyActivityMetric): string => {
-    const index = selectedMetrics.indexOf(metric);
-    if (index <= 0) return "var(--color-accent-primary)";
-    return index === 1 ? "var(--color-text-secondary)" : "var(--color-text-disabled)";
+    if (metric === "distance") return "var(--color-accent-primary)";
+    if (metric === "duration") return "var(--color-accent-exertion)";
+    return "var(--color-status-moderate)";
   };
   const dailyAverage = weeklyMetricTotals[selectedMetric] / 7;
   const activeDays = rawWeeklyActivityData.filter((day) =>
@@ -552,23 +552,21 @@ export default function DashboardPage() {
                 </header>
 
                 <div className="weekly-instrument-overview">
-                  <div className="instrument-primary-reading">
-                    <span>{WEEKLY_ACTIVITY_CONFIG[selectedMetric].label}</span>
-                    <strong>{formatWeeklyMetric(selectedMetric, weeklyMetricTotals[selectedMetric])}</strong>
+                  <div className="weekly-metrics-readings-group" style={{ display: "flex", alignItems: "flex-end", gap: "var(--space-5)", flexWrap: "wrap" }}>
+                    {selectedMetrics.map((metric) => (
+                      <div key={metric} className="instrument-primary-reading">
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                          <i style={{ width: 6, height: 6, borderRadius: "50%", background: weeklyMetricColor(metric), display: "inline-block" }} />
+                          {WEEKLY_ACTIVITY_CONFIG[metric].label}
+                        </span>
+                        <strong>{formatWeeklyMetric(metric, weeklyMetricTotals[metric])}</strong>
+                      </div>
+                    ))}
                   </div>
                   <div><span>Best day</span><strong>{bestDay.day}</strong></div>
                   <div><span>Active days</span><strong>{activeDays}/7</strong></div>
                 </div>
 
-                <div className="weekly-instrument-legend">
-                  {selectedMetrics.map((metric) => (
-                    <span key={metric}>
-                      <i style={{ background: weeklyMetricColor(metric) }} />
-                      {WEEKLY_ACTIVITY_CONFIG[metric].label}
-                    </span>
-                  ))}
-                  {isRelativeChart && <strong>Relative scale</strong>}
-                </div>
 
                 <div className="weekly-instrument-chart">
                 <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 200 }}>
@@ -599,18 +597,86 @@ export default function DashboardPage() {
                     )}
                     <Tooltip
                       cursor={{ fill: "var(--color-chart-cursor)", radius: 10 }}
-                      contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--border-color)", borderRadius: 16, boxShadow: "var(--shadow-sm)", fontSize: 12 }}
-                      labelStyle={{ color: "var(--color-text-muted)", marginBottom: 4 }}
-                      formatter={(value, name) => {
-                        const metric = WEEKLY_ACTIVITY_METRICS.find(
-                          (item) => WEEKLY_ACTIVITY_CONFIG[item].label === String(name),
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload || !payload.length) return null;
+                        const dayData = payload[0]?.payload;
+                        const formattedDate = dayData?.dateStr
+                          ? new Date(`${dayData.dateStr}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                          : null;
+
+                        return (
+                          <div
+                            style={{
+                              background: "var(--color-popover)",
+                              border: "1px solid var(--border-color)",
+                              borderRadius: "14px",
+                              boxShadow: "var(--shadow-md)",
+                              padding: "10px 14px",
+                              minWidth: "165px",
+                              fontSize: "12px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: "10px",
+                                fontWeight: 700,
+                                color: "var(--color-text-muted)",
+                                letterSpacing: "0.08em",
+                                textTransform: "uppercase",
+                                marginBottom: "8px",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                            >
+                              <span>{label}</span>
+                              {formattedDate && <span style={{ fontWeight: 500, color: "var(--color-text-disabled)" }}>{formattedDate}</span>}
+                            </div>
+
+                            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                              {payload.map((entry: any) => {
+                                const metricKey = WEEKLY_ACTIVITY_METRICS.find(
+                                  (m) => WEEKLY_ACTIVITY_CONFIG[m].label === entry.name,
+                                );
+                                if (!metricKey) return null;
+                                const rawValue = isRelativeChart
+                                  ? (Number(entry.value ?? 0) / 100) * weeklyMetricMaxima[metricKey]
+                                  : Number(entry.value ?? 0);
+
+                                const displayLabel = metricKey === "distance" ? "Distance" : WEEKLY_ACTIVITY_CONFIG[metricKey].label;
+
+                                return (
+                                  <div
+                                    key={entry.name}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                      gap: "12px",
+                                    }}
+                                  >
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-secondary)" }}>
+                                      <i
+                                        style={{
+                                          width: 7,
+                                          height: 7,
+                                          borderRadius: "50%",
+                                          background: weeklyMetricColor(metricKey),
+                                          display: "inline-block",
+                                        }}
+                                      />
+                                      {displayLabel}
+                                    </span>
+                                    <strong style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-primary)", fontWeight: 600 }}>
+                                      {formatWeeklyMetric(metricKey, rawValue)}
+                                    </strong>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
                         );
-                        if (!metric) return [value, name];
-                        const chartValue = Number(value ?? 0);
-                        const rawValue = isRelativeChart
-                          ? (chartValue / 100) * weeklyMetricMaxima[metric]
-                          : chartValue;
-                        return [formatWeeklyMetric(metric, rawValue), name];
                       }}
                     />
                     {selectedMetrics.map((metric) => (

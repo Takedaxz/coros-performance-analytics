@@ -6,6 +6,7 @@ import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import SingleSelect from "@/components/SingleSelect";
 import NumberStepper from "@/components/NumberStepper";
+import CustomDatePicker from "@/components/CustomDatePicker";
 import { getSportVisual, SportIcon } from "@/components/SportActivityIcon";
 import type { ActivitySummary } from "@/lib/types";
 
@@ -261,31 +262,28 @@ export default function ActivitiesPage() {
                     />
                   </div>
 
-                  <label className="activity-filter-field">
+                  <div className="activity-filter-field">
                     <span>{periodInputLabel}</span>
-                    {draftFilters.period === "year" ? (
-                      <input
-                        aria-label={periodInputLabel}
-                        type="number"
-                        min="2000"
-                        max="2100"
-                        required
-                        placeholder="2026"
-                        value={draftFilters.periodValue}
-                        onChange={(event) => setDraftFilter("periodValue", event.target.value)}
-                      />
-                    ) : (
-                      <input
-                        aria-label={periodInputLabel}
-                        type={draftFilters.period === "day" ? "date" : draftFilters.period || "date"}
-                        required={Boolean(draftFilters.period)}
-                        disabled={!draftFilters.period}
-                        value={draftFilters.periodValue}
-                        onChange={(event) => setDraftFilter("periodValue", event.target.value)}
-                      />
-                    )}
+                    <CustomDatePicker
+                      id="activity-period-value"
+                      disabled={!draftFilters.period}
+                      mode={draftFilters.period === "day" ? "date" : draftFilters.period || "date"}
+                      placeholder={
+                        !draftFilters.period
+                          ? "Select period first"
+                          : draftFilters.period === "day"
+                          ? "Select date"
+                          : draftFilters.period === "week"
+                          ? "Select week"
+                          : draftFilters.period === "month"
+                          ? "Select month"
+                          : "Select year"
+                      }
+                      value={draftFilters.periodValue}
+                      onChange={(val) => setDraftFilter("periodValue", val)}
+                    />
                     <small className="activity-filter-hint">{periodInputHint}</small>
-                  </label>
+                  </div>
 
                   <div className="activity-filter-field">
                     <span>Day of week</span>

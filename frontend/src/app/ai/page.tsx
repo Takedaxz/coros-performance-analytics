@@ -109,6 +109,28 @@ function parseThinkingAndAnswer(rawContent: string): { thinking: string | null; 
   return { thinking: thinking || null, answer, isThinkingActive: true };
 }
 
+function ChevronIcon({ isOpen }: { isOpen: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{
+        transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+        transition: "transform var(--transition-fast)",
+      }}
+      aria-hidden="true"
+    >
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
 function ThinkingAccordion({ thinking, isThinkingActive }: { thinking: string; isThinkingActive: boolean }) {
   const [isOpen, setIsOpen] = useState(isThinkingActive);
 
@@ -120,48 +142,16 @@ function ThinkingAccordion({ thinking, isThinkingActive }: { thinking: string; i
 
   return (
     <details
-      className="ai-thinking-accordion"
+      className={`ai-thinking-accordion ${isThinkingActive ? "is-active" : ""}`}
       open={isOpen}
       onToggle={(e) => setIsOpen(e.currentTarget.open)}
-      style={{
-        marginBottom: "var(--space-3)",
-        border: "1px solid var(--border-color)",
-        borderRadius: "var(--radius-md)",
-        background: "var(--color-surface-secondary)",
-        overflow: "hidden",
-        fontSize: "var(--text-xs)",
-      }}
     >
-      <summary
-        style={{
-          padding: "var(--space-2) var(--space-3)",
-          cursor: "pointer",
-          userSelect: "none",
-          fontWeight: 500,
-          color: "var(--color-text-muted)",
-          display: "flex",
-          alignItems: "center",
-          gap: "var(--space-2)",
-        }}
-      >
-        <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-          🧠 {isThinkingActive ? <WaveThinkingText text="Thinking" /> : "Thought process"}
-        </span>
+      <summary>
+        <span>{isThinkingActive ? <WaveThinkingText text="Thinking" /> : "Thought process"}</span>
+        <ChevronIcon isOpen={isOpen} />
       </summary>
-      <div
-        style={{
-          padding: "var(--space-3)",
-          borderTop: "1px solid var(--border-color)",
-          color: "var(--color-text-secondary)",
-          fontFamily: "var(--font-mono)",
-          fontSize: "11px",
-          lineHeight: "1.5",
-          whiteSpace: "pre-wrap",
-          maxHeight: "240px",
-          overflowY: "auto",
-        }}
-      >
-        {thinking}
+      <div className="ai-thinking-accordion-content">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{thinking}</ReactMarkdown>
       </div>
     </details>
   );
