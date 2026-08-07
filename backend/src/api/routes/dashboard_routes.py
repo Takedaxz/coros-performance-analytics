@@ -25,7 +25,6 @@ async def dashboard_summary(
     # Recent activities
     act_result = await db.execute(
         select(Activity)
-        .where(Activity.start_time >= cutoff)
         .order_by(Activity.start_time.desc())
         .limit(10)
     )

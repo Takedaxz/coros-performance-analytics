@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.api.routes.sync_routes import _utc_iso
+from src.db.models import SportType
 from src.mcp.daily_health_client import _build_daily_health_args
 from src.sync.api_client import _rate_limit_delay
 from src.sync.sync_manager import (
@@ -96,13 +97,21 @@ async def test_activity_upsert_reads_and_flushes_once_for_a_batch() -> None:
     items = [
         {"startTime": 1_785_450_000, "sportType": 100, "labelId": "run-1"},
         {"startTime": 1_785_536_400, "sportType": 200, "labelId": "ride-1"},
+        {"startTime": 1_785_622_800, "sportType": 1000, "labelId": "badminton-1"},
+        {"startTime": 1_785_709_200, "sportType": 104, "labelId": "hike-1"},
     ]
 
     count = await _upsert_activities(db, "user-id", items, client)
 
-    assert count == 2
+    assert count == 4
     assert db.execute.await_count == 1
     assert db.flush.await_count == 1
+    assert [call.args[0].sport for call in db.add.call_args_list] == [
+        SportType.RUN,
+        SportType.RIDE,
+        SportType.OTHER,
+        SportType.HIKE,
+    ]
 
 
 @pytest.mark.asyncio

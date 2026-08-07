@@ -1063,8 +1063,8 @@ async def _upsert_activities(
         elif raw_sport in (900, 5, 2):
             # 900 = Walk (modern), 5 = Walk/Hike (legacy), 2 = Road Run (legacy — use walk as safe default)
             sport_enum = SportType.WALK
-        elif raw_sport in (1000, 1001, 13):
-            # Hike (community-observed), 13 = Outdoor Cardio/Hike (legacy)
+        elif raw_sport in (104, 13):
+            # 104 = Hike, 13 = Outdoor Cardio/Hike (legacy)
             sport_enum = SportType.HIKE
         elif raw_sport in (402, 11):
             # 402 = Strength Training (modern), 11 = Strength (legacy)

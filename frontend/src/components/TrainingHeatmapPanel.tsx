@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import type { ActivitySummary } from "@/lib/types";
 
-export type SportColorCategory = "strength" | "trail" | "run" | "cycle" | "swim" | "other";
+export type SportColorCategory = "strength" | "trail" | "hike" | "run" | "cycle" | "swim" | "other";
 
 interface HeatmapDay {
   dateStr: string;
@@ -35,6 +35,7 @@ const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 const SPORT_COLORS: Record<SportColorCategory, string> = {
   strength: "#FF4D62",
   trail: "#2D9BF0",
+  hike: "#A0AEC0",
   run: "#21E6A5",
   cycle: "#F0D348",
   swim: "#00C2FF",
@@ -44,6 +45,7 @@ const SPORT_COLORS: Record<SportColorCategory, string> = {
 const SPORT_LABELS: Record<SportColorCategory, string> = {
   strength: "Strength",
   trail: "Trail Run",
+  hike: "Hike",
   run: "Running",
   cycle: "Cycling",
   swim: "Swimming",
@@ -75,7 +77,8 @@ function normalizeSportCategory(sportStr: string, titleStr: string = ""): SportC
   const s = (sportStr || "").toLowerCase();
   const t = (titleStr || "").toLowerCase();
   if (s.includes("strength") || s.includes("gym") || s.includes("weights") || t.includes("strength") || t.includes("gym")) return "strength";
-  if (s.includes("trail") || s.includes("hike") || s.includes("climb") || t.includes("trail") || t.includes("hike")) return "trail";
+  if (s.includes("hike") || t.includes("hike")) return "hike";
+  if (s.includes("trail") || s.includes("climb") || t.includes("trail")) return "trail";
   if (s.includes("ride") || s.includes("cycle") || s.includes("bike") || /\b(?:ride|cycling|cycle|bike)\b/.test(t)) return "cycle";
   if (s.includes("swim") || s.includes("pool") || t.includes("swim")) return "swim";
   if (s.includes("run") || s.includes("track") || t.includes("run")) return "run";
@@ -266,6 +269,7 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
     const maxes: Record<SportColorCategory, number> = {
       strength: 40,
       trail: 40,
+      hike: 40,
       run: 40,
       cycle: 40,
       swim: 40,
@@ -544,4 +548,3 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
     </div>
   );
 }
-

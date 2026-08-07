@@ -16,6 +16,7 @@ export const SPORT_ICON_URLS: Record<string, string> = {
   cardio: "https://img.icons8.com/?size=100&id=aZCcxa9TqPy7&format=png&color=000000",
   multisport: "https://img.icons8.com/?size=100&id=aZCcxa9TqPy7&format=png&color=000000",
   yoga: "https://img.icons8.com/liquid-glass/96/yoga.png",
+  badminton: "https://img.icons8.com/?size=100&id=t7ONehkDkZMA&format=png&color=000000",
   other: "https://img.icons8.com/liquid-glass/96/activity.png",
 };
 
@@ -31,6 +32,7 @@ const SPORT_VISUALS: Record<string, SportVisual> = {
   hyrox: { label: "Hyrox / Hybrid", background: "rgba(147, 100, 240, 0.14)", color: "#9364f0" },
   cardio: { label: "Cardio", background: "rgba(240, 140, 60, 0.14)", color: "#f08c3c" },
   yoga: { label: "Yoga", background: "rgba(240, 150, 200, 0.14)", color: "#e06cba" },
+  badminton: { label: "Badminton", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
   multisport: { label: "Multisport", background: "rgba(147, 100, 240, 0.14)", color: "#9364f0" },
   other: { label: "Activity", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
 };
@@ -47,8 +49,9 @@ export function resolveSportKey(sport?: string, title?: string, subsport?: strin
   if (t.includes("treadmill") || t.includes("indoor run") || sub === "101") return "treadmill";
   if (t.includes("hyrox") || t.includes("hybrid") || sub === "1200") return "hyrox";
   if (t.includes("yoga") || sub === "904" || sub === "905") return "yoga";
+  if (t.includes("badminton") || sub === "1000") return "badminton";
   if (t.includes("cardio") || t.includes("skierg") || sub === "400" || sub === "701") return "cardio";
-  if (t.includes("hike") || sub === "104" || sub === "1000") return "hike";
+  if (t.includes("hike") || sub === "104") return "hike";
   if (t.includes("trail") || sub === "102") return "trail_run";
 
   // Enum sport mappings
