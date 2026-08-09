@@ -362,6 +362,7 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
       requestAnimationFrame(() => {
         if (isMounted && mapInstanceRef.current) {
           mapInstanceRef.current.invalidateSize();
+          mapInstanceRef.current.fitBounds(routeBoundsRef.current!, { padding: [20, 20] });
           const zoomInBtn = container.querySelector(".leaflet-control-zoom-in");
           const zoomOutBtn = container.querySelector(".leaflet-control-zoom-out");
           if (zoomInBtn) {

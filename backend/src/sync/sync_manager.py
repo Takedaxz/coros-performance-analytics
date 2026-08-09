@@ -859,7 +859,7 @@ async def run_sync(
         )
 
         # --- Sleep stages via COROS MCP (no Mobile API) ---
-        _emit(on_event, "progress", '{"stage": "sleep", "message": "Fetching sleep stages (MCP)..."}')
+        _emit(on_event, "progress", '{"stage": "sleep", "message": "Fetching sleep stages..."}')
         sleep_count = 0
         try:
             from src.mcp.sleep_client import fetch_sleep_via_mcp

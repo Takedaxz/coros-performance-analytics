@@ -18,15 +18,6 @@ function AiGlyph() {
   );
 }
 
-function UserIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M20 21a8 8 0 0 0-16 0" />
-      <circle cx="12" cy="7" r="4" />
-    </svg>
-  );
-}
-
 function SendIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -903,7 +894,6 @@ export default function AiPage() {
                         if (msg.role === "user") {
                           return (
                             <div key={idx} className="msg-row user-row msg-enter" style={{ animationDelay: "0ms" }}>
-                              <div className="avatar-sq user" aria-hidden="true"><UserIcon /></div>
                               <div className="user-pill">{msg.content}</div>
                             </div>
                           );
@@ -911,9 +901,6 @@ export default function AiPage() {
                         const { thinking, answer, isThinkingActive } = parseThinkingAndAnswer(msg.content);
                         return (
                           <div key={idx} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
-                            <div className="avatar-sq ai" aria-label={msg.content === "" && isLoading ? "AI Coach is thinking" : "AI Coach"}>
-                              <AiGlyph />
-                            </div>
                             <div className="ai-text">
                               {thinking && (
                                 <ThinkingAccordion thinking={thinking} isThinkingActive={isThinkingActive} />
@@ -939,7 +926,6 @@ export default function AiPage() {
 
                       {isLoading && messages[messages.length - 1]?.role !== "ai" && (
                         <div className="msg-row ai-row msg-enter">
-                          <div className="avatar-sq ai" aria-label="AI Coach is thinking"><AiGlyph /></div>
                           <div className="ai-text">
                             <WaveThinkingText text="thinking" />
                           </div>
