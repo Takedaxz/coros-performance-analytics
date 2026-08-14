@@ -4,9 +4,12 @@ import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import SingleSelect from "@/components/SingleSelect";
+import CustomDatePicker from "@/components/CustomDatePicker";
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   Cell,
   Pie,
@@ -21,6 +24,39 @@ interface TrainingLoadDay {
   date: string;
   total_load: number;
 }
+
+type TrainingVolumeGroup = "week" | "month" | "year";
+type TrainingVolumeMetric = "distance" | "duration" | "load";
+
+interface TrainingVolumeBucket {
+  period_start: string;
+  distance_m: number;
+  duration_s: number;
+  training_load: number;
+  activity_count: number;
+}
+
+const TRAINING_VOLUME_METRICS: TrainingVolumeMetric[] = ["distance", "duration", "load"];
+
+const TRAINING_VOLUME_CONFIG: Record<TrainingVolumeMetric, { label: string; color: string }> = {
+  distance: { label: "Distance", color: "var(--color-accent-primary)" },
+  duration: { label: "Duration", color: "var(--color-accent-exertion)" },
+  load: { label: "Training Load", color: "var(--color-status-moderate)" },
+};
+
+const SPORT_OPTIONS = [
+  { value: "", label: "All Sports" },
+  { value: "run", label: "Run" },
+  { value: "treadmill", label: "Treadmill Run" },
+  { value: "trail_run", label: "Trail Run" },
+  { value: "ride", label: "Ride" },
+  { value: "swim", label: "Swim" },
+  { value: "hike", label: "Hike" },
+  { value: "walk", label: "Walk" },
+  { value: "strength", label: "Strength" },
+  { value: "multisport", label: "Multisport" },
+  { value: "other", label: "Other" },
+];
 
 interface DistributionEntry {
   index: number;
@@ -62,6 +98,39 @@ const RPE_LABELS = ["RPE 1 · Very light", "RPE 2 · Light", "RPE 3 · Moderate"
 function formatDuration(seconds: number): string {
   if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.round((seconds % 3600) / 60)}m`;
   return `${Math.round(seconds / 60)} min`;
+}
+
+function dateInputValue(value: Date): string {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function trainingVolumeDateRange(): { start: string; end: string } {
+  const end = new Date();
+  const start = new Date(end);
+  start.setFullYear(start.getFullYear() - 1);
+  return { start: dateInputValue(start), end: dateInputValue(end) };
+}
+
+function formatTrainingVolumeMetric(metric: TrainingVolumeMetric, value: number): string {
+  if (metric === "distance") return `${value.toFixed(1)} km`;
+  if (metric === "duration") return formatDuration(value * 3600);
+  return `${Math.round(value)} TL`;
+}
+
+function formatTrainingVolumePeriod(periodStart: string, groupBy: TrainingVolumeGroup): string {
+  const date = new Date(`${periodStart}T00:00:00`);
+  if (groupBy === "year") return String(date.getFullYear());
+  if (groupBy === "month") return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function isCurrentTrainingVolumePeriod(periodStart: string, groupBy: TrainingVolumeGroup): boolean {
+  const start = new Date(`${periodStart}T00:00:00`);
+  const end = new Date(start);
+  if (groupBy === "week") end.setDate(end.getDate() + 7);
+  if (groupBy === "month") end.setMonth(end.getMonth() + 1);
+  if (groupBy === "year") end.setFullYear(end.getFullYear() + 1);
+  return start <= new Date() && new Date() < end;
 }
 
 function recentLoad(data: TrainingLoadDay[], days: number): number {
@@ -225,6 +294,14 @@ export default function TrendsPage() {
   const [distanceMetric, setDistanceMetric] = useState("frequency");
   const [rpeMetric, setRpeMetric] = useState("frequency");
   const [visibleTrendDays, setVisibleTrendDays] = useState(30);
+  const [trainingVolume, setTrainingVolume] = useState<TrainingVolumeBucket[]>([]);
+  const [trainingVolumeLoading, setTrainingVolumeLoading] = useState(true);
+  const [trainingVolumeError, setTrainingVolumeError] = useState<string | null>(null);
+  const [trainingVolumeGroupBy, setTrainingVolumeGroupBy] = useState<TrainingVolumeGroup>("month");
+  const [trainingVolumeSport, setTrainingVolumeSport] = useState("");
+  const [trainingVolumeMetrics, setTrainingVolumeMetrics] = useState<TrainingVolumeMetric[]>(TRAINING_VOLUME_METRICS);
+  const [trainingVolumeRange, setTrainingVolumeRange] = useState(trainingVolumeDateRange);
+  const invalidTrainingVolumeRange = trainingVolumeRange.start > trainingVolumeRange.end;
   const trendHistoryDays = visibleTrendDays + 6;
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -254,6 +331,38 @@ export default function TrendsPage() {
     void fetchTrendData();
     void fetchDistributions();
   }, [apiBase, trendHistoryDays]);
+
+  useEffect(() => {
+    if (invalidTrainingVolumeRange) return;
+
+    let cancelled = false;
+    async function fetchTrainingVolume() {
+      setTrainingVolumeLoading(true);
+      setTrainingVolumeError(null);
+      try {
+        const params = new URLSearchParams({
+          group_by: trainingVolumeGroupBy,
+          start_date: trainingVolumeRange.start,
+          end_date: trainingVolumeRange.end,
+        });
+        if (trainingVolumeSport) params.set("sport", trainingVolumeSport);
+        const response = await fetch(`${apiBase}/api/dashboard/training-volume?${params}`);
+        if (!response.ok) throw new Error("Unable to load training volume.");
+        if (!cancelled) setTrainingVolume(await response.json());
+      } catch {
+        if (!cancelled) {
+          setTrainingVolume([]);
+          setTrainingVolumeError("Unable to load training volume.");
+        }
+      } finally {
+        if (!cancelled) setTrainingVolumeLoading(false);
+      }
+    }
+    void fetchTrainingVolume();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, invalidTrainingVolumeRange, trainingVolumeGroupBy, trainingVolumeRange, trainingVolumeSport]);
 
   useEffect(() => {
     async function fetchDailyHealthTrends() {
@@ -294,6 +403,45 @@ export default function TrendsPage() {
     .slice(-visibleTrendDays);
   const caloriesChartData = addSevenDayAverage(dailyHealthData, (day) => day.active_calories_kcal)
     .slice(-visibleTrendDays);
+  const trainingVolumeMaxima = TRAINING_VOLUME_METRICS.reduce(
+    (maxima, metric) => ({
+      ...maxima,
+      [metric]: Math.max(
+        ...trainingVolume.map((bucket) => (
+          metric === "distance"
+            ? bucket.distance_m / 1000
+            : metric === "duration"
+              ? bucket.duration_s / 3600
+              : bucket.training_load
+        )),
+        1,
+      ),
+    }),
+    { distance: 1, duration: 1, load: 1 },
+  );
+  const trainingVolumeChartData = trainingVolume.map((bucket) => {
+    const distance = bucket.distance_m / 1000;
+    const duration = bucket.duration_s / 3600;
+    const load = bucket.training_load;
+    return {
+      ...bucket,
+      label: formatTrainingVolumePeriod(bucket.period_start, trainingVolumeGroupBy),
+      toDate: isCurrentTrainingVolumePeriod(bucket.period_start, trainingVolumeGroupBy),
+      distance,
+      duration,
+      load,
+      distanceRelative: (distance / trainingVolumeMaxima.distance) * 100,
+      durationRelative: (duration / trainingVolumeMaxima.duration) * 100,
+      loadRelative: (load / trainingVolumeMaxima.load) * 100,
+    };
+  });
+  const trainingVolumeIsRelative = trainingVolumeMetrics.length > 1;
+  const toggleTrainingVolumeMetric = (metric: TrainingVolumeMetric) => {
+    setTrainingVolumeMetrics((current) => {
+      if (current.includes(metric)) return current.length === 1 ? current : current.filter((item) => item !== metric);
+      return [...current, metric];
+    });
+  };
 
   return (
     <div className="app-layout">
@@ -301,15 +449,84 @@ export default function TrendsPage() {
       <main className="main-content">
         <header className="page-header">
           <PageTitle>Training Trends</PageTitle>
-          <SingleSelect
-            ariaLabel="Training trend period"
-            value={String(visibleTrendDays)}
-            onChange={(value) => setVisibleTrendDays(Number(value))}
-            id="period-selector"
-            options={[7, 14, 30, 60, 90].map((period) => ({ value: String(period), label: `${period} days` }))}
-          />
+          <div className="activity-header-controls">
+            <SingleSelect
+              ariaLabel="Training trend period"
+              value={String(visibleTrendDays)}
+              onChange={(value) => setVisibleTrendDays(Number(value))}
+              id="period-selector"
+              options={[7, 14, 30, 60, 90].map((period) => ({ value: String(period), label: `${period} days` }))}
+            />
+          </div>
         </header>
         <div className="page-body">
+          <section className="card training-volume-card" aria-labelledby="training-volume-title">
+            <div className="card-header training-volume-header">
+              <div className="training-volume-heading">
+                <span id="training-volume-title" className="card-title">Training Volume</span>
+                <div className="training-volume-metrics" role="group" aria-label="Training volume metrics">
+                  {TRAINING_VOLUME_METRICS.map((metric) => {
+                    const selected = trainingVolumeMetrics.includes(metric);
+                    return <button key={metric} type="button" aria-pressed={selected} onClick={() => toggleTrainingVolumeMetric(metric)}><i style={{ background: selected ? TRAINING_VOLUME_CONFIG[metric].color : "var(--color-overlay-medium)" }} />{TRAINING_VOLUME_CONFIG[metric].label}</button>;
+                  })}
+                </div>
+              </div>
+              <div className="training-volume-controls">
+                <label>
+                  Sport
+                  <SingleSelect ariaLabel="Training volume sport filter" value={trainingVolumeSport} onChange={setTrainingVolumeSport} options={SPORT_OPTIONS} />
+                </label>
+                <label>
+                  Group by
+                  <SingleSelect ariaLabel="Training volume grouping" value={trainingVolumeGroupBy} onChange={(value) => setTrainingVolumeGroupBy(value as TrainingVolumeGroup)} options={[{ value: "week", label: "Week" }, { value: "month", label: "Month" }, { value: "year", label: "Year" }]} />
+                </label>
+                <label>
+                  Start
+                  <CustomDatePicker
+                    ariaLabel="Training volume start date"
+                    value={trainingVolumeRange.start}
+                    maxDate={trainingVolumeRange.end}
+                    onChange={(start) => setTrainingVolumeRange((current) => ({ ...current, start }))}
+                  />
+                </label>
+                <label>
+                  End
+                  <CustomDatePicker
+                    ariaLabel="Training volume end date"
+                    value={trainingVolumeRange.end}
+                    minDate={trainingVolumeRange.start}
+                    onChange={(end) => setTrainingVolumeRange((current) => ({ ...current, end }))}
+                  />
+                </label>
+              </div>
+            </div>
+            {invalidTrainingVolumeRange ? (
+              <p className="training-volume-empty">Start date must be on or before end date.</p>
+            ) : trainingVolumeLoading ? (
+              <div className="skeleton" style={{ width: "100%", height: 300, borderRadius: 12, marginTop: "var(--space-4)" }} />
+            ) : trainingVolumeError ? (
+              <p className="training-volume-empty">{trainingVolumeError}</p>
+            ) : trainingVolumeChartData.length === 0 ? (
+              <p className="training-volume-empty">No activities match this sport and date range.</p>
+            ) : (
+              <div className="training-volume-chart">
+                <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 300 }}>
+                  <BarChart data={trainingVolumeChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={2}>
+                    <CartesianGrid strokeDasharray="2 6" stroke="var(--color-chart-grid)" />
+                    <XAxis dataKey="label" tick={{ fill: "var(--color-text-muted)", fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} dy={4} interval="equidistantPreserveStart" />
+                    <YAxis domain={trainingVolumeIsRelative ? [0, 100] : [0, "auto"]} tick={trainingVolumeIsRelative ? false : { fill: "var(--color-text-muted)", fontSize: 10 }} tickFormatter={(value: number) => trainingVolumeMetrics[0] === "distance" ? value.toFixed(value >= 10 ? 0 : 1) : trainingVolumeMetrics[0] === "duration" ? `${value.toFixed(1)}h` : `${Math.round(value)}`} axisLine={false} tickLine={false} width={trainingVolumeIsRelative ? 8 : 40} />
+                    <Tooltip cursor={{ fill: "var(--color-chart-cursor)", radius: 10 }} content={({ active, payload }) => {
+                      const bucket = payload?.[0]?.payload as (typeof trainingVolumeChartData)[number] | undefined;
+                      if (!active || !bucket) return null;
+                      return <div className="training-volume-tooltip"><strong>{bucket.label}{bucket.toDate ? " · To date" : ""}</strong>{trainingVolumeMetrics.map((metric) => <span key={metric}><i style={{ background: TRAINING_VOLUME_CONFIG[metric].color }} />{TRAINING_VOLUME_CONFIG[metric].label}<b>{formatTrainingVolumeMetric(metric, bucket[metric])}</b></span>)}</div>;
+                    }} />
+                    {trainingVolumeMetrics.map((metric) => <Bar key={metric} dataKey={trainingVolumeIsRelative ? `${metric}Relative` : metric} name={TRAINING_VOLUME_CONFIG[metric].label} radius={[4, 4, 0, 0]} barSize={trainingVolumeMetrics.length === 1 ? 30 : 14} isAnimationActive={false}>{trainingVolumeChartData.map((bucket) => <Cell key={`${metric}-${bucket.period_start}`} fill={TRAINING_VOLUME_CONFIG[metric].color} fillOpacity={bucket.toDate ? 1 : 0.78} />)}</Bar>)}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </section>
+
           {/* Training Load History */}
           <section className="card" id="chart-trends" style={{ marginBottom: "var(--space-6)" }}>
             <div className="card-header" style={{ alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>

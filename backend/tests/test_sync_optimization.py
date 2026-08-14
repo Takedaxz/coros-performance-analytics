@@ -6,7 +6,7 @@ import pytest
 from src.api.routes.sync_routes import _utc_iso
 from src.db.models import SportType
 from src.mcp.daily_health_client import _build_daily_health_args
-from src.sync.api_client import _rate_limit_delay
+from src.sync.api_client import CorosApiClient, _rate_limit_delay
 from src.sync.sync_manager import (
     _resolve_sync_start_dates,
     _upsert_activities,
@@ -19,6 +19,56 @@ def test_rate_limit_retry_delay_is_bounded() -> None:
     assert _rate_limit_delay("2.5") == 2.5
     assert _rate_limit_delay("60") == 5.0
     assert _rate_limit_delay("not-a-number") == 1.0
+
+
+@pytest.mark.asyncio
+async def test_training_hub_refreshes_api_level_invalid_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        status_code = 200
+
+        def __init__(self, body: dict[str, object]) -> None:
+            self.body = body
+
+        def json(self) -> dict[str, object]:
+            return self.body
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class HttpClient:
+        def __init__(self) -> None:
+            self.responses = iter([
+                Response({"result": "1001", "message": "Access token is invalid"}),
+                Response({"result": "0000", "data": {"ok": True}}),
+            ])
+            self.tokens: list[str] = []
+
+        async def __aenter__(self) -> "HttpClient":
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def post(self, _url: str, **kwargs: object) -> Response:
+            headers = kwargs["headers"]
+            assert isinstance(headers, dict)
+            self.tokens.append(str(headers["accesstoken"]))
+            return next(self.responses)
+
+    http_client = HttpClient()
+    monkeypatch.setattr("src.sync.api_client.httpx.AsyncClient", lambda **_kwargs: http_client)
+    client = CorosApiClient("athlete@example.com", "secret")
+    client.access_token = "stale"
+
+    async def fresh_login() -> None:
+        client.access_token = "fresh"
+
+    monkeypatch.setattr(client, "login", fresh_login)
+
+    assert await client.post_training_hub("/training/schedule/update", {}) == {"ok": True}
+    assert http_client.tokens == ["stale", "fresh"]
 
 
 def test_sync_timestamp_is_serialized_as_utc() -> None:

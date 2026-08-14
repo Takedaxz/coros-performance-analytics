@@ -1,4 +1,5 @@
 """AI routes: ask questions, get briefings, activity postmortems."""
+
 import asyncio
 import datetime
 import json
@@ -61,8 +62,6 @@ class ChatMessage(BaseModel):
 class AskRequest(BaseModel):
     question: str
     context_days: int = 14
-    plan_days_back: int = 7
-    plan_days_forward: int = 14
     history: list[ChatMessage] = []
 
 
@@ -85,27 +84,31 @@ async def ask_ai(
             detail="No AI backend is enabled. Set OPENAI_COMPAT_ENABLED=true or GEMINI_ENABLED=true.",
         )
 
-    # 1. Build context from DB + training plan
+    # 1. Build the compact default context; calendar details are fetched on demand.
     context = await build_training_context(
         db,
         user_id=get_owner_id(),
-        days=req.context_days,
-        include_activity_details=True,
+        days=min(req.context_days, 2),
+        include_activity_details=False,
     )
-    plan_context = await build_plan_context(
-        days_back=req.plan_days_back,
-        days_forward=req.plan_days_forward,
-    )
-    context = context + "\n\n" + plan_context
-
     # 2. Ask AI coach
     history_dicts = [{"role": msg.role, "content": msg.content} for msg in req.history]
-    answer = ask_coach(req.question, context, history_dicts)
+    tool_calls: list[str] = []
+    answer = await asyncio.to_thread(
+        ask_coach,
+        req.question,
+        context,
+        history_dicts,
+        model=None,
+        user_id=get_owner_id(),
+        tool_calls=tool_calls,
+        event_loop=asyncio.get_running_loop(),
+    )
 
     return AskResponse(
         answer=answer,
         confidence=None,
-        evidence=None,
+        evidence=[{"tool": name} for name in tool_calls] or None,
         model=_active_model(),
     )
 
@@ -122,19 +125,13 @@ async def ask_ai_stream(
             detail="No AI backend is enabled. Set OPENAI_COMPAT_ENABLED=true or GEMINI_ENABLED=true.",
         )
 
-    # 1. Build context from DB + training plan
+    # 1. Build the compact default context; calendar details are fetched on demand.
     context: str = await build_training_context(
         db,
         user_id=get_owner_id(),
-        days=req.context_days,
-        include_activity_details=True,
+        days=min(req.context_days, 2),
+        include_activity_details=False,
     )
-    plan_context: str = await build_plan_context(
-        days_back=req.plan_days_back,
-        days_forward=req.plan_days_forward,
-    )
-    context = context + "\n\n" + plan_context
-
     # 2. Stream AI coach response
     history_dicts: list[dict[str, str]] = [
         {"role": msg.role, "content": msg.content} for msg in req.history
@@ -144,6 +141,7 @@ async def ask_ai_stream(
         """Bridge the blocking SDK iterator into an async generator via a queue."""
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         loop = asyncio.get_event_loop()
+        tool_calls: list[str] = []
 
         def _produce(sync_iter: Iterator[str]) -> None:
             try:
@@ -155,7 +153,14 @@ async def ask_ai_stream(
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
 
-        sync_stream = ask_coach_stream(req.question, context, history_dicts)
+        sync_stream = ask_coach_stream(
+            req.question,
+            context,
+            history_dicts,
+            user_id=get_owner_id(),
+            tool_calls=tool_calls,
+            event_loop=loop,
+        )
         # Run the blocking SDK iterator in a thread pool concurrently with consumption
         producer = asyncio.create_task(asyncio.to_thread(_produce, sync_stream))
 
@@ -165,6 +170,8 @@ async def ask_ai_stream(
                 if item is None:
                     break
                 yield f"data: {json.dumps({'text': item})}\n\n"
+            for tool_name in tool_calls:
+                yield f"data: {json.dumps({'tool': tool_name})}\n\n"
         finally:
             await producer
 
@@ -191,9 +198,7 @@ async def weekly_briefing(
         }
 
     # 1. Build context from DB + training plan
-    context = await build_training_context(
-        db, user_id=get_owner_id(), days=7
-    )
+    context = await build_training_context(db, user_id=get_owner_id(), days=7)
     plan_context = await build_plan_context(days_back=14, days_forward=30)
     context = context + "\n\n" + plan_context
 
@@ -249,10 +254,15 @@ async def _build_laps_with_km_breakdown(
             )
 
             # Filter time-series records for this lap to compute per-km splits inside the lap
-            lap_recs = [
-                r for r in records
-                if lap_start <= r.timestamp <= lap_end and r.distance_m is not None
-            ] if records else []
+            lap_recs = (
+                [
+                    r
+                    for r in records
+                    if lap_start <= r.timestamp <= lap_end and r.distance_m is not None
+                ]
+                if records
+                else []
+            )
 
             if not lap_recs:
                 continue
@@ -262,24 +272,32 @@ async def _build_laps_with_km_breakdown(
             accum_powers = []
 
             for i, r in enumerate(lap_recs):
-                if r.heart_rate_bpm: accum_hrs.append(r.heart_rate_bpm)
-                if r.power_w: accum_powers.append(r.power_w)
+                if r.heart_rate_bpm:
+                    accum_hrs.append(r.heart_rate_bpm)
+                if r.power_w:
+                    accum_powers.append(r.power_w)
 
                 dist_covered = (r.distance_m or 0) - (start_rec.distance_m or 0)
-                is_last = (i == len(lap_recs) - 1)
+                is_last = i == len(lap_recs) - 1
 
                 if dist_covered >= 1000.0 or (is_last and dist_covered > 50):
                     time_diff_s = (r.timestamp - start_rec.timestamp).total_seconds()
                     if time_diff_s > 0:
                         avg_speed = dist_covered / time_diff_s
                         avg_hr = round(sum(accum_hrs) / len(accum_hrs)) if accum_hrs else None
-                        avg_pwr = round(sum(accum_powers) / len(accum_powers)) if accum_powers else None
+                        avg_pwr = (
+                            round(sum(accum_powers) / len(accum_powers)) if accum_powers else None
+                        )
 
                         sub_pace = _format_pace(avg_speed)
                         sub_hr = f"Avg HR: {avg_hr} bpm" if avg_hr else ""
                         sub_pwr = f" ({avg_pwr} W)" if avg_pwr else ""
 
-                        dist_desc = f"{dist_covered/1000:.2f} km" if is_last and dist_covered < 950 else "1.00 km"
+                        dist_desc = (
+                            f"{dist_covered / 1000:.2f} km"
+                            if is_last and dist_covered < 950
+                            else "1.00 km"
+                        )
                         lines.append(
                             f"    • Km {overall_km_counter} ({dist_desc}): Pace {sub_pace} | {sub_hr}{sub_pwr}"
                         )
@@ -318,9 +336,7 @@ async def activity_postmortem(
     laps = laps_res.scalars().all()
 
     # 2. Build context
-    context = await build_training_context(
-        db, user_id=get_owner_id(), days=7
-    )
+    context = await build_training_context(db, user_id=get_owner_id(), days=7)
 
     lap_lines = await _build_laps_with_km_breakdown(db, activity_id, laps)
 
@@ -447,7 +463,6 @@ async def activity_postmortem_stream(
 # ---------------------------------------------------------------------------
 
 
-
 class SessionCreateResponse(BaseModel):
     id: str
     title: str
@@ -497,6 +512,7 @@ class MessageItem(BaseModel):
     id: str
     role: str
     content: str
+    tool_calls: list[str] | None = None
     created_at: str
 
 
@@ -620,7 +636,7 @@ async def get_session_messages(
     )
     msgs = msg_res.scalars().all()
     return [
-        MessageItem(id=m.id, role=m.role, content=m.content, created_at=m.created_at.isoformat())
+        MessageItem(id=m.id, role=m.role, content=m.content, tool_calls=m.tool_calls, created_at=m.created_at.isoformat())
         for m in msgs
     ]
 
@@ -645,6 +661,21 @@ async def session_ask_stream(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
+    history_rows = (
+        (
+            await db.execute(
+                select(DBChatMessage)
+                .where(DBChatMessage.session_id == session_id)
+                .order_by(DBChatMessage.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    history_dicts = [
+        {"role": message.role, "content": message.content} for message in history_rows[-12:]
+    ]
+
     # Persist user message
     user_msg = DBChatMessage(session_id=session_id, role="user", content=req.question)
     db.add(user_msg)
@@ -663,23 +694,14 @@ async def session_ask_stream(
     context: str = await build_training_context(
         db,
         user_id=get_owner_id(),
-        days=req.context_days,
-        include_activity_details=True,
+        days=min(req.context_days, 2),
+        include_activity_details=False,
     )
-    plan_context: str = await build_plan_context(
-        days_back=req.plan_days_back,
-        days_forward=req.plan_days_forward,
-    )
-    context = context + "\n\n" + plan_context
-
-    history_dicts: list[dict[str, str]] = [
-        {"role": msg.role, "content": msg.content} for msg in req.history
-    ]
-
     async def event_generator() -> AsyncIterator[str]:
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         loop = asyncio.get_event_loop()
         accumulated: list[str] = []
+        tool_calls: list[str] = []
 
         def _produce(sync_iter: Iterator[str]) -> None:
             try:
@@ -697,6 +719,9 @@ async def session_ask_stream(
             context,
             history_dicts,
             model=session.model_name or _active_model(),
+            user_id=get_owner_id(),
+            tool_calls=tool_calls,
+            event_loop=loop,
         )
         producer = asyncio.create_task(asyncio.to_thread(_produce, sync_stream))
 
@@ -706,26 +731,35 @@ async def session_ask_stream(
                 if item is None:
                     break
                 yield f"data: {json.dumps({'text': item})}\n\n"
+            for tool_name in tool_calls:
+                yield f"data: {json.dumps({'tool': tool_name})}\n\n"
         finally:
             # Fire the DB persist as a background task so the generator exits immediately.
             # This closes the SSE stream for the client (reader.read() returns done=True)
             # without waiting for the DB write. The task runs independently on the event
             # loop and is NOT cancelled by client disconnect.
-            asyncio.create_task(_persist_ai_response(session_id, req.question, accumulated, producer))
+            asyncio.create_task(
+                _persist_ai_response(session_id, req.question, accumulated, producer, tool_calls)
+            )
 
     async def _persist_ai_response(
         sid: str,
         question: str,
         accumulated: list[str],
         producer: asyncio.Task,
+        tool_calls: list[str],
     ) -> None:
         await producer
-        full_response = "".join(accumulated)
-        if not full_response:
-            return
+        full_response = "".join(accumulated) or "Error communicating with AI."
         async with async_session_factory() as persist_db:
             from datetime import datetime
-            ai_msg = DBChatMessage(session_id=sid, role="assistant", content=full_response)
+
+            ai_msg = DBChatMessage(
+                session_id=sid,
+                role="assistant",
+                content=full_response,
+                tool_calls=list(dict.fromkeys(tool_calls)),
+            )
             sess_res = await persist_db.execute(
                 select(DBChatSession).where(DBChatSession.id == sid)
             )
@@ -763,3 +797,4 @@ async def delete_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
     await db.delete(session)
+    await db.commit()

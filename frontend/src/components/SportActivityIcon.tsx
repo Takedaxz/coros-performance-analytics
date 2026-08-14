@@ -12,7 +12,10 @@ export const SPORT_ICON_URLS: Record<string, string> = {
   hike: "https://img.icons8.com/liquid-glass/96/mountain.png",
   walk: "https://img.icons8.com/liquid-glass/96/walking.png",
   strength: "https://img.icons8.com/liquid-glass/96/dumbbell.png",
-  hyrox: "https://img.icons8.com/?size=100&id=aZCcxa9TqPy7&format=png&color=000000",
+  hyrox: "/hyrox-liquid-glass.svg",
+  climbing: "https://img.icons8.com/liquid-glass/96/climbing.png",
+  skiing: "https://img.icons8.com/liquid-glass/96/skiing.png",
+  hybrid: "https://img.icons8.com/?size=100&id=aZCcxa9TqPy7&format=png&color=000000",
   cardio: "https://img.icons8.com/?size=100&id=aZCcxa9TqPy7&format=png&color=000000",
   multisport: "https://img.icons8.com/?size=100&id=aZCcxa9TqPy7&format=png&color=000000",
   yoga: "https://img.icons8.com/liquid-glass/96/yoga.png",
@@ -29,7 +32,10 @@ const SPORT_VISUALS: Record<string, SportVisual> = {
   hike: { label: "Hike", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
   walk: { label: "Walk", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
   strength: { label: "Strength", background: "rgba(255, 77, 98, 0.14)", color: "var(--color-status-critical)" },
-  hyrox: { label: "Hyrox / Hybrid", background: "rgba(147, 100, 240, 0.14)", color: "#9364f0" },
+  hyrox: { label: "HYROX", background: "rgba(147, 100, 240, 0.14)", color: "#9364f0" },
+  climbing: { label: "Climb", background: "rgba(240, 140, 60, 0.14)", color: "#f08c3c" },
+  skiing: { label: "Skiing", background: "rgba(45, 155, 240, 0.14)", color: "var(--color-accent-exertion)" },
+  hybrid: { label: "Hybrid", background: "rgba(147, 100, 240, 0.14)", color: "#9364f0" },
   cardio: { label: "Cardio", background: "rgba(240, 140, 60, 0.14)", color: "#f08c3c" },
   yoga: { label: "Yoga", background: "rgba(240, 150, 200, 0.14)", color: "#e06cba" },
   badminton: { label: "Badminton", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
@@ -47,12 +53,15 @@ export function resolveSportKey(sport?: string, title?: string, subsport?: strin
 
   // Keyword / Subsport detections
   if (t.includes("treadmill") || t.includes("indoor run") || sub === "101") return "treadmill";
-  if (t.includes("hyrox") || t.includes("hybrid") || sub === "1200") return "hyrox";
+  if (t.includes("hyrox")) return "hyrox";
+  if (t.includes("hybrid") || sub === "1200") return "hybrid";
   if (t.includes("yoga") || sub === "904" || sub === "905") return "yoga";
   if (t.includes("badminton") || sub === "1000") return "badminton";
   if (t.includes("cardio") || t.includes("skierg") || sub === "400" || sub === "701") return "cardio";
   if (t.includes("hike") || sub === "104") return "hike";
   if (t.includes("trail") || sub === "102") return "trail_run";
+  if (s.includes("climb") || s.includes("boulder") || t.includes("climb") || t.includes("boulder")) return "climbing";
+  if (s.includes("ski") || t.includes("ski")) return "skiing";
 
   // Enum sport mappings
   if (s === "run" || s === "running") return "run";
@@ -63,7 +72,10 @@ export function resolveSportKey(sport?: string, title?: string, subsport?: strin
   if (s === "walk" || s === "walking") return "walk";
   if (s === "hike" || s === "hiking") return "hike";
   if (s === "strength" || s === "gym") return "strength";
-  if (s === "multisport") return "hyrox";
+  if (s === "indoor_climb" || s === "bouldering") return "climbing";
+  if (s === "xc_ski") return "skiing";
+  if (s === "hybrid") return "hybrid";
+  if (s === "multisport") return "multisport";
 
   return s || "other";
 }
@@ -94,6 +106,24 @@ export function SportIcon({
   const iconColor = color || visual.color;
   const key = resolveSportKey(sport, title, subsport);
   const iconUrl = SPORT_ICON_URLS[key] ?? SPORT_ICON_URLS.other;
+
+  if (key === "hyrox") {
+    return (
+      <span
+        className="sport-activity-icon"
+        role="img"
+        aria-label={title || "HYROX icon"}
+        style={{
+          width: `${size}px`,
+          height: `${size}px`,
+          display: "inline-block",
+          verticalAlign: "middle",
+          background: `center / contain no-repeat url("${iconUrl}")`,
+          flexShrink: 0,
+        }}
+      />
+    );
+  }
 
   return (
     <span

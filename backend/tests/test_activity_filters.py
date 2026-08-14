@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import date, datetime
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -11,6 +12,7 @@ from src.api.routes.activity_routes import (
     _period_bounds,
     _validate_range,
 )
+from src.api.routes.dashboard_routes import _training_volume_bounds, training_volume_trend
 from src.parsers.fit_parser import _fit_lap_trigger
 
 
@@ -32,6 +34,49 @@ def test_invalid_filter_values_raise_422() -> None:
         _period_bounds("month", "2026-13")
     with pytest.raises(HTTPException, match="minimum cannot exceed maximum"):
         _validate_range("Distance", 10, 5)
+
+
+def test_training_volume_bounds_are_inclusive_and_validated() -> None:
+    assert _training_volume_bounds(date(2026, 8, 1), date(2026, 8, 3)) == (
+        datetime(2026, 8, 1),
+        datetime(2026, 8, 4),
+    )
+    with pytest.raises(HTTPException, match="start_date cannot be after end_date"):
+        _training_volume_bounds(date(2026, 8, 4), date(2026, 8, 3))
+
+
+@pytest.mark.asyncio
+async def test_training_volume_serializes_aggregate_rows() -> None:
+    class Result:
+        def all(self) -> list[SimpleNamespace]:
+            return [
+                SimpleNamespace(
+                    period_start=datetime(2026, 8, 3),
+                    distance_m=12500,
+                    duration_s=4200,
+                    training_load=82,
+                    activity_count=2,
+                )
+            ]
+
+    class Session:
+        async def execute(self, _query: object) -> Result:
+            return Result()
+
+    assert await training_volume_trend(
+        group_by="week",
+        start_date=date(2026, 8, 1),
+        end_date=date(2026, 8, 9),
+        db=Session(),  # type: ignore[arg-type]
+    ) == [
+        {
+            "period_start": "2026-08-03",
+            "distance_m": 12500,
+            "duration_s": 4200,
+            "training_load": 82,
+            "activity_count": 2,
+        }
+    ]
 
 
 def test_lap_elapsed_uses_first_lap_as_origin() -> None:

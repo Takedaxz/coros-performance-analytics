@@ -214,6 +214,7 @@ All settings are in `.env` (copy from `.env.example`):
 | `COROS_EMAIL` | For sync | — | COROS account email |
 | `COROS_PASSWORD` | For sync | — | COROS account password |
 | `GEMINI_API_KEY` | Optional | — | Google Gemini API key (enables Gemini Direct models) |
+| `BRAVE_SEARCH_API_KEY` | Optional | — | Server-only Brave Search API key for current coaching research and event rules |
 | `GEMINI_MODEL` | No | `gemini-3.5-flash` | Default Gemini model ID |
 | `OPENAI_COMPAT_API_KEY` | Optional | — | OpenAI-compatible API key (enables OpenAI-compatible gateway models) |
 | `OPENAI_COMPAT_BASE_URL` | Optional | `https://gen.ai.kku.ac.th/okmd/api/v1` | OpenAI-compatible Base URL (KKU OKMD, vLLM, LM Studio, Ollama) |

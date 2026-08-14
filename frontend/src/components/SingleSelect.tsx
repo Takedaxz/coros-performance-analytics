@@ -27,7 +27,7 @@ export default function SingleSelect({
   return (
     <details className="single-select" id={id} name={detailsName}>
       <summary className="single-select-trigger" aria-label={ariaLabel}>
-        {selectedLabel}
+        <span className="single-select-trigger-label">{selectedLabel}</span>
         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none">
           <path d="m3 4.5 3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>

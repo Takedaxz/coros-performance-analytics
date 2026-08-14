@@ -3,17 +3,52 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
-import NumberStepper from "@/components/NumberStepper";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { WaveThinkingText } from "@/components/WaveThinkingText";
+import { removeLegacyEvidenceUsed } from "./answer-display";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+const TOOL_LABELS: Record<string, string> = {
+  compare_activities: "Workout comparison",
+  get_activities: "Activities",
+  get_activity_detail: "Workout details",
+  get_fitness_history: "Fitness history",
+  get_health_trend: "Health & recovery",
+  get_scheduled_workout_details: "Workout details",
+  get_training_plan: "Training plan",
+  search_coaching_knowledge: "Coaching library",
+  search_live_coaching_sources: "Web sources",
+  web_search: "Web sources",
+};
+
+function toolLabel(tool: string): string {
+  return TOOL_LABELS[tool] ?? tool.replace(/^get_/, "").replaceAll("_", " ");
+}
 
 function AiGlyph() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+function SourcesIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="6" />
+      <path d="m16 16 4 4" />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </svg>
   );
 }
@@ -69,6 +104,34 @@ function CheckIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="20 6 9 17 4 12" />
     </svg>
+  );
+}
+
+function CopyMessageButton({ content, label }: { content: string; label: string }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+    window.setTimeout(() => setCopyState("idle"), 1_500);
+  };
+
+  const status = copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : `Copy ${label}`;
+
+  return (
+    <button
+      className={`message-copy-button${copyState === "failed" ? " is-failed" : ""}`}
+      type="button"
+      aria-label={status}
+      title={status}
+      onClick={() => void handleCopy()}
+    >
+      {copyState === "copied" ? <CheckIcon /> : copyState === "failed" ? <XIcon /> : <CopyIcon />}
+    </button>
   );
 }
 
@@ -172,12 +235,14 @@ type ModelsResponse = {
 type Message = {
   role: "user" | "ai";
   content: string;
+  tools?: string[];
 };
 
 type DBMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  tool_calls?: string[];
   created_at: string;
 };
 
@@ -211,8 +276,6 @@ export default function AiPage() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [sessionPendingDelete, setSessionPendingDelete] = useState<Session | null>(null);
-  const [planDaysBack, setPlanDaysBack] = useState(7);
-  const [planDaysForward, setPlanDaysForward] = useState(14);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [providers, setProviders] = useState<ProviderGroup[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
@@ -297,6 +360,7 @@ export default function AiPage() {
         setMessages(dbMsgs.map((m) => ({
           role: m.role === "assistant" ? "ai" : "user",
           content: m.content,
+          tools: m.tool_calls,
         })));
       } catch (err) {
         if (err instanceof Error && err.name !== "AbortError") {
@@ -412,8 +476,6 @@ export default function AiPage() {
         body: JSON.stringify({
           question: userMsg,
           context_days: 14,
-          plan_days_back: planDaysBack,
-          plan_days_forward: planDaysForward,
           history: baseHistory.slice(-12).map((m) => ({
             role: m.role === "ai" ? "assistant" : "user",
             content: m.content,
@@ -461,6 +523,14 @@ export default function AiPage() {
                     if (updated.length > 0) {
                       updated[updated.length - 1] = { ...updated[updated.length - 1], content: snapshot };
                     }
+                    return updated;
+                  });
+                }
+                if (parsed.tool) {
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    const last = updated.at(-1);
+                    if (last?.role === "ai") last.tools = [...(last.tools ?? []), parsed.tool];
                     return updated;
                   });
                 }
@@ -655,27 +725,6 @@ export default function AiPage() {
                 )}
               </select>
             </label>
-            <div className="ai-link-context">
-              <span className="ai-link-context-label">Calendar context</span>
-              <span className="ai-link-context-range">
-                <NumberStepper
-                  ariaLabel="Calendar days back"
-                  value={planDaysBack}
-                  onChange={(value) => setPlanDaysBack(Number(value) || 0)}
-                  compact
-                />
-                <span>days back</span>
-              </span>
-              <span className="ai-link-context-range">
-                <NumberStepper
-                  ariaLabel="Calendar days forward"
-                  value={planDaysForward}
-                  onChange={(value) => setPlanDaysForward(Number(value) || 0)}
-                  compact
-                />
-                <span>days forward</span>
-              </span>
-            </div>
             {activeSessionId && !isEmpty && (
               <>
                 <button className="ai-link-tool-button" onClick={handleExportMarkdown} title="Export as Markdown">
@@ -894,11 +943,18 @@ export default function AiPage() {
                         if (msg.role === "user") {
                           return (
                             <div key={idx} className="msg-row user-row msg-enter" style={{ animationDelay: "0ms" }}>
-                              <div className="user-pill">{msg.content}</div>
+                              <div className="user-message-content">
+                                <div className="user-pill">{msg.content}</div>
+                                <div className="message-copy-actions">
+                                  <CopyMessageButton content={msg.content} label="your message" />
+                                </div>
+                              </div>
                             </div>
                           );
                         }
                         const { thinking, answer, isThinkingActive } = parseThinkingAndAnswer(msg.content);
+                        const displayAnswer = removeLegacyEvidenceUsed(answer);
+                        const tools = msg.tools ? [...new Set(msg.tools)] : [];
                         return (
                           <div key={idx} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
                             <div className="ai-text">
@@ -907,11 +963,28 @@ export default function AiPage() {
                               )}
                               {msg.content === "" && isLoading ? (
                                 <WaveThinkingText text="thinking" />
-                              ) : answer ? (
+                              ) : displayAnswer ? (
                                 <div className="markdown-body">
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{answer.replaceAll(" -- ", " — ")}</ReactMarkdown>
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayAnswer.replaceAll(" -- ", " — ")}</ReactMarkdown>
                                 </div>
                               ) : null}
+                              {tools.length > 0 && (
+                                <div className="ai-tool-calls" aria-label={`Evidence consulted: ${tools.map(toolLabel).join(", ")}`}>
+                                  <span className="ai-tool-calls-icon" aria-hidden="true">
+                                    <SourcesIcon />
+                                  </span>
+                                  {tools.map((tool) => (
+                                    <span className="ai-tool-chip" key={tool}>
+                                      {toolLabel(tool)}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {displayAnswer && (
+                                <div className="message-copy-actions">
+                                  <CopyMessageButton content={displayAnswer} label="coach response" />
+                                </div>
+                              )}
                               {isErrorMsg && (
                                 <div style={{ marginTop: "var(--space-3)" }}>
                                   <button id="retry-btn" className="btn btn-secondary btn-sm" onClick={handleRetry} disabled={isLoading} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>

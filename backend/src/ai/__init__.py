@@ -5,11 +5,16 @@ Routes requests dynamically across all configured AI backends
 the selected model ID.
 """
 
+import asyncio
+import logging
 from collections.abc import Iterator
 from typing import Any
 
 from src.ai import gemini_client, openai_compat_client
+from src.ai.coach_agent import ask_coach_with_tools, ask_coach_with_tools_stream
 from src.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def _openai_compat_ready() -> bool:
@@ -28,25 +33,23 @@ def list_provider_models() -> list[dict[str, Any]]:
 
     if _gemini_ready():
         gem_models = gemini_client.list_models()
-        providers.append({
-            "id": "gemini",
-            "name": "Google Gemini",
-            "models": [
-                {"id": f"gemini:{m}", "name": m}
-                for m in gem_models
-            ],
-        })
+        providers.append(
+            {
+                "id": "gemini",
+                "name": "Google Gemini",
+                "models": [{"id": f"gemini:{m}", "name": m} for m in gem_models],
+            }
+        )
 
     if _openai_compat_ready():
         raw_models = openai_compat_client.list_models()
-        providers.append({
-            "id": "openai_compat",
-            "name": "OKMD OpenAI-Compatible",
-            "models": [
-                {"id": f"openai_compat:{m}", "name": m}
-                for m in raw_models
-            ],
-        })
+        providers.append(
+            {
+                "id": "openai_compat",
+                "name": "OKMD OpenAI-Compatible",
+                "models": [{"id": f"openai_compat:{m}", "name": m} for m in raw_models],
+            }
+        )
 
     return providers
 
@@ -96,21 +99,21 @@ def resolve_model(model_name: str | None) -> tuple[str, str]:
 def ask_coach(
     question: str,
     context: str,
-    history: list[dict] | None = None,
+    history: list[dict[str, str]] | None = None,
     model: str | None = None,
+    *,
+    user_id: str,
+    tool_calls: list[str],
+    event_loop: asyncio.AbstractEventLoop,
 ) -> str:
     provider, clean_model = resolve_model(model)
-    if provider == "gemini":
-        try:
-            res = gemini_client.ask_coach(question, context, history, model=clean_model)
-            if res and not res.startswith("Error"):
-                return res
-        except Exception as e:
-            logger.warning("Gemini ask_coach failed, attempting fallback to OKMD: %s", e)
-        if _openai_compat_ready():
-            return openai_compat_client.ask_coach(question, context, history)
+    try:
+        return ask_coach_with_tools(
+            provider, clean_model, question, context, history, user_id, event_loop, tool_calls
+        )
+    except Exception:
+        logger.exception("AI Coach request failed", extra={"provider": provider})
         return "Error communicating with AI."
-    return openai_compat_client.ask_coach(question, context, history)
 
 
 def ask_coach_stream(
@@ -118,25 +121,19 @@ def ask_coach_stream(
     context: str,
     history: list[dict[str, str]] | None = None,
     model: str | None = None,
+    *,
+    user_id: str,
+    tool_calls: list[str],
+    event_loop: asyncio.AbstractEventLoop,
 ) -> Iterator[str]:
     provider, clean_model = resolve_model(model)
-    if provider == "gemini":
-        yielded_any = False
-        try:
-            for chunk in gemini_client.ask_coach_stream(question, context, history, model=clean_model):
-                if chunk and not chunk.startswith("Error communicating"):
-                    yielded_any = True
-                    yield chunk
-                elif not yielded_any and chunk.startswith("Error communicating"):
-                    raise RuntimeError(chunk)
-        except Exception as e:
-            logger.warning("Gemini ask_coach_stream failed (%s) — attempting fallback to OKMD", e)
-            if not yielded_any and _openai_compat_ready():
-                yield from openai_compat_client.ask_coach_stream(question, context, history)
-            elif not yielded_any:
-                yield "Error communicating with AI."
-    else:
-        yield from openai_compat_client.ask_coach_stream(question, context, history, model=clean_model)
+    try:
+        yield from ask_coach_with_tools_stream(
+            provider, clean_model, question, context, history, user_id, event_loop, tool_calls
+        )
+    except Exception:
+        logger.exception("AI Coach stream failed", extra={"provider": provider})
+        yield "Error communicating with AI."
 
 
 def generate_briefing(context: str, model: str | None = None) -> str:
@@ -158,7 +155,9 @@ def generate_postmortem_stream(
 ) -> Iterator[str]:
     provider, clean_model = resolve_model(model)
     if provider == "gemini":
-        yield from gemini_client.generate_postmortem_stream(context, activity_context, model=clean_model)
+        yield from gemini_client.generate_postmortem_stream(
+            context, activity_context, model=clean_model
+        )
     else:
         yield from openai_compat_client.generate_postmortem_stream(context, activity_context)
 
@@ -173,4 +172,3 @@ __all__ = [
     "list_provider_models",
     "resolve_model",
 ]
-

@@ -1,9 +1,10 @@
 import asyncio
 import base64
 import hashlib
+import json
 import logging
 import random
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from Crypto.Cipher import AES
@@ -26,6 +27,15 @@ def _rate_limit_delay(retry_after: str | None) -> float:
     except ValueError:
         seconds = 1.0
     return min(max(seconds, 0.0), 5.0)
+
+
+def _training_hub_token_invalid(status_code: int, body: object) -> bool:
+    return status_code == 401 or (
+        status_code == 200
+        and isinstance(body, dict)
+        and body.get("result") != "0000"
+        and "token" in str(body.get("message", "")).lower()
+    )
 
 
 class CorosApiClientError(Exception):
@@ -73,9 +83,7 @@ class CorosApiClient:
             user_id = await self.redis.get(_REDIS_KEY_USER_ID)
             if token:
                 self.access_token = token.decode() if isinstance(token, bytes) else token
-                self.user_id = (
-                    user_id.decode() if isinstance(user_id, bytes) else user_id
-                )
+                self.user_id = user_id.decode() if isinstance(user_id, bytes) else user_id
                 return True
         except Exception:
             logger.warning("redis_token_load_failed: falling back to fresh login")
@@ -160,6 +168,17 @@ class CorosApiClient:
             "accessToken": self.access_token,
         }
 
+    def _get_training_hub_headers(self) -> dict[str, str]:
+        if not self.access_token:
+            raise CorosApiClientError("Not logged in")
+        headers = {
+            "accesstoken": self.access_token,
+            "Accept": "application/json, text/plain, */*",
+        }
+        if self.user_id:
+            headers["yfheader"] = json.dumps({"userId": self.user_id})
+        return headers
+
     async def _get_json(
         self, client: httpx.AsyncClient, url: str, params: dict[str, Any] | None = None
     ) -> dict:
@@ -170,10 +189,10 @@ class CorosApiClient:
             logger.warning("coros_api: rate limited, retrying once in %.1fs", delay)
             await asyncio.sleep(delay)
             resp = await client.get(url, params=params, headers=self._get_auth_headers())
-        
+
         body = None
         is_token_invalid = resp.status_code == 401
-        
+
         if resp.status_code == 200:
             body = resp.json()
             if body.get("result") != "0000" and "token" in body.get("message", "").lower():
@@ -203,7 +222,7 @@ class CorosApiClient:
                     "pageNumber": page_number,
                     "size": size,
                 }
-                
+
                 body = await self._get_json(client, url, params)
 
                 if body.get("result") != "0000":
@@ -211,18 +230,99 @@ class CorosApiClient:
 
                 data = body.get("data", {})
                 page_data = data.get("dataList", data.get("list", []))
-                
+
                 if not page_data:
                     break
-                    
+
                 all_activities.extend(page_data)
-                
+
                 if len(page_data) < size:
                     break
-                    
+
                 page_number += 1
 
         return all_activities
+
+    async def fetch_training_schedule(self, start_day: str, end_day: str) -> dict[str, object]:
+        """Fetch calendar workouts from the COROS Training Hub."""
+        url = f"{self.base_url}/training/schedule/query"
+        params: dict[str, str | int] = {
+            "startDate": start_day,
+            "endDate": end_day,
+            "supportRestExercise": 1,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            for attempt in range(2):
+                response = await client.get(
+                    url, params=params, headers=self._get_training_hub_headers()
+                )
+                body: object = response.json() if response.status_code == 200 else None
+                if not attempt and _training_hub_token_invalid(response.status_code, body):
+                    await self._invalidate_token()
+                    await self.login()
+                    continue
+                response.raise_for_status()
+                if not isinstance(body, dict):
+                    raise CorosApiClientError("Training calendar returned an invalid response.")
+                if body.get("result") != "0000":
+                    raise CorosApiClientError(
+                        f"Failed to fetch training calendar: {body.get('message')}"
+                    )
+                data = body.get("data")
+                return cast("dict[str, object]", data) if isinstance(data, dict) else {}
+        raise CorosApiClientError("Failed to fetch training calendar")
+
+    async def post_training_hub(self, path: str, payload: object) -> object:
+        """Send a confirmed write or calculation request to the Training Hub."""
+        if not path.startswith("/training/"):
+            raise CorosApiClientError("Unsupported Training Hub path")
+        url = f"{self.base_url}{path}"
+        async with httpx.AsyncClient(timeout=30) as client:
+            for attempt in range(2):
+                response = await client.post(
+                    url, json=payload, headers=self._get_training_hub_headers()
+                )
+                body: object = response.json() if response.status_code == 200 else None
+                if not attempt and _training_hub_token_invalid(response.status_code, body):
+                    await self._invalidate_token()
+                    await self.login()
+                    continue
+                response.raise_for_status()
+                if not isinstance(body, dict):
+                    raise CorosApiClientError("Training Hub returned an invalid response.")
+                if body.get("result") != "0000":
+                    raise CorosApiClientError(
+                        f"Training Hub rejected the request: {body.get('message')}"
+                    )
+                return body.get("data")
+        raise CorosApiClientError("Training Hub request failed")
+
+    async def get_training_hub(
+        self, path: str, params: dict[str, str | int] | None = None
+    ) -> object:
+        """Read a Training Hub resource with the authenticated athlete session."""
+        if not path.startswith("/training/"):
+            raise CorosApiClientError("Unsupported Training Hub path")
+        url = f"{self.base_url}{path}"
+        async with httpx.AsyncClient(timeout=30) as client:
+            for attempt in range(2):
+                response = await client.get(
+                    url, params=params, headers=self._get_training_hub_headers()
+                )
+                body: object = response.json() if response.status_code == 200 else None
+                if not attempt and _training_hub_token_invalid(response.status_code, body):
+                    await self._invalidate_token()
+                    await self.login()
+                    continue
+                response.raise_for_status()
+                if not isinstance(body, dict):
+                    raise CorosApiClientError("Training Hub returned an invalid response.")
+                if body.get("result") != "0000":
+                    raise CorosApiClientError(
+                        f"Training Hub rejected the request: {body.get('message')}"
+                    )
+                return body.get("data")
+        raise CorosApiClientError("Training Hub request failed")
 
     async def fetch_activity_fit_url(self, activity_id: str, sport_type: int) -> str:
         """Call POST /activity/detail/download to get the S3 FIT file URL."""
@@ -236,15 +336,15 @@ class CorosApiClient:
         async with httpx.AsyncClient(timeout=30) as client:
             headers = self._get_auth_headers()
             resp = await client.post(url, params=params, headers=headers)
-            
+
             body = None
             is_token_invalid = resp.status_code == 401
-            
+
             if resp.status_code == 200:
                 body = resp.json()
                 if body.get("result") != "0000" and "token" in body.get("message", "").lower():
                     is_token_invalid = True
-            
+
             if is_token_invalid:
                 logger.info("coros_api: refreshing token for FIT download URL")
                 await self._invalidate_token()
@@ -257,7 +357,7 @@ class CorosApiClient:
             res_json = body if body is not None else resp.json()
             if res_json.get("result") != "0000":
                 raise CorosApiClientError(f"Failed to get FIT url: {res_json.get('message')}")
-            
+
             file_url = res_json.get("data", {}).get("fileUrl")
             if not file_url:
                 raise CorosApiClientError("Response missing fileUrl")
@@ -292,7 +392,6 @@ class CorosApiClient:
             resp = await client.get(url)
             resp.raise_for_status()
             return resp.content
-
 
     async def fetch_daily_metrics(self, start_day: str, end_day: str) -> list[dict]:
         """Fetch daily health metrics for a date range (YYYYMMDD)."""
@@ -353,9 +452,7 @@ class CorosApiClient:
         try:
             token = await self.redis.get(_REDIS_KEY_MOBILE_TOKEN)
             if token:
-                self.mobile_access_token = (
-                    token.decode() if isinstance(token, bytes) else token
-                )
+                self.mobile_access_token = token.decode() if isinstance(token, bytes) else token
                 return True
         except Exception:
             logger.warning("redis_mobile_token_load_failed")

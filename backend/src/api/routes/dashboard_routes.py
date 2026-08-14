@@ -1,10 +1,11 @@
 """Dashboard routes: aggregated data for the home dashboard."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from statistics import fmean, median
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import String, cast, func, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.engine import get_db_session
@@ -12,6 +13,17 @@ from src.db.models import Activity, DailyHealth, FitnessEstimate, SleepSession, 
 from src.metrics.derived import compute_cardio_fitness_age
 
 router = APIRouter()
+
+TrainingVolumeGroup = Literal["week", "month", "year"]
+
+
+def _training_volume_bounds(start_date: date, end_date: date) -> tuple[datetime, datetime]:
+    if start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date cannot be after end_date")
+    return (
+        datetime.combine(start_date, time.min),
+        datetime.combine(end_date + timedelta(days=1), time.min),
+    )
 
 
 @router.get("/summary")
@@ -172,6 +184,57 @@ async def training_load_trend(
             "total_duration_s": r.total_duration_s or 0,
         }
         for r in rows
+    ]
+
+
+@router.get("/training-volume")
+async def training_volume_trend(
+    group_by: TrainingVolumeGroup = "month",
+    start_date: date | None = None,
+    end_date: date | None = None,
+    sport: str | None = None,
+    db: AsyncSession = Depends(get_db_session),
+) -> list[dict]:
+    """Aggregate training volume by calendar period for the Trends chart."""
+    today = date.today()
+    resolved_end_date = end_date or today
+    resolved_start_date = start_date or resolved_end_date - timedelta(days=365)
+    start, end = _training_volume_bounds(resolved_start_date, resolved_end_date)
+
+    conditions = [Activity.start_time >= start, Activity.start_time < end]
+    if sport == "treadmill":
+        conditions.append(
+            or_(
+                Activity.subsport == "101",
+                Activity.title.ilike("%treadmill%"),
+                Activity.title.ilike("%indoor run%"),
+            )
+        )
+    elif sport:
+        conditions.append(Activity.sport == sport)
+
+    period_start = func.date_trunc(group_by, Activity.start_time).label("period_start")
+    result = await db.execute(
+        select(
+            period_start,
+            func.sum(Activity.distance_m).label("distance_m"),
+            func.sum(Activity.elapsed_time_s).label("duration_s"),
+            func.sum(Activity.training_load_vendor).label("training_load"),
+            func.count(Activity.id).label("activity_count"),
+        )
+        .where(*conditions)
+        .group_by(period_start)
+        .order_by(period_start)
+    )
+    return [
+        {
+            "period_start": row.period_start.date().isoformat(),
+            "distance_m": row.distance_m or 0,
+            "duration_s": row.duration_s or 0,
+            "training_load": row.training_load or 0,
+            "activity_count": row.activity_count,
+        }
+        for row in result.all()
     ]
 
 

@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     openai_compat_base_url: str = "https://gen.ai.kku.ac.th/okmd/api/v1"
     openai_compat_model: str = "gemini-3.5-flash-lite"
 
+    # --- Brave Search ---
+    brave_search_api_key: str = ""
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"

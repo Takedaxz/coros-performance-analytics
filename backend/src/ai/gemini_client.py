@@ -24,15 +24,23 @@ logger = logging.getLogger(__name__)
 _FALLBACK_MODELS: list[str] = [
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
-    "gemini-2.5-flash", 
+    "gemini-2.5-flash",
 ]
 
 _RATE_LIMIT_TERMS: frozenset[str] = frozenset(["429", "exhausted", "quota", "limit", "demand"])
-_TRANSIENT_TERMS: frozenset[str] = frozenset([
-    "503", "unavailable", "temporary",
-    "disconnected", "connection", "protocol",
-    "reset", "eof", "broken",
-])
+_TRANSIENT_TERMS: frozenset[str] = frozenset(
+    [
+        "503",
+        "unavailable",
+        "temporary",
+        "disconnected",
+        "connection",
+        "protocol",
+        "reset",
+        "eof",
+        "broken",
+    ]
+)
 
 
 def _classify_error(err_msg: str) -> str:
@@ -76,12 +84,17 @@ def retry_with_backoff(
             if attempt == max_retries or kind in ("permanent", "rate_limit"):
                 logger.warning(
                     "Gemini API call [%s] advancing to model fallback: %s",
-                    kind, e,
+                    kind,
+                    e,
                 )
                 raise
             logger.warning(
                 "Gemini API transient failure [%s]. Retrying in %.1fs... (attempt %d/%d): %s",
-                kind, delay, attempt + 1, max_retries + 1, e,
+                kind,
+                delay,
+                attempt + 1,
+                max_retries + 1,
+                e,
             )
             time.sleep(delay)
             delay *= backoff_factor
@@ -112,12 +125,17 @@ def retry_generator_with_backoff(
             if attempt == max_retries or kind in ("permanent", "rate_limit"):
                 logger.warning(
                     "Gemini API stream call [%s] advancing to model fallback: %s",
-                    kind, e,
+                    kind,
+                    e,
                 )
                 raise
             logger.warning(
                 "Gemini API stream transient failure [%s]. Retrying in %.1fs... (attempt %d/%d): %s",
-                kind, delay, attempt + 1, max_retries + 1, e,
+                kind,
+                delay,
+                attempt + 1,
+                max_retries + 1,
+                e,
             )
             time.sleep(delay)
             delay *= backoff_factor
@@ -145,6 +163,7 @@ def list_models() -> list[str]:
 # Internal helpers that try each model in the chain
 # ---------------------------------------------------------------------------
 
+
 def _call_with_model_fallback(
     client: genai.Client,
     build_request: Callable[[str], types.GenerateContentResponse],
@@ -166,7 +185,9 @@ def _call_with_model_fallback(
             if kind == "rate_limit" and model != chain[-1]:
                 logger.warning(
                     "Gemini %s rate-limited on %s — trying next model. Error: %s",
-                    label, model, e,
+                    label,
+                    model,
+                    e,
                 )
                 last_exc = e
                 continue
@@ -199,7 +220,9 @@ def _stream_with_model_fallback(
             if kind == "rate_limit" and model != chain[-1]:
                 logger.warning(
                     "Gemini %s stream rate-limited on %s — trying next model. Error: %s",
-                    label, model, e,
+                    label,
+                    model,
+                    e,
                 )
                 last_exc = e
                 continue
@@ -212,10 +235,11 @@ def _stream_with_model_fallback(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def ask_coach(
     question: str,
     context: str,
-    history: list[dict] = None,
+    history: list[dict[str, str]] | None = None,
     model: str | None = None,
 ) -> str:
     """Ask the AI coach a question, given the user's data context and conversation history."""
@@ -287,8 +311,14 @@ def ask_coach_stream(
 
     try:
         in_thinking = False
-        for chunk in _stream_with_model_fallback(client, build_request, target_model, "ask_coach_stream"):
-            if not chunk.candidates or not chunk.candidates[0].content or not chunk.candidates[0].content.parts:
+        for chunk in _stream_with_model_fallback(
+            client, build_request, target_model, "ask_coach_stream"
+        ):
+            if (
+                not chunk.candidates
+                or not chunk.candidates[0].content
+                or not chunk.candidates[0].content.parts
+            ):
                 if chunk.text:
                     if in_thinking:
                         yield "</think>\n"
@@ -368,7 +398,9 @@ def generate_postmortem(context: str, activity_context: str, model: str | None =
         return f"Error: {str(e)}"
 
 
-def generate_postmortem_stream(context: str, activity_context: str, model: str | None = None) -> Iterator[str]:
+def generate_postmortem_stream(
+    context: str, activity_context: str, model: str | None = None
+) -> Iterator[str]:
     """Stream a postmortem analysis chunk by chunk."""
     client = get_client()
     if not client:
@@ -392,6 +424,3 @@ def generate_postmortem_stream(context: str, activity_context: str, model: str |
                 yield chunk.text
     except Exception as e:
         yield f"Error: {str(e)}"
-
-
-
