@@ -391,6 +391,11 @@ async def fetch_coros_calendar(
         )
     except CorosApiClientError as exc:
         raise HTTPException(status_code=502, detail=f"COROS Calendar unavailable: {exc}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="COROS Calendar unavailable: network request failed.",
+        ) from exc
 
 
 async def _fetch_coros_calendar(

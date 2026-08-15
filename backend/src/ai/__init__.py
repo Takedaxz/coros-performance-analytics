@@ -12,9 +12,25 @@ from typing import Any
 
 from src.ai import gemini_client, openai_compat_client
 from src.ai.coach_agent import ask_coach_with_tools, ask_coach_with_tools_stream
+from src.ai.coach_tools import ToolCallRecord
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite"
+_GEMINI_RATE_LIMIT_TERMS = ("429", "quota", "exhausted", "resource exhausted")
+
+
+def _can_fallback_to_gemini_flash_lite(
+    provider: str, model: str, error: Exception, tool_calls: list[ToolCallRecord]
+) -> bool:
+    """Return whether a clean Gemini request can safely use the configured fallback."""
+    return (
+        provider == "gemini"
+        and model != _GEMINI_FALLBACK_MODEL
+        and not tool_calls
+        and any(term in str(error).lower() for term in _GEMINI_RATE_LIMIT_TERMS)
+    )
 
 
 def _openai_compat_ready() -> bool:
@@ -103,7 +119,7 @@ def ask_coach(
     model: str | None = None,
     *,
     user_id: str,
-    tool_calls: list[str],
+    tool_calls: list[ToolCallRecord],
     event_loop: asyncio.AbstractEventLoop,
 ) -> str:
     provider, clean_model = resolve_model(model)
@@ -111,7 +127,25 @@ def ask_coach(
         return ask_coach_with_tools(
             provider, clean_model, question, context, history, user_id, event_loop, tool_calls
         )
-    except Exception:
+    except Exception as error:
+        if _can_fallback_to_gemini_flash_lite(provider, clean_model, error, tool_calls):
+            logger.warning(
+                "Gemini Coach quota exhausted; retrying with Flash Lite",
+                extra={"model": clean_model, "fallback_model": _GEMINI_FALLBACK_MODEL},
+            )
+            try:
+                return ask_coach_with_tools(
+                    provider,
+                    _GEMINI_FALLBACK_MODEL,
+                    question,
+                    context,
+                    history,
+                    user_id,
+                    event_loop,
+                    tool_calls,
+                )
+            except Exception:
+                logger.exception("Gemini Coach fallback failed")
         logger.exception("AI Coach request failed", extra={"provider": provider})
         return "Error communicating with AI."
 
@@ -123,15 +157,40 @@ def ask_coach_stream(
     model: str | None = None,
     *,
     user_id: str,
-    tool_calls: list[str],
+    tool_calls: list[ToolCallRecord],
     event_loop: asyncio.AbstractEventLoop,
 ) -> Iterator[str]:
     provider, clean_model = resolve_model(model)
+    streamed_text = False
     try:
-        yield from ask_coach_with_tools_stream(
+        for chunk in ask_coach_with_tools_stream(
             provider, clean_model, question, context, history, user_id, event_loop, tool_calls
-        )
-    except Exception:
+        ):
+            streamed_text = True
+            yield chunk
+    except Exception as error:
+        if (
+            not streamed_text
+            and _can_fallback_to_gemini_flash_lite(provider, clean_model, error, tool_calls)
+        ):
+            logger.warning(
+                "Gemini Coach quota exhausted; streaming with Flash Lite",
+                extra={"model": clean_model, "fallback_model": _GEMINI_FALLBACK_MODEL},
+            )
+            try:
+                yield from ask_coach_with_tools_stream(
+                    provider,
+                    _GEMINI_FALLBACK_MODEL,
+                    question,
+                    context,
+                    history,
+                    user_id,
+                    event_loop,
+                    tool_calls,
+                )
+                return
+            except Exception:
+                logger.exception("Gemini Coach streaming fallback failed")
         logger.exception("AI Coach stream failed", extra={"provider": provider})
         yield "Error communicating with AI."
 

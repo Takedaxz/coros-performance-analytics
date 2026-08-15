@@ -3,9 +3,11 @@
 import asyncio
 import datetime as dt
 from collections.abc import Callable
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 
 from sqlalchemy import select
+from typing_extensions import TypedDict
 
 from src.ai.brave_search import search_live_coaching_sources as search_web
 from src.ai.context_builder import build_plan_context
@@ -36,21 +38,26 @@ _SPORT_ALIASES: dict[str, SportType] = {
 }
 
 
+class ToolCallRecord(TypedDict):
+    name: str
+    arguments: dict[str, Any]
+
+
 def coach_tool_functions(
     user_id: str,
     event_loop: asyncio.AbstractEventLoop,
-    tool_calls: list[str] | None = None,
 ) -> list[Callable[..., dict[str, Any]]]:
     """Return SDK-callable functions bound to one authenticated user."""
 
-    def run(name: str, **arguments: Any) -> dict[str, Any]:
-        if tool_calls is not None:
-            if len(tool_calls) >= MAX_TOOL_CALLS:
-                return {"error": "Tool call limit reached; answer from the data already returned."}
-            tool_calls.append(name)
-        return asyncio.run_coroutine_threadsafe(
+    def run(name: str, timeout_seconds: float = 15.0, **arguments: Any) -> dict[str, Any]:
+        future = asyncio.run_coroutine_threadsafe(
             _execute_tool(name, user_id, arguments), event_loop
-        ).result(timeout=15)
+        )
+        try:
+            return future.result(timeout=timeout_seconds)
+        except FutureTimeoutError:
+            future.cancel()
+            return {"error": f"{name} timed out."}
 
     def get_health_trend(days: int) -> dict[str, Any]:
         """Get health, sleep, readiness, and recovery trends for 7, 14, 28, or 56 days."""
@@ -78,7 +85,7 @@ def coach_tool_functions(
 
     def get_scheduled_workout_details(date: str) -> dict[str, Any]:
         """Get the structured COROS workouts scheduled on one date, including steps and targets."""
-        return run("get_scheduled_workout_details", date=date)
+        return run("get_scheduled_workout_details", timeout_seconds=45.0, date=date)
 
     def get_fitness_history(days: int) -> dict[str, Any]:
         """Get fitness estimates and race predictions for 28, 56, 90, or 180 days."""

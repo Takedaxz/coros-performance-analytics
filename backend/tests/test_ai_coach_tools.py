@@ -1,9 +1,11 @@
 import asyncio
 import datetime as dt
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from types import SimpleNamespace
 
 import pytest
 
+from src.ai import coach_tools
 from src.ai.coach_tools import (
     _health_trend,
     _pace_s_km,
@@ -118,6 +120,39 @@ def test_scheduled_workout_details_tool_is_exposed() -> None:
     assert "get_scheduled_workout_details" in names
     assert "search_coaching_knowledge" in names
     assert "web_search" in names
+
+
+def test_scheduled_workout_details_waits_longer_and_cancels_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, float | bool] = {}
+
+    class Future:
+        def result(self, timeout: float) -> dict[str, str]:
+            seen["timeout"] = timeout
+            raise FutureTimeoutError
+
+        def cancel(self) -> bool:
+            seen["cancelled"] = True
+            return True
+
+    def schedule(coro: object, _loop: asyncio.AbstractEventLoop) -> Future:
+        coro.close()  # type: ignore[attr-defined]
+        return Future()
+
+    monkeypatch.setattr(coach_tools.asyncio, "run_coroutine_threadsafe", schedule)
+    loop = asyncio.new_event_loop()
+    try:
+        tool = next(
+            tool
+            for tool in coach_tool_functions("owner", loop)
+            if tool.__name__ == "get_scheduled_workout_details"
+        )
+        assert tool("2026-08-16") == {"error": "get_scheduled_workout_details timed out."}
+    finally:
+        loop.close()
+
+    assert seen == {"timeout": 45.0, "cancelled": True}
 
 
 @pytest.mark.asyncio

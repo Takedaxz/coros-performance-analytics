@@ -7,12 +7,18 @@ import pytest
 import src.ai as ai_pkg
 from src.ai import coach_agent
 from src.ai.coach_tools import MAX_TOOL_CALLS
+from src.api.routes.ai_routes import _unique_tool_calls
 
 
 def test_tool_call_limit_is_shared_between_agent_and_tools() -> None:
     """coach_agent must not redefine its own limit; both sites share one constant."""
     assert coach_agent.MAX_TOOL_CALLS is MAX_TOOL_CALLS
     assert not hasattr(coach_agent, "_MAX_TOOL_CALLS")
+
+
+def test_unique_tool_calls_handles_dict_records() -> None:
+    call = {"name": "get_training_plan", "arguments": {"start_date": "2026-08-16"}}
+    assert _unique_tool_calls([call, call]) == [call]
 
 
 def test_ask_coach_uses_the_langchain_tool_loop(monkeypatch) -> None:
@@ -76,7 +82,7 @@ def test_tool_loop_raises_instead_of_returning_an_error_string(monkeypatch) -> N
             raise RuntimeError("503 unavailable")
 
     monkeypatch.setattr(coach_agent, "_model", lambda _p, _m: Model())
-    monkeypatch.setattr(coach_agent, "_tools", lambda _u, _l, _t: [])
+    monkeypatch.setattr(coach_agent, "_tools", lambda _u, _l: [])
 
     with pytest.raises(RuntimeError, match="503"):
         coach_agent.ask_coach_with_tools(

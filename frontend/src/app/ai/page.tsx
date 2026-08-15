@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import ReactMarkdown from "react-markdown";
@@ -27,12 +27,29 @@ function toolLabel(tool: string): string {
   return TOOL_LABELS[tool] ?? tool.replace(/^get_/, "").replaceAll("_", " ");
 }
 
-function AiGlyph() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-    </svg>
-  );
+type ToolCall = {
+  name: string;
+  arguments: Record<string, unknown>;
+};
+
+function normalizeToolCall(tool: ToolCall | string): ToolCall {
+  return typeof tool === "string" ? { name: tool, arguments: {} } : tool;
+}
+
+function formatToolArguments(arguments_: Record<string, unknown>): string {
+  return Object.entries(arguments_)
+    .map(([name, value]) => `${name}: ${JSON.stringify(value)}`)
+    .join(", ");
+}
+
+function uniqueToolCalls(tools: (ToolCall | string)[]): ToolCall[] {
+  const seen = new Set<string>();
+  return tools.map(normalizeToolCall).filter((tool) => {
+    const key = `${tool.name}:${JSON.stringify(tool.arguments)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function SourcesIcon() {
@@ -235,23 +252,70 @@ type ModelsResponse = {
 type Message = {
   role: "user" | "ai";
   content: string;
-  tools?: string[];
+  tools?: (ToolCall | string)[];
 };
 
 type DBMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  tool_calls?: string[];
+  tool_calls?: (ToolCall | string)[];
   created_at: string;
 };
 
-const SUGGESTED_PROMPTS: { label: string; action?: "briefing" | "ask" }[] = [
-  { label: "Weekly Briefing", action: "briefing" },
-  { label: "Summarize my training load this week", action: "ask" },
-  { label: "Is my HRV showing signs of fatigue?", action: "ask" },
-  { label: "What should my next workout be?", action: "ask" },
-  { label: "Analyze my sleep trends", action: "ask" },
+type SuggestedPrompt = {
+  label: string;
+  detail: string;
+  prompt: string;
+  action: "briefing" | "ask";
+};
+
+const SUGGESTED_PROMPTS: SuggestedPrompt[] = [
+  {
+    label: "Weekly briefing",
+    detail: "Summarize the last seven days and what matters next.",
+    prompt: "Generate a weekly briefing",
+    action: "briefing",
+  },
+  {
+    label: "Check my recovery",
+    detail: "Compare HRV, sleep, and recent training.",
+    prompt: "How is my recovery today? Review my HRV, sleep, and recent training.",
+    action: "ask",
+  },
+  {
+    label: "Plan my next workout",
+    detail: "Recommend a session based on current load.",
+    prompt: "What should my next workout be based on my recent training and recovery?",
+    action: "ask",
+  },
+  {
+    label: "Review training load",
+    detail: "Explain whether this week is balanced.",
+    prompt: "Review my training load this week and explain whether it is balanced.",
+    action: "ask",
+  },
+  {
+    label: "Analyze sleep trends",
+    detail: "Find patterns that may be affecting recovery.",
+    prompt: "Analyze my recent sleep trends and explain what may be affecting my recovery.",
+    action: "ask",
+  },
+];
+
+const MORE_PROMPTS: SuggestedPrompt[] = [
+  {
+    label: "Check fitness progress",
+    detail: "Review changes in fitness and threshold metrics.",
+    prompt: "Review my recent fitness progress and explain the most important changes.",
+    action: "ask",
+  },
+  {
+    label: "Review upcoming plan",
+    detail: "Check the next seven days in my COROS calendar.",
+    prompt: "Review my COROS training plan for the next seven days and suggest what to adjust.",
+    action: "ask",
+  },
 ];
 
 function relativeTime(iso: string): string {
@@ -283,11 +347,15 @@ export default function AiPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const aiResponseRef = useRef("");
+  const sessionScrollRef = useRef(false);
   // Prevents the activeSessionId effect from fetching + overwriting messages while a send is in progress
   const isStreamingRef = useRef(false);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  useLayoutEffect(() => {
+    messagesEndRef.current?.scrollIntoView({
+      behavior: sessionScrollRef.current ? "auto" : "smooth",
+    });
+    sessionScrollRef.current = false;
   }, [messages, isLoading]);
 
   useEffect(() => {
@@ -347,6 +415,7 @@ export default function AiPage() {
 
   useEffect(() => {
     if (!activeSessionId) { setMessages([]); return; }
+    sessionScrollRef.current = true;
     // Skip fetch if a send is in flight — messages are managed by handleSend during streaming
     if (isStreamingRef.current) return;
     const controller = new AbortController();
@@ -562,7 +631,7 @@ export default function AiPage() {
     await handleSend("Generate a weekly briefing", sid);
   }
 
-  async function handleChipClick(chip: (typeof SUGGESTED_PROMPTS)[number]) {
+  async function handleChipClick(chip: SuggestedPrompt) {
     if (isLoading) return;
     let sid = activeSessionId;
     if (!sid) {
@@ -573,7 +642,7 @@ export default function AiPage() {
     if (chip.action === "briefing") {
       generateBriefing(sid);
     } else {
-      handleSend(chip.label, sid);
+      handleSend(chip.prompt, sid);
     }
   }
 
@@ -607,21 +676,37 @@ export default function AiPage() {
   // Shared empty-state content (prompt bar + chips)
   function renderEmptyPrompt(sessionId?: string) {
     const inputId = sessionId ? "new-session-input" : "empty-state-input";
+    const racePrompts: SuggestedPrompt[] = goals
+      .filter((goal) => goal.goal_race_date && new Date(goal.goal_race_date) >= new Date(new Date().setHours(0, 0, 0, 0)))
+      .sort((first, second) => new Date(first.goal_race_date).getTime() - new Date(second.goal_race_date).getTime())
+      .slice(0, 3)
+      .map((goal) => ({
+        label: `Plan for ${goal.goal_race_name}`,
+        detail: "Use my COROS calendar to shape the next block.",
+        prompt: `Plan a training block for ${goal.goal_race_name}`,
+        action: "ask",
+      }));
+    const balancingPrompt = racePrompts[0] ?? MORE_PROMPTS[0];
+    const promptStarters = [...SUGGESTED_PROMPTS, balancingPrompt];
+    const morePrompts = [
+      ...MORE_PROMPTS.filter((prompt) => prompt !== balancingPrompt),
+      ...racePrompts.slice(1),
+    ];
 
     return (
       <div className="ai-link-empty-prompt">
         <div className="ai-link-empty-intro">
-          <p className="ai-link-empty-label"><AiGlyph /> Training intelligence</p>
-          <h1>What would you like to improve?</h1>
-          <p>AI will answer based on your recent training, recovery, sleep, and calendar data.</p>
+          <h1>How can I help with your training?</h1>
+          <p>Ask about training, recovery, sleep, or your COROS calendar.</p>
         </div>
 
         <div className="ai-link-empty-composer">
+          <label className="sr-only" htmlFor={inputId}>Ask AI Coach</label>
           <div className="cmd-bar-wrap">
             <textarea
               id={inputId}
               className="cmd-bar"
-              placeholder="How can I improve my recovery score?"
+              placeholder="Ask AI Coach"
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);
@@ -671,20 +756,45 @@ export default function AiPage() {
         </div>
 
         <div className="ai-link-suggestions">
-          <p>Start with a focus</p>
-          <div className="prompt-chips-row" role="list" aria-label="Suggested prompts">
-            {[...SUGGESTED_PROMPTS, ...goals.filter(g => g.goal_race_date && new Date(g.goal_race_date) >= new Date(new Date().setHours(0, 0, 0, 0))).map(g => ({ label: `Plan a training block for ${g.goal_race_name}`, action: "ask" as const }))].map((chip) => (
-              <button
-                key={chip.label}
-                id={`chip-${sessionId ?? "empty"}-${chip.label.toLowerCase().replace(/\s+/g, "-")}`}
-                className="prompt-chip"
-                role="listitem"
-                onClick={() => handleChipClick(chip)}
-                disabled={isLoading}
-              >
-                {chip.label}
-              </button>
+          <h2>Try asking</h2>
+          <ul className="prompt-chips-row" aria-label="Suggested prompts">
+            {promptStarters.map((chip) => (
+              <li key={chip.label}>
+                <button
+                  id={`chip-${sessionId ?? "empty"}-${chip.label.toLowerCase().replace(/\s+/g, "-")}`}
+                  className="prompt-chip"
+                  onClick={() => handleChipClick(chip)}
+                  disabled={isLoading}
+                >
+                  <strong>{chip.label}</strong>
+                  <small>{chip.detail}</small>
+                </button>
+              </li>
             ))}
+          </ul>
+          <details className="ai-link-prompt-gallery">
+            <summary>More prompts <span>{morePrompts.length}</span></summary>
+            <ul className="prompt-chips-row" aria-label="More suggested prompts">
+              {morePrompts.map((chip) => (
+                <li key={chip.label}>
+                  <button
+                    id={`chip-${sessionId ?? "empty"}-${chip.label.toLowerCase().replace(/\s+/g, "-")}`}
+                    className="prompt-chip"
+                    onClick={() => handleChipClick(chip)}
+                    disabled={isLoading}
+                  >
+                    <strong>{chip.label}</strong>
+                    <small>{chip.detail}</small>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
+          <div className="ai-link-empty-scope" aria-label="Data used by AI Coach">
+            <span>Training</span>
+            <span>Recovery</span>
+            <span>Sleep</span>
+            <span>Calendar</span>
           </div>
         </div>
       </div>
@@ -954,7 +1064,7 @@ export default function AiPage() {
                         }
                         const { thinking, answer, isThinkingActive } = parseThinkingAndAnswer(msg.content);
                         const displayAnswer = removeLegacyEvidenceUsed(answer);
-                        const tools = msg.tools ? [...new Set(msg.tools)] : [];
+                        const tools = msg.tools ? uniqueToolCalls(msg.tools) : [];
                         return (
                           <div key={idx} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
                             <div className="ai-text">
@@ -969,15 +1079,23 @@ export default function AiPage() {
                                 </div>
                               ) : null}
                               {tools.length > 0 && (
-                                <div className="ai-tool-calls" aria-label={`Evidence consulted: ${tools.map(toolLabel).join(", ")}`}>
+                                <div className="ai-tool-calls" aria-label={`Evidence consulted: ${tools.map((tool) => toolLabel(tool.name)).join(", ")}`}>
                                   <span className="ai-tool-calls-icon" aria-hidden="true">
                                     <SourcesIcon />
                                   </span>
-                                  {tools.map((tool) => (
-                                    <span className="ai-tool-chip" key={tool}>
-                                      {toolLabel(tool)}
-                                    </span>
-                                  ))}
+                                  {tools.map((tool, toolIndex) => {
+                                    const argumentsText = formatToolArguments(tool.arguments);
+                                    return (
+                                      <span
+                                        aria-label={argumentsText ? `${toolLabel(tool.name)}: ${argumentsText}` : toolLabel(tool.name)}
+                                        className="ai-tool-chip"
+                                        key={`${tool.name}-${toolIndex}`}
+                                      >
+                                        {toolLabel(tool.name)}
+                                        {argumentsText && <span className="ai-tool-tooltip" role="tooltip">{argumentsText}</span>}
+                                      </span>
+                                    );
+                                  })}
                                 </div>
                               )}
                               {displayAnswer && (

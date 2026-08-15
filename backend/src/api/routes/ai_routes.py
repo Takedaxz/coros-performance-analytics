@@ -22,6 +22,7 @@ from src.ai import (
     list_provider_models,
     resolve_model,
 )
+from src.ai.coach_tools import ToolCallRecord
 from src.ai.context_builder import build_plan_context, build_training_context
 from src.config import get_settings
 from src.db.engine import async_session_factory, get_db_session
@@ -52,6 +53,17 @@ def _active_model() -> str:
     if bool(st.openai_compat_api_key):
         return f"openai_compat:{st.openai_compat_model}"
     return f"gemini:{st.gemini_model}"
+
+
+def _unique_tool_calls(tool_calls: list[ToolCallRecord]) -> list[ToolCallRecord]:
+    seen: set[str] = set()
+    unique: list[ToolCallRecord] = []
+    for tool_call in tool_calls:
+        key = json.dumps(tool_call, sort_keys=True, separators=(",", ":"), default=str)
+        if key not in seen:
+            seen.add(key)
+            unique.append(tool_call)
+    return unique
 
 
 class ChatMessage(BaseModel):
@@ -93,7 +105,7 @@ async def ask_ai(
     )
     # 2. Ask AI coach
     history_dicts = [{"role": msg.role, "content": msg.content} for msg in req.history]
-    tool_calls: list[str] = []
+    tool_calls: list[ToolCallRecord] = []
     answer = await asyncio.to_thread(
         ask_coach,
         req.question,
@@ -108,7 +120,8 @@ async def ask_ai(
     return AskResponse(
         answer=answer,
         confidence=None,
-        evidence=[{"tool": name} for name in tool_calls] or None,
+        evidence=[{"tool": call["name"], "arguments": call["arguments"]} for call in tool_calls]
+        or None,
         model=_active_model(),
     )
 
@@ -141,7 +154,7 @@ async def ask_ai_stream(
         """Bridge the blocking SDK iterator into an async generator via a queue."""
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         loop = asyncio.get_event_loop()
-        tool_calls: list[str] = []
+        tool_calls: list[ToolCallRecord] = []
 
         def _produce(sync_iter: Iterator[str]) -> None:
             try:
@@ -170,8 +183,8 @@ async def ask_ai_stream(
                 if item is None:
                     break
                 yield f"data: {json.dumps({'text': item})}\n\n"
-            for tool_name in tool_calls:
-                yield f"data: {json.dumps({'tool': tool_name})}\n\n"
+            for tool_call in _unique_tool_calls(tool_calls):
+                yield f"data: {json.dumps({'tool': tool_call})}\n\n"
         finally:
             await producer
 
@@ -512,7 +525,7 @@ class MessageItem(BaseModel):
     id: str
     role: str
     content: str
-    tool_calls: list[str] | None = None
+    tool_calls: list[ToolCallRecord | str] | None = None
     created_at: str
 
 
@@ -701,7 +714,7 @@ async def session_ask_stream(
         queue: asyncio.Queue[str | None] = asyncio.Queue()
         loop = asyncio.get_event_loop()
         accumulated: list[str] = []
-        tool_calls: list[str] = []
+        tool_calls: list[ToolCallRecord] = []
 
         def _produce(sync_iter: Iterator[str]) -> None:
             try:
@@ -731,8 +744,8 @@ async def session_ask_stream(
                 if item is None:
                     break
                 yield f"data: {json.dumps({'text': item})}\n\n"
-            for tool_name in tool_calls:
-                yield f"data: {json.dumps({'tool': tool_name})}\n\n"
+            for tool_call in _unique_tool_calls(tool_calls):
+                yield f"data: {json.dumps({'tool': tool_call})}\n\n"
         finally:
             # Fire the DB persist as a background task so the generator exits immediately.
             # This closes the SSE stream for the client (reader.read() returns done=True)
@@ -747,7 +760,7 @@ async def session_ask_stream(
         question: str,
         accumulated: list[str],
         producer: asyncio.Task,
-        tool_calls: list[str],
+        tool_calls: list[ToolCallRecord],
     ) -> None:
         await producer
         full_response = "".join(accumulated) or "Error communicating with AI."
@@ -758,7 +771,7 @@ async def session_ask_stream(
                 session_id=sid,
                 role="assistant",
                 content=full_response,
-                tool_calls=list(dict.fromkeys(tool_calls)),
+                tool_calls=_unique_tool_calls(tool_calls),
             )
             sess_res = await persist_db.execute(
                 select(DBChatSession).where(DBChatSession.id == sid)

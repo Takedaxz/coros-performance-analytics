@@ -1,4 +1,8 @@
+import datetime as dt
+
+import httpx
 import pytest
+from fastapi import HTTPException
 
 from src.api.routes import training_plan_routes
 from src.api.routes.training_plan_routes import (
@@ -10,6 +14,7 @@ from src.api.routes.training_plan_routes import (
     _draft_from_program,
     _parse_coros_schedule,
     _schedule_new_workout,
+    fetch_coros_calendar,
 )
 
 
@@ -75,6 +80,28 @@ async def test_ical_source_keeps_existing_fetch_path(monkeypatch: pytest.MonkeyP
         )
         == expected
     )
+
+
+@pytest.mark.asyncio
+async def test_coros_calendar_network_timeout_becomes_502(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def load_credentials(_db: object, _secret: str) -> tuple[str, str]:
+        return "athlete@example.com", "password"
+
+    class Client:
+        def __init__(self, **_kwargs: str) -> None:
+            pass
+
+        async def login(self) -> None:
+            raise httpx.ConnectTimeout("timed out")
+
+    monkeypatch.setattr(training_plan_routes, "load_coros_credentials", load_credentials)
+    monkeypatch.setattr(training_plan_routes, "CorosApiClient", Client)
+
+    with pytest.raises(HTTPException) as error:
+        await fetch_coros_calendar(dt.date(2026, 8, 16), dt.date(2026, 8, 16), object())
+
+    assert error.value.status_code == 502
+    assert error.value.detail == "COROS Calendar unavailable: network request failed."
 
 
 def test_structured_hyrox_workout_uses_coros_units() -> None:

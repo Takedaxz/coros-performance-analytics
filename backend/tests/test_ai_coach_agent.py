@@ -1,6 +1,6 @@
 import asyncio
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
 from src.ai import coach_agent
 from src.ai.prompts import COACH_SYSTEM_PROMPT
@@ -82,9 +82,10 @@ def test_controlled_tool_loop_executes_at_most_two_tools(monkeypatch) -> None:
     monkeypatch.setattr(
         coach_agent,
         "_tools",
-        lambda _user_id, _loop, _tool_calls: [Tool("first"), Tool("second"), Tool("third")],
+        lambda _user_id, _loop: [Tool("first"), Tool("second"), Tool("third")],
     )
 
+    tool_calls = []
     answer = coach_agent.ask_coach_with_tools(
         "gemini",
         "gemini-3.5-flash-lite",
@@ -93,11 +94,15 @@ def test_controlled_tool_loop_executes_at_most_two_tools(monkeypatch) -> None:
         None,
         "user-id",
         asyncio.new_event_loop(),
-        [],
+        tool_calls,
     )
 
     assert answer == "Final answer"
     assert executed == ["first", "second"]
+    assert tool_calls == [
+        {"name": "first", "arguments": {"value": 1}},
+        {"name": "second", "arguments": {"value": 2}},
+    ]
     assert len(model.calls) == 2
     assert sum(isinstance(message, ToolMessage) for message in model.calls[1]) == 3
 
@@ -139,7 +144,7 @@ def test_controlled_tool_loop_can_choose_a_second_tool_after_the_first_result(mo
     monkeypatch.setattr(
         coach_agent,
         "_tools",
-        lambda _user_id, _loop, _tool_calls: [Tool("get_activities"), Tool("compare_activities")],
+        lambda _user_id, _loop: [Tool("get_activities"), Tool("compare_activities")],
     )
 
     answer = coach_agent.ask_coach_with_tools(
@@ -157,6 +162,64 @@ def test_controlled_tool_loop_can_choose_a_second_tool_after_the_first_result(mo
     assert executed == ["get_activities", "compare_activities"]
 
 
+def test_controlled_tool_loop_ignores_duplicate_calls(monkeypatch) -> None:
+    executed: list[dict[str, str]] = []
+
+    class Tool:
+        name = "get_training_plan"
+
+        def invoke(self, arguments: dict[str, str]) -> dict[str, str]:
+            executed.append(arguments)
+            return {"session": "race"}
+
+    class Model:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def bind_tools(self, _tools: list[Tool]) -> "Model":
+            return self
+
+        def invoke(self, _messages: list[object]) -> AIMessage:
+            self.calls += 1
+            if self.calls == 1:
+                return AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "get_training_plan",
+                            "args": {"start_date": "2026-08-16", "end_date": "2026-08-16"},
+                            "id": "1",
+                        },
+                        {
+                            "name": "get_training_plan",
+                            "args": {"start_date": "2026-08-16", "end_date": "2026-08-16"},
+                            "id": "2",
+                        },
+                    ],
+                )
+            return AIMessage(content="Race plan ready")
+
+    model = Model()
+    monkeypatch.setattr(coach_agent, "_model", lambda _provider, _model: model)
+    monkeypatch.setattr(coach_agent, "_tools", lambda _user_id, _loop: [Tool()])
+
+    tool_calls = []
+    answer = coach_agent.ask_coach_with_tools(
+        "gemini",
+        "gemini-3.5-flash-lite",
+        "Question",
+        "Snapshot",
+        None,
+        "user-id",
+        asyncio.new_event_loop(),
+        tool_calls,
+    )
+
+    assert answer == "Race plan ready"
+    assert executed == [{"start_date": "2026-08-16", "end_date": "2026-08-16"}]
+    assert tool_calls == [{"name": "get_training_plan", "arguments": executed[0]}]
+
+
 def test_controlled_tool_loop_streams_the_final_answer(monkeypatch) -> None:
     class Tool:
         name = "get_activities"
@@ -165,20 +228,33 @@ def test_controlled_tool_loop_streams_the_final_answer(monkeypatch) -> None:
             return {"activity": "run"}
 
     class Model:
+        def __init__(self) -> None:
+            self.calls = 0
+
         def bind_tools(self, _tools: list[Tool]) -> "Model":
             return self
 
         def invoke(self, _messages: list[object]) -> AIMessage:
-            return AIMessage(
-                content="", tool_calls=[{"name": "get_activities", "args": {}, "id": "1"}]
-            )
+            raise AssertionError("streaming must not call invoke")
 
         def stream(self, _messages: list[object]):
-            return iter([AIMessage(content="Streaming "), AIMessage(content="works")])
+            self.calls += 1
+            if self.calls == 1:
+                return iter(
+                    [
+                        AIMessageChunk(
+                            content="",
+                            tool_call_chunks=[
+                                {"name": "get_activities", "args": "{}", "id": "1", "index": 0}
+                            ],
+                        )
+                    ]
+                )
+            return iter([AIMessageChunk(content="Streaming "), AIMessageChunk(content="works")])
 
     model = Model()
     monkeypatch.setattr(coach_agent, "_model", lambda _provider, _model: model)
-    monkeypatch.setattr(coach_agent, "_tools", lambda _user_id, _loop, _tool_calls: [Tool()])
+    monkeypatch.setattr(coach_agent, "_tools", lambda _user_id, _loop: [Tool()])
 
     answer = "".join(
         coach_agent.ask_coach_with_tools_stream(
@@ -196,23 +272,23 @@ def test_controlled_tool_loop_streams_the_final_answer(monkeypatch) -> None:
     assert answer == "Streaming works"
 
 
-def test_stream_uses_the_completed_answer_without_a_second_model_call(monkeypatch) -> None:
+def test_streams_a_direct_answer_without_a_non_streaming_model_call(monkeypatch) -> None:
     class Model:
         def bind_tools(self, _tools: list[object]) -> "Model":
             return self
 
         def invoke(self, _messages: list[object]) -> AIMessage:
-            return AIMessage(content="Already answered")
+            raise AssertionError("streaming must not call invoke")
 
         def stream(self, _messages: list[object]):
-            raise AssertionError("stream must not make a second model call")
+            return iter([AIMessageChunk(content="Streaming "), AIMessageChunk(content="directly")])
 
     class Tool:
         name = "get_activities"
 
     model = Model()
     monkeypatch.setattr(coach_agent, "_model", lambda _provider, _model: model)
-    monkeypatch.setattr(coach_agent, "_tools", lambda _user_id, _loop, _tool_calls: [Tool()])
+    monkeypatch.setattr(coach_agent, "_tools", lambda _user_id, _loop: [Tool()])
 
     answer = "".join(
         coach_agent.ask_coach_with_tools_stream(
@@ -227,4 +303,4 @@ def test_stream_uses_the_completed_answer_without_a_second_model_call(monkeypatc
         )
     )
 
-    assert answer == "Already answered"
+    assert answer == "Streaming directly"

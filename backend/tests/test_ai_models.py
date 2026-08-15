@@ -1,4 +1,7 @@
-from src.ai import openai_compat_client
+import asyncio
+
+from src import ai
+from src.ai import gemini_client, list_provider_models, openai_compat_client, resolve_model
 
 
 def test_model_discovery_is_sorted_and_cached(monkeypatch) -> None:
@@ -43,15 +46,14 @@ def test_stream_uses_selected_model(monkeypatch) -> None:
 
 
 def test_resolve_model_prefixes() -> None:
-    from src.ai import resolve_model
-
-    assert resolve_model("openai_compat:claude-sonnet-4.6") == ("openai_compat", "claude-sonnet-4.6")
+    assert resolve_model("openai_compat:claude-sonnet-4.6") == (
+        "openai_compat",
+        "claude-sonnet-4.6",
+    )
     assert resolve_model("gemini:gemini-3.5-flash") == ("gemini", "gemini-3.5-flash")
 
 
 def test_list_provider_models(monkeypatch) -> None:
-    from src.ai import list_provider_models, gemini_client, openai_compat_client
-
     monkeypatch.setattr(openai_compat_client, "list_models", lambda: ["claude-sonnet-4.6"])
     monkeypatch.setattr(gemini_client, "list_models", lambda: ["gemini-3.5-flash"])
 
@@ -67,3 +69,56 @@ def test_list_provider_models(monkeypatch) -> None:
     assert providers[1]["id"] == "openai_compat"
     assert providers[1]["models"][0]["id"] == "openai_compat:claude-sonnet-4.6"
 
+
+def test_coach_stream_retries_gemini_quota_errors_with_flash_lite(monkeypatch) -> None:
+    requested_models: list[str] = []
+
+    def stream_with_model(
+        _provider: str,
+        model: str,
+        *_args: object,
+    ):
+        requested_models.append(model)
+        if model == "gemini-3.5-flash":
+            raise RuntimeError("429 RESOURCE_EXHAUSTED: quota")
+        yield "Flash Lite answer"
+
+    monkeypatch.setattr(ai, "resolve_model", lambda _model: ("gemini", "gemini-3.5-flash"))
+    monkeypatch.setattr(ai, "ask_coach_with_tools_stream", stream_with_model)
+
+    loop = asyncio.new_event_loop()
+    try:
+        answer = "".join(
+            ai.ask_coach_stream(
+                "Question", "Context", user_id="user-id", tool_calls=[], event_loop=loop
+            )
+        )
+    finally:
+        loop.close()
+
+    assert answer == "Flash Lite answer"
+    assert requested_models == ["gemini-3.5-flash", "gemini-3.5-flash-lite"]
+
+
+def test_coach_retries_gemini_quota_errors_with_flash_lite(monkeypatch) -> None:
+    requested_models: list[str] = []
+
+    def ask_with_model(_provider: str, model: str, *_args: object) -> str:
+        requested_models.append(model)
+        if model == "gemini-3.5-flash":
+            raise RuntimeError("429 RESOURCE_EXHAUSTED: quota")
+        return "Flash Lite answer"
+
+    monkeypatch.setattr(ai, "resolve_model", lambda _model: ("gemini", "gemini-3.5-flash"))
+    monkeypatch.setattr(ai, "ask_coach_with_tools", ask_with_model)
+
+    loop = asyncio.new_event_loop()
+    try:
+        answer = ai.ask_coach(
+            "Question", "Context", user_id="user-id", tool_calls=[], event_loop=loop
+        )
+    finally:
+        loop.close()
+
+    assert answer == "Flash Lite answer"
+    assert requested_models == ["gemini-3.5-flash", "gemini-3.5-flash-lite"]

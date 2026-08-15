@@ -7,7 +7,7 @@ overwritten by app-derived estimates.
 
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -543,7 +543,7 @@ class ChatMessage(Base):
     )
     role: Mapped[str] = mapped_column(String(10), nullable=False)  # "user" | "assistant"
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    tool_calls: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    tool_calls: Mapped[list[dict[str, Any] | str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     session: Mapped["ChatSession"] = relationship("ChatSession", back_populates="messages")
