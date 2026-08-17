@@ -1392,7 +1392,15 @@ export default function AiPage() {
               ) : (
                 /* Active conversation */
                 <>
-                  <h1 className="print-only-title" style={{ display: "none" }}>AI Coach Session</h1>
+                  <div className="print-only-header print-block" style={{ display: "none" }}>
+                    <div className="print-header-meta">
+                      <span className="print-brand">COROS Performance Analytics • AI Coach</span>
+                      <span className="print-date">{new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}</span>
+                    </div>
+                    <h1 className="print-only-title">
+                      {sessions.find((s) => s.id === activeSessionId)?.title || "AI Coach Session Report"}
+                    </h1>
+                  </div>
                   <div id="chat-history" className="ai-link-chat-history print-block">
                     <div className="ai-link-thread print-block">
                       {messages.map((msg, idx) => {

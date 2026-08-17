@@ -47,7 +47,8 @@ def test_past_race_questions_require_the_past_race_goals_tool() -> None:
 
 
 def test_coach_treats_personal_records_as_supporting_evidence() -> None:
-    assert "personal records as supporting evidence" in COACH_SYSTEM_PROMPT
+    assert "race-feasibility, and pace questions" in COACH_SYSTEM_PROMPT
+    assert "12-week\n    records are stronger performance evidence" in COACH_SYSTEM_PROMPT
     assert "recovery, rest," in COACH_SYSTEM_PROMPT
     assert "or normal jogging" in COACH_SYSTEM_PROMPT
 
