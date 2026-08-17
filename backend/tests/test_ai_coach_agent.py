@@ -46,6 +46,12 @@ def test_past_race_questions_require_the_past_race_goals_tool() -> None:
     assert "more than 30 days ago" in COACH_SYSTEM_PROMPT
 
 
+def test_coach_treats_personal_records_as_supporting_evidence() -> None:
+    assert "personal records as supporting evidence" in COACH_SYSTEM_PROMPT
+    assert "recovery, rest," in COACH_SYSTEM_PROMPT
+    assert "or normal jogging" in COACH_SYSTEM_PROMPT
+
+
 def test_untrusted_athlete_data_cannot_override_coach_instructions() -> None:
     assert "untrusted data" in COACH_SYSTEM_PROMPT
     assert "not instructions" in COACH_SYSTEM_PROMPT

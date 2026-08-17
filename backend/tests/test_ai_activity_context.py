@@ -1,7 +1,58 @@
 from datetime import datetime, timedelta
 
-from src.ai.context_builder import _format_detailed_activity_context, _split_lines
+from src.ai.context_builder import (
+    _format_detailed_activity_context,
+    _format_personal_records,
+    _split_lines,
+)
 from src.db.models import Activity, ActivityLap, ActivityRecord
+
+
+def test_personal_record_context_includes_only_4_and_12_week_records() -> None:
+    context = _format_personal_records(
+        {
+            "coros_personal_record_groups": [
+                {
+                    "type": 1,
+                    "records": [
+                        {
+                            "label": "10K",
+                            "duration_s": 3498,
+                            "pace_s_per_km": 350,
+                            "date": "2026-07-30",
+                        }
+                    ],
+                },
+                {
+                    "type": 3,
+                    "records": [
+                        {
+                            "label": "5K",
+                            "duration_s": 1403,
+                            "pace_s_per_km": 281,
+                            "date": "2026-05-02",
+                        }
+                    ],
+                },
+                {
+                    "type": 4,
+                    "records": [
+                        {
+                            "label": "1K",
+                            "duration_s": 200,
+                            "pace_s_per_km": 200,
+                            "date": "2026-01-01",
+                        }
+                    ],
+                },
+            ]
+        }
+    )
+
+    assert "**4 weeks:** 10K: 58:18, 5:50/km, 2026-07-30" in context
+    assert "**12 weeks:** 5K: 23:23, 4:41/km, 2026-05-02" in context
+    assert "**All:**" not in context
+    assert "not verified race performances" in context
 
 
 def test_detailed_activity_context_keeps_segments_and_compresses_sensor_data() -> None:
@@ -170,4 +221,3 @@ def test_split_lines_handles_source_lap_index_out_of_bounds() -> None:
     # Must not raise IndexError
     lines = _split_lines(activity, laps, records)
     assert isinstance(lines, list)
-

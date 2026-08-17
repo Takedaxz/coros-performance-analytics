@@ -61,6 +61,62 @@ def _format_pace(speed_mps: float | None, distance_m: int = 1_000) -> str | None
     return f"{minutes}:{secs:02d}/{unit}"
 
 
+def _format_personal_records(preferences: dict[object, object] | None) -> str:
+    """Format the 4- and 12-week COROS personal records for coach context."""
+    if not isinstance(preferences, dict):
+        return ""
+    raw_groups = preferences.get("coros_personal_record_groups")
+    if not isinstance(raw_groups, list):
+        return ""
+
+    groups_by_type = {
+        group_type: group
+        for group in raw_groups
+        if isinstance(group, dict)
+        and (group_type := group.get("type")) in {1, 3}
+    }
+    lines: list[str] = []
+    for group_type, label in ((1, "4 weeks"), (3, "12 weeks")):
+        group = groups_by_type.get(group_type)
+        records = group.get("records") if isinstance(group, dict) else None
+        if not isinstance(records, list):
+            continue
+        formatted_records = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            name = record.get("label")
+            duration = _format_duration(_json_number(record.get("duration_s")))
+            pace_seconds = _json_number(record.get("pace_s_per_km"))
+            pace = _format_duration(pace_seconds)
+            date = record.get("date")
+            if not isinstance(name, str) or duration is None:
+                continue
+            details = [duration]
+            if pace is not None:
+                details.append(f"{pace}/km")
+            if isinstance(date, str):
+                details.append(date[:10])
+            formatted_records.append(f"{name}: {', '.join(details)}")
+        if formatted_records:
+            lines.append(f"- **{label}:** {'; '.join(formatted_records)}")
+
+    if not lines:
+        return ""
+    return "\n".join(
+        [
+            "#### COROS Personal Records",
+            *lines,
+            "- **Interpretation:** These are best elapsed times within each window, not "
+            "verified race performances. A 4-week 5K or 10K record without a "
+            "sustained matching-distance effort may include recovery, rest, or normal "
+            "jogging; do not treat it as current race fitness. Cross-check recent "
+            "continuous hard sessions and HR before using any record to set training "
+            "or race paces.",
+        ]
+    )
+
+
 def _metric(label: str, value: str | int | float | None) -> str | None:
     return f"{label}={value}" if value is not None else None
 
@@ -738,6 +794,13 @@ async def build_training_context(
     res = await db.execute(stmt)
     fitness = res.scalar_one_or_none()
 
+    preferences = await db.scalar(
+        select(User.device_preferences).where(User.id == user_id)
+    )
+    personal_records = _format_personal_records(
+        preferences if isinstance(preferences, dict) else None
+    )
+
     # Build Context String
     lines = []
     if goal_section:
@@ -804,6 +867,9 @@ async def build_training_context(
 
     if detailed_activity_context:
         lines.extend(["", detailed_activity_context])
+
+    if personal_records:
+        lines.extend(["", personal_records])
 
     # Fitness Snapshot — vendor-provided values only
     if fitness:
