@@ -24,7 +24,7 @@ _MODEL_CACHE_SECONDS = 300
 
 def _get_client() -> OpenAI | None:
     """Return an initialised OpenAI-compat client, or None if not configured."""
-    if not settings.openai_compat_api_key:
+    if not settings.openai_compat_enabled or not settings.openai_compat_api_key:
         return None
     return OpenAI(
         api_key=settings.openai_compat_api_key,

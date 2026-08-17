@@ -27,7 +27,10 @@ logger = logging.getLogger(__name__)
 
 
 def _messages(
-    question: str, context: str, history: list[dict[str, str]] | None
+    question: str,
+    context: str,
+    history: list[dict[str, str]] | None,
+    images: list[str] | None = None,
 ) -> list[BaseMessage]:
     messages: list[BaseMessage] = [SystemMessage(content=COACH_SYSTEM_PROMPT)]
     for item in (history or [])[-12:]:
@@ -35,7 +38,15 @@ def _messages(
             messages.append(AIMessage(content=item["content"]))
         elif item["role"] == "user":
             messages.append(HumanMessage(content=item["content"]))
-    messages.append(HumanMessage(content=f"{context}\n\nAthlete Question:\n{question}"))
+    text_content = f"{context}\n\nAthlete Question:\n{question}"
+    if images:
+        content_blocks: list[dict[str, Any]] = [{"type": "text", "text": text_content}]
+        for img in images:
+            url_str = img if isinstance(img, str) else str(img)
+            content_blocks.append({"type": "image_url", "image_url": {"url": url_str}})
+        messages.append(HumanMessage(content=content_blocks))
+    else:
+        messages.append(HumanMessage(content=text_content))
     return messages
 
 
@@ -66,6 +77,18 @@ def _content(message: BaseMessage) -> str:
         for block in message.content
         if isinstance(block, dict) and isinstance(block.get("text"), str)
     )
+
+
+def _stream_text(chunk: AIMessageChunk, thinking_open: bool) -> tuple[str, bool]:
+    """Convert compatible-provider reasoning chunks into the UI's think markers."""
+    reasoning = chunk.additional_kwargs.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning:
+        return ("" if thinking_open else "<think>") + reasoning, True
+
+    text = _content(chunk)
+    if text:
+        return ("</think>\n" if thinking_open else "") + text, False
+    return "", thinking_open
 
 
 def _tool_result(value: Any) -> str:
@@ -102,8 +125,12 @@ def _append_tool_results(
             status = "error"
         else:
             try:
-                tool_calls.append({"name": name, "arguments": arguments})
+                record: ToolCallRecord = {"name": name, "arguments": arguments}
+                tool_calls.append(record)
                 result = tool.invoke(arguments)
+                knowledge = result.get("knowledge") if name == "search_coaching_knowledge" else None
+                if isinstance(knowledge, list) and all(isinstance(excerpt, str) for excerpt in knowledge):
+                    record["display_result"] = {"knowledge": knowledge}
                 status = "error" if "error" in result else "success"
             except Exception:
                 logger.exception("AI Coach tool failed", extra={"tool_name": name})
@@ -132,11 +159,12 @@ def _prepare_tool_messages(
     user_id: str,
     event_loop: asyncio.AbstractEventLoop,
     tool_calls: list[ToolCallRecord],
+    images: list[str] | None = None,
 ) -> tuple[ChatGoogleGenerativeAI | ChatOpenAI, list[BaseMessage], BaseMessage | None]:
     """Run the controlled tool loop and return messages ready for a final answer."""
     tools = _tools(user_id, event_loop)
     tools_by_name = {tool.name: tool for tool in tools}
-    messages = _messages(question, context, history)
+    messages = _messages(question, context, history, images=images)
     model = _model(provider, model_name)
 
     try:
@@ -175,10 +203,11 @@ def ask_coach_with_tools(
     user_id: str,
     event_loop: asyncio.AbstractEventLoop,
     tool_calls: list[ToolCallRecord],
+    images: list[str] | None = None,
 ) -> str:
     """Run read-only tools, then return the final coach answer."""
     model, messages, completed_response = _prepare_tool_messages(
-        provider, model_name, question, context, history, user_id, event_loop, tool_calls
+        provider, model_name, question, context, history, user_id, event_loop, tool_calls, images=images
     )
     if completed_response is not None:
         return _content(completed_response) or "No response from AI."
@@ -194,13 +223,15 @@ def ask_coach_with_tools_stream(
     user_id: str,
     event_loop: asyncio.AbstractEventLoop,
     tool_calls: list[ToolCallRecord],
+    images: list[str] | None = None,
 ) -> Iterator[str]:
     """Run read-only tools and stream every model response without duplicate calls."""
     tools = _tools(user_id, event_loop)
     tools_by_name = {tool.name: tool for tool in tools}
-    messages = _messages(question, context, history)
+    messages = _messages(question, context, history, images=images)
     model = _model(provider, model_name)
     model_with_tools = model.bind_tools(tools)
+    thinking_open = False
 
     for _ in range(MAX_TOOL_CALLS):
         response: AIMessageChunk | None = None
@@ -209,11 +240,13 @@ def ask_coach_with_tools_stream(
                 response = cast("AIMessageChunk", chunk)
             else:
                 response = cast("AIMessageChunk", response + chunk)
-            text = _content(chunk)
+            text, thinking_open = _stream_text(chunk, thinking_open)
             if text:
                 yield text
 
         if response is None or not response.tool_calls:
+            if thinking_open:
+                yield "</think>\n"
             return
 
         _append_tool_results(_streamed_tool_response(response), tools_by_name, messages, tool_calls)
@@ -231,6 +264,8 @@ def ask_coach_with_tools_stream(
         )
     )
     for chunk in model.stream(messages):
-        text = _content(chunk)
+        text, thinking_open = _stream_text(cast("AIMessageChunk", chunk), thinking_open)
         if text:
             yield text
+    if thinking_open:
+        yield "</think>\n"

@@ -143,6 +143,8 @@ class Goal(Base):
     goal_race_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     goal_race_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     goal_target_time: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    goal_result_time: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    goal_race_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     weekly_training_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -224,6 +226,7 @@ class Activity(Base):
     cardiac_drift_pct_app: Mapped[float | None] = mapped_column(Float, nullable=True)
     hr_quality_flag: Mapped[str | None] = mapped_column(String(50), nullable=True)
     postmortem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    activity_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Provenance
     source_type: Mapped[str] = mapped_column(Enum(SourceType, name="source_type"), nullable=False)
@@ -543,6 +546,7 @@ class ChatMessage(Base):
     )
     role: Mapped[str] = mapped_column(String(10), nullable=False)  # "user" | "assistant"
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    images: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     tool_calls: Mapped[list[dict[str, Any] | str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

@@ -23,8 +23,24 @@ interface SleepTooltipEntry {
   name?: string;
   value?: number | string;
   color?: string;
+  fill?: string;
   payload?: { total: number };
 }
+
+interface GenericTooltipEntry {
+  name?: string;
+  value?: number | string;
+  color?: string;
+  fill?: string;
+  stroke?: string;
+}
+
+const STAGE_COLORS: Record<string, string> = {
+  Deep: "#21E6A5",
+  REM: "#2D9BF0",
+  Light: "#8DABC2",
+  Nap: "#8B7CC0",
+};
 
 function formatHoursMinutes(hours: number): string {
   const totalMinutes = Math.round(hours * 60);
@@ -46,18 +62,99 @@ function SleepStageTooltip({
   const total = payload[0].payload?.total ?? 0;
 
   return (
-    <div style={{ padding: "12px 14px", borderRadius: "16px", background: "var(--color-popover)", border: "1px solid var(--border-color)", color: "var(--color-text-primary)" }}>
+    <div style={{ padding: "12px 14px", borderRadius: "16px", background: "var(--color-popover)", border: "1px solid var(--border-color)", color: "var(--color-text-primary)", boxShadow: "var(--shadow-md)" }}>
       <strong style={{ display: "block", marginBottom: "8px", color: "var(--color-text-secondary)", fontSize: "12px" }}>{label}</strong>
-      {payload.map((entry) => (
-        <div key={entry.name} style={{ display: "flex", justifyContent: "space-between", gap: "18px", marginTop: "5px" }}>
-          <span>{entry.name}</span>
-          <strong>{formatHoursMinutes(Number(entry.value))}</strong>
-        </div>
-      ))}
+      {payload.map((entry) => {
+        const stageColor = entry.color || entry.fill || STAGE_COLORS[entry.name ?? ""] || "var(--color-accent-primary)";
+        return (
+          <div key={entry.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "18px", marginTop: "5px" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+              <i
+                style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "50%",
+                  backgroundColor: stageColor,
+                  display: "inline-block",
+                  flexShrink: 0,
+                }}
+              />
+              {entry.name}
+            </span>
+            <strong>{formatHoursMinutes(Number(entry.value))}</strong>
+          </div>
+        );
+      })}
       <div style={{ display: "flex", justifyContent: "space-between", gap: "18px", marginTop: "10px", paddingTop: "9px", borderTop: "1px solid var(--border-color)" }}>
         <strong>Total</strong>
         <strong>{formatHoursMinutes(total)}</strong>
       </div>
+    </div>
+  );
+}
+
+function ChartLegendTooltip({
+  active,
+  label,
+  payload,
+  unit = "",
+}: {
+  active?: boolean;
+  label?: string;
+  payload?: GenericTooltipEntry[];
+  unit?: string;
+}) {
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div
+      style={{
+        padding: "12px 14px",
+        borderRadius: "14px",
+        background: "var(--color-popover)",
+        border: "1px solid var(--border-color)",
+        color: "var(--color-text-primary)",
+        boxShadow: "var(--shadow-md)",
+        minWidth: "160px",
+      }}
+    >
+      <strong style={{ display: "block", marginBottom: "8px", color: "var(--color-text-secondary)", fontSize: "12px" }}>
+        {label}
+      </strong>
+      {payload.map((entry, idx) => {
+        const itemColor = entry.stroke || entry.color || entry.fill || "var(--color-accent-primary)";
+        const val = typeof entry.value === "number" ? Math.round(entry.value).toLocaleString() : entry.value;
+        return (
+          <div
+            key={entry.name || idx}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "16px",
+              marginTop: idx === 0 ? 0 : "5px",
+              fontSize: "13px",
+            }}
+          >
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-secondary)" }}>
+              <i
+                style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "50%",
+                  backgroundColor: itemColor,
+                  display: "inline-block",
+                  flexShrink: 0,
+                }}
+              />
+              {entry.name}
+            </span>
+            <strong>
+              {val} {unit}
+            </strong>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -268,7 +365,7 @@ export default function SleepPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                 <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
                 <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="ms" />
-                <Tooltip formatter={(value) => `${Math.round(Number(value))} ms`} />
+                <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="ms" />} />
                 <Area type="monotone" dataKey="hrv" name="Overnight HRV" stroke="var(--color-accent-primary)" fill="url(#sleepHrvGrad)" strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-primary)" }} />
                 <Area type="monotone" dataKey="sma" name="7-day average" stroke="var(--color-text-secondary)" strokeDasharray="4 4" fill="none" strokeWidth={1.5} />
               </AreaChart>
@@ -289,11 +386,11 @@ export default function SleepPage() {
                   <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<SleepStageTooltip />} />
                   <Bar dataKey="deep" name="Deep" stackId="s" fill="#21E6A5" />
                   <Bar dataKey="rem" name="REM" stackId="s" fill="#2D9BF0" />
-                  <Bar dataKey="light" name="Light" stackId="s" fill="#8DABC2">
-                    {sleepData.map((day) => (
-                      <Cell key={day.date} radius={day.nap > 0 ? 0 : [4, 4, 0, 0]} />
-                    ))}
-                  </Bar>
+                    <Bar dataKey="light" name="Light" stackId="s" fill="#8DABC2">
+                      {sleepData.map((day) => (
+                        <Cell key={day.date} radius={day.nap > 0 ? 0 : ([4, 4, 0, 0] as unknown as number)} />
+                      ))}
+                    </Bar>
                   <Bar dataKey="nap" name="Nap" stackId="s" fill="#8B7CC0" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -315,7 +412,7 @@ export default function SleepPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                   <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
                   <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={[0, 100]} unit="%" />
-                  <Tooltip />
+                  <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="%" />} />
                   <Area type="monotone" dataKey="readiness" name="Readiness" stroke="var(--color-accent-exertion)" fill="url(#recGrad)" strokeWidth={2} dot={{ r: 3 }} />
                 </AreaChart>
               </ResponsiveContainer>
@@ -332,7 +429,7 @@ export default function SleepPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                 <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
                 <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={["dataMin - 3", "dataMax + 3"]} unit="bpm" />
-                <Tooltip formatter={(value) => `${Math.round(Number(value))} bpm`} />
+                <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="bpm" />} />
                 <Area type="monotone" dataKey="rhr" name="Resting HR" stroke="var(--color-status-critical)" fill="rgba(255, 77, 98, 0.08)" strokeWidth={2} dot={{ r: 3 }} />
                 <Area type="monotone" dataKey="sma" name="7-day average" stroke="var(--color-text-secondary)" strokeDasharray="4 4" fill="none" strokeWidth={1.5} />
               </AreaChart>

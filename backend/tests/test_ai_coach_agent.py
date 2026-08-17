@@ -24,10 +24,26 @@ def test_conversation_history_preserves_user_and_assistant_turns() -> None:
     assert "Athlete Question:\ntry again" in messages[3].content
 
 
+def test_messages_includes_image_url_blocks_when_images_provided() -> None:
+    images = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="]
+    messages = coach_agent._messages("What is in this chart?", "Context", history=None, images=images)
+
+    assert isinstance(messages[1], HumanMessage)
+    assert isinstance(messages[1].content, list)
+    assert messages[1].content[0] == {"type": "text", "text": "Context\n\nAthlete Question:\nWhat is in this chart?"}
+    assert messages[1].content[1] == {"type": "image_url", "image_url": {"url": images[0]}}
+
+
+
 def test_calendar_questions_require_the_training_plan_tool() -> None:
     assert "Calendar intent is mandatory tool use." in COACH_SYSTEM_PROMPT
     assert "Goals and training notes do not replace the calendar tool" in COACH_SYSTEM_PROMPT
     assert "get_scheduled_workout_details" in COACH_SYSTEM_PROMPT
+
+
+def test_past_race_questions_require_the_past_race_goals_tool() -> None:
+    assert "get_past_race_goals" in COACH_SYSTEM_PROMPT
+    assert "more than 30 days ago" in COACH_SYSTEM_PROMPT
 
 
 def test_untrusted_athlete_data_cannot_override_coach_instructions() -> None:
@@ -44,6 +60,22 @@ def test_live_search_is_reserved_for_current_or_uncertain_external_knowledge() -
     assert "web_search" in COACH_SYSTEM_PROMPT
     assert "latest/recent/real-time" in COACH_SYSTEM_PROMPT
     assert "query concise English" in COACH_SYSTEM_PROMPT
+
+
+def test_coaching_library_tool_call_keeps_its_returned_excerpts_for_display() -> None:
+    class Tool:
+        def invoke(self, _arguments: dict[str, str]) -> dict[str, list[str]]:
+            return {"knowledge": ["Excerpt one [Source]", "Excerpt two [Source]"]}
+
+    tool_calls = []
+    coach_agent._append_tool_results(
+        AIMessage(content="", tool_calls=[{"name": "search_coaching_knowledge", "args": {"query": "hyrox"}, "id": "1"}]),
+        {"search_coaching_knowledge": Tool()},
+        [],
+        tool_calls,
+    )
+
+    assert tool_calls[0]["display_result"] == {"knowledge": ["Excerpt one [Source]", "Excerpt two [Source]"]}
 
 
 def test_controlled_tool_loop_executes_at_most_two_tools(monkeypatch) -> None:
@@ -304,3 +336,38 @@ def test_streams_a_direct_answer_without_a_non_streaming_model_call(monkeypatch)
     )
 
     assert answer == "Streaming directly"
+
+
+def test_openai_compat_streams_reasoning_before_its_answer(monkeypatch) -> None:
+    class Model:
+        def bind_tools(self, _tools: list[object]) -> "Model":
+            return self
+
+        def stream(self, _messages: list[object]):
+            return iter(
+                [
+                    AIMessageChunk(
+                        content="",
+                        additional_kwargs={"reasoning_content": "Checking recovery data."},
+                    ),
+                    AIMessageChunk(content="Take an easy day."),
+                ]
+            )
+
+    monkeypatch.setattr(coach_agent, "_model", lambda _provider, _model: Model())
+    monkeypatch.setattr(coach_agent, "_tools", lambda _user_id, _loop: [])
+
+    chunks = list(
+        coach_agent.ask_coach_with_tools_stream(
+            "openai_compat",
+            "compat-model",
+            "Question",
+            "Snapshot",
+            None,
+            "user-id",
+            asyncio.new_event_loop(),
+            [],
+        )
+    )
+
+    assert chunks == ["<think>Checking recovery data.", "</think>\nTake an easy day."]

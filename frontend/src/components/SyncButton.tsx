@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { createSSEConnection } from "@/lib/api";
 
 interface SyncState {
@@ -14,21 +14,94 @@ interface SyncButtonProps {
 }
 
 export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
+  const streamRef = useRef<EventSource | null>(null);
   const [syncState, setSyncState] = useState<SyncState>({
     isSyncing: false,
     message: "",
     error: null,
   });
 
+  const connectToJob = useCallback((jobId: string) => {
+    streamRef.current?.close();
+
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    streamRef.current = createSSEConnection(
+      `/api/sync/stream?job_id=${jobId}`,
+      (event, data) => {
+        if (event === "ping") return;
+        try {
+          const parsed = JSON.parse(data);
+          if (event === "progress") {
+            setSyncState((prev) => ({
+              ...prev,
+              message: parsed.message || prev.message,
+            }));
+          } else if (event === "complete") {
+            streamRef.current = null;
+            setSyncState({ isSyncing: false, message: "", error: null });
+            onSyncComplete?.();
+          } else if (event === "error") {
+            streamRef.current = null;
+            setSyncState((prev) => ({
+              ...prev,
+              isSyncing: false,
+              error: parsed.message || "Sync error",
+            }));
+          }
+        } catch {
+          // Non-JSON event data, ignore
+        }
+      },
+      async () => {
+        try {
+          const res = await fetch(`${apiBase}/api/sync/status`);
+          if (res.ok) {
+            const status: { is_syncing: boolean; active_job_id: string | null; last_sync_status: string } =
+              await res.json();
+            if (status.is_syncing && status.active_job_id) {
+              connectToJob(status.active_job_id);
+              return;
+            }
+            if (status.last_sync_status === "completed") {
+              streamRef.current = null;
+              setSyncState({ isSyncing: false, message: "", error: null });
+              onSyncComplete?.();
+              return;
+            }
+          }
+        } catch {}
+
+        streamRef.current = null;
+        setSyncState((prev) => ({
+          ...prev,
+          isSyncing: false,
+          message: "",
+          error: prev.error ?? "Sync connection lost",
+        }));
+      }
+    );
+  }, [onSyncComplete]);
+
+  useEffect(() => {
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    void fetch(`${apiBase}/api/sync/status`)
+      .then(async (response) => {
+        if (!response.ok) return;
+        const status: { is_syncing: boolean; active_job_id: string | null } = await response.json();
+        if (status.is_syncing && status.active_job_id) {
+          setSyncState({ isSyncing: true, message: "Syncing COROS data...", error: null });
+          connectToJob(status.active_job_id);
+        }
+      })
+      .catch(() => {});
+
+    return () => streamRef.current?.close();
+  }, [connectToJob]);
+
   const triggerSync = useCallback(async () => {
     if (syncState.isSyncing) return;
 
-    setSyncState((prev) => ({
-      ...prev,
-      isSyncing: true,
-      message: "Connecting to COROS...",
-      error: null,
-    }));
+    setSyncState({ isSyncing: true, message: "Connecting to COROS...", error: null });
 
     try {
       const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -42,62 +115,7 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
       }
 
       const { job_id } = await response.json();
-
-      createSSEConnection(
-        `/api/sync/stream?job_id=${job_id}`,
-        (event, data) => {
-          if (event === "ping") return;
-          try {
-            const parsed = JSON.parse(data);
-            if (event === "progress") {
-              setSyncState((prev) => ({
-                ...prev,
-                message: parsed.message || prev.message,
-              }));
-            } else if (event === "complete") {
-              setSyncState({
-                isSyncing: false,
-                message: "",
-                error: null,
-              });
-              if (onSyncComplete) onSyncComplete();
-            } else if (event === "error") {
-              setSyncState((prev) => ({
-                ...prev,
-                isSyncing: false,
-                error: parsed.message || "Sync error",
-              }));
-            }
-          } catch {
-            // Non-JSON event data, ignore
-          }
-        },
-        async () => {
-          // Verify via backend status before declaring connection lost
-          try {
-            const res = await fetch(`${apiBase}/api/sync/status`);
-            if (res.ok) {
-              const statusData = await res.json();
-              if (statusData.last_sync_status === "completed") {
-                setSyncState({
-                  isSyncing: false,
-                  message: "",
-                  error: null,
-                });
-                if (onSyncComplete) onSyncComplete();
-                return;
-              }
-            }
-          } catch {}
-
-          setSyncState((prev) => ({
-            ...prev,
-            isSyncing: false,
-            message: "",
-            error: prev.error ?? "Sync connection lost",
-          }));
-        }
-      );
+      connectToJob(job_id);
     } catch (err) {
       setSyncState((prev) => ({
         ...prev,
@@ -106,7 +124,7 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
         error: err instanceof Error ? err.message : "Sync failed",
       }));
     }
-  }, [syncState.isSyncing, onSyncComplete]);
+  }, [connectToJob, syncState.isSyncing]);
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>

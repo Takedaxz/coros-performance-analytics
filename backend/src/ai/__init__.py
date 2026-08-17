@@ -35,12 +35,12 @@ def _can_fallback_to_gemini_flash_lite(
 
 def _openai_compat_ready() -> bool:
     settings = get_settings()
-    return bool(settings.openai_compat_api_key)
+    return settings.openai_compat_enabled and bool(settings.openai_compat_api_key)
 
 
 def _gemini_ready() -> bool:
     settings = get_settings()
-    return bool(settings.gemini_api_key)
+    return settings.gemini_enabled and bool(settings.gemini_api_key)
 
 
 def list_provider_models() -> list[dict[str, Any]]:
@@ -117,6 +117,7 @@ def ask_coach(
     context: str,
     history: list[dict[str, str]] | None = None,
     model: str | None = None,
+    images: list[str] | None = None,
     *,
     user_id: str,
     tool_calls: list[ToolCallRecord],
@@ -125,7 +126,7 @@ def ask_coach(
     provider, clean_model = resolve_model(model)
     try:
         return ask_coach_with_tools(
-            provider, clean_model, question, context, history, user_id, event_loop, tool_calls
+            provider, clean_model, question, context, history, user_id, event_loop, tool_calls, images
         )
     except Exception as error:
         if _can_fallback_to_gemini_flash_lite(provider, clean_model, error, tool_calls):
@@ -143,6 +144,7 @@ def ask_coach(
                     user_id,
                     event_loop,
                     tool_calls,
+                    images,
                 )
             except Exception:
                 logger.exception("Gemini Coach fallback failed")
@@ -155,6 +157,7 @@ def ask_coach_stream(
     context: str,
     history: list[dict[str, str]] | None = None,
     model: str | None = None,
+    images: list[str] | None = None,
     *,
     user_id: str,
     tool_calls: list[ToolCallRecord],
@@ -164,7 +167,7 @@ def ask_coach_stream(
     streamed_text = False
     try:
         for chunk in ask_coach_with_tools_stream(
-            provider, clean_model, question, context, history, user_id, event_loop, tool_calls
+            provider, clean_model, question, context, history, user_id, event_loop, tool_calls, images
         ):
             streamed_text = True
             yield chunk
@@ -187,6 +190,7 @@ def ask_coach_stream(
                     user_id,
                     event_loop,
                     tool_calls,
+                    images,
                 )
                 return
             except Exception:

@@ -1,13 +1,15 @@
 """Regression tests for the LangChain-only AI Coach dispatch path."""
 
 import asyncio
+from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
 import src.ai as ai_pkg
 from src.ai import coach_agent
 from src.ai.coach_tools import MAX_TOOL_CALLS
-from src.api.routes.ai_routes import _unique_tool_calls
+from src.api.routes.ai_routes import _display_tool_calls, _unique_tool_calls
 
 
 def test_tool_call_limit_is_shared_between_agent_and_tools() -> None:
@@ -21,10 +23,56 @@ def test_unique_tool_calls_handles_dict_records() -> None:
     assert _unique_tool_calls([call, call]) == [call]
 
 
+def test_activity_tool_call_display_uses_title_and_date() -> None:
+    class Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [
+                SimpleNamespace(
+                    id="00000000-0000-0000-0000-000000000001",
+                    title="Morning Run",
+                    sport="run",
+                    start_time=datetime(2026, 8, 17, 6, 30),
+                )
+            ]
+
+    class Db:
+        async def execute(self, _query):
+            return Result()
+
+    displayed = asyncio.run(
+        _display_tool_calls(
+            Db(),
+            "owner",
+            [{"name": "get_activity_detail", "arguments": {"activity_id": "00000000-0000-0000-0000-000000000001"}}],
+        )
+    )
+
+    assert displayed[0]["display_arguments"] == {"activity": "Morning Run · 2026-08-17"}
+
+
+def test_activity_tool_call_display_does_not_query_invalid_id() -> None:
+    class Db:
+        async def execute(self, _query):
+            raise AssertionError("invalid activity ID must not query the database")
+
+    displayed = asyncio.run(
+        _display_tool_calls(
+            Db(),
+            "owner",
+            [{"name": "get_activity_detail", "arguments": {"activity_id": "2026-08-16-hyrox-race"}}],
+        )
+    )
+
+    assert displayed[0]["display_arguments"] == {"activity": "Activity unavailable"}
+
+
 def test_ask_coach_uses_the_langchain_tool_loop(monkeypatch) -> None:
     seen: dict[str, object] = {}
 
-    def fake_tools(provider, model_name, question, context, history, user_id, loop, tool_calls):
+    def fake_tools(provider, model_name, question, context, history, user_id, loop, tool_calls, images=None):
         seen["provider"] = provider
         tool_calls.append("get_activities")
         return "Tool answer"

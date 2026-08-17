@@ -44,6 +44,79 @@ const TRAINING_VOLUME_CONFIG: Record<TrainingVolumeMetric, { label: string; colo
   load: { label: "Training Load", color: "var(--color-status-moderate)" },
 };
 
+interface GenericTooltipEntry {
+  name?: string;
+  value?: number | string;
+  color?: string;
+  fill?: string;
+  stroke?: string;
+}
+
+function ChartLegendTooltip({
+  active,
+  label,
+  payload,
+  unit = "",
+}: {
+  active?: boolean;
+  label?: string;
+  payload?: GenericTooltipEntry[];
+  unit?: string;
+}) {
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div
+      style={{
+        padding: "12px 14px",
+        borderRadius: "14px",
+        background: "var(--color-popover)",
+        border: "1px solid var(--border-color)",
+        color: "var(--color-text-primary)",
+        boxShadow: "var(--shadow-md)",
+        minWidth: "165px",
+      }}
+    >
+      <strong style={{ display: "block", marginBottom: "8px", color: "var(--color-text-secondary)", fontSize: "12px" }}>
+        {label}
+      </strong>
+      {payload.map((entry, idx) => {
+        const itemColor = entry.stroke || entry.color || entry.fill || "var(--color-accent-primary)";
+        const rawVal = entry.value;
+        const valStr = rawVal == null || rawVal === "" ? "No Data" : `${Math.round(Number(rawVal)).toLocaleString()}${unit ? ` ${unit}` : ""}`;
+        return (
+          <div
+            key={entry.name || idx}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "16px",
+              marginTop: idx === 0 ? 0 : "5px",
+              fontSize: "13px",
+            }}
+          >
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-secondary)" }}>
+              <i
+                style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "50%",
+                  backgroundColor: itemColor,
+                  display: "inline-block",
+                  flexShrink: 0,
+                }}
+              />
+              {entry.name}
+            </span>
+            <strong>{valStr}</strong>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const SPORT_OPTIONS = [
   { value: "", label: "All Sports" },
   { value: "run", label: "Run" },
@@ -157,7 +230,7 @@ function addSevenDayAverage<T extends { date: string }>(
       ...day,
       moving_average_7d: values.some((value) => value === null)
         ? null
-        : Math.round(values.reduce((sum, value) => sum + (value as number), 0) / values.length),
+        : Math.round(values.reduce((sum: number, value) => sum + (value as number), 0) / values.length),
     };
   });
 }
@@ -650,7 +723,7 @@ export default function TrendsPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                     <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                     <YAxis stroke="var(--color-text-muted)" fontSize={11} axisLine={false} />
-                    <Tooltip contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--border-color)", borderRadius: 12 }} />
+                    <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip />} />
                     <Area type="monotone" dataKey="total_load" name="Training Load" stroke="var(--color-accent-exertion)" fill="url(#loadGrad)" strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-exertion)" }} />
                     <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
                   </AreaChart>
@@ -685,10 +758,7 @@ export default function TrendsPage() {
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                         <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                         <YAxis stroke="#4fc3f3" fontSize={11} axisLine={false} tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`} />
-                        <Tooltip
-                          contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--border-color)", borderRadius: 12 }}
-                          formatter={(val: any, name: any) => [val != null ? Math.round(Number(val)).toLocaleString() : "No Data", String(name)]}
-                        />
+                        <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="steps" />} />
                         <Area type="monotone" dataKey="steps" name="Daily Steps" stroke="#4fc3f3" fill="url(#stepsGrad)" strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#4fc3f3" }} />
                         <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
                       </AreaChart>
@@ -719,10 +789,7 @@ export default function TrendsPage() {
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                         <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
                         <YAxis stroke="#ff9800" fontSize={11} axisLine={false} />
-                        <Tooltip
-                          contentStyle={{ background: "var(--color-popover)", border: "1px solid var(--border-color)", borderRadius: 12 }}
-                          formatter={(val: any, name: any) => [val != null ? `${Math.round(Number(val)).toLocaleString()} kcal` : "No Data", String(name)]}
-                        />
+                        <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="kcal" />} />
                         <Area type="monotone" dataKey="active_calories_kcal" name="Active Calories" stroke="#ff9800" fill="url(#calGrad)" strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#ff9800" }} />
                         <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
                       </AreaChart>

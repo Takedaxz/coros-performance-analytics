@@ -64,6 +64,38 @@ _SPORT_CONFIG: dict[WorkoutSport, tuple[int, int, str]] = {
     "xc_ski": (8, 9, "sid_run_training"),
     "hyrox": (9, 9, "sid_strength_training"),
 }
+_HYROX_EXERCISE_CONFIG: dict[str, tuple[str, int, str]] = {
+    "training": ("T1398", 0, ""),
+    "runtraining": ("T1398", 0, ""),
+    "skierg": ("T1393", 2, "sid_strength_skierg"),
+    "sledpush": ("T1394", 2, "sid_strength_sledpush"),
+    "sledpull": ("T1395", 2, "sid_strength_sledpull"),
+    "burpee": ("T1396", 2, "sid_strength_burpee"),
+    "burpeebroadjumps": ("T1396", 2, "sid_strength_burpee"),
+    "indoorrower": ("T1207", 2, "sid_strength_indoor_rower"),
+    "rower": ("T1207", 2, "sid_strength_indoor_rower"),
+    "farmerswalk": ("T1310", 2, "sid_strength_farmers_walk"),
+    "farmerscarry": ("T1310", 2, "sid_strength_farmers_walk"),
+    "dumbbelllunges": ("T1064", 2, "sid_strength_dumbbell_lunges"),
+    "sandbaglunges": ("T1064", 2, "sid_strength_dumbbell_lunges"),
+    "wallballs": ("T1397", 2, "sid_strength_wallballs"),
+}
+_HYROX_TARGET_CONFIG: dict[str, WorkoutTarget] = {
+    "training": "distance",
+    "runtraining": "distance",
+    "skierg": "distance",
+    "sledpush": "distance",
+    "sledpull": "distance",
+    "burpee": "distance",
+    "burpeebroadjumps": "distance",
+    "indoorrower": "distance",
+    "rower": "distance",
+    "farmerswalk": "distance",
+    "farmerscarry": "distance",
+    "dumbbelllunges": "distance",
+    "sandbaglunges": "distance",
+    "wallballs": "reps",
+}
 _STEP_EXERCISE_TYPE: dict[WorkoutStepKind, int] = {
     "warmup": 1,
     "training": 2,
@@ -515,6 +547,39 @@ def _intensity_fields(step: CorosWorkoutStep, sport: WorkoutSport) -> ScheduleOb
     }
 
 
+def _hyrox_exercise_fields(step: CorosWorkoutStep) -> tuple[str, int, str] | None:
+    """Return COROS's station metadata for a known HYROX training step."""
+    if step.kind != "training":
+        return None
+    normalized_name = re.sub(r"[^a-z0-9]+", "", step.name.lower())
+    return _HYROX_EXERCISE_CONFIG.get(normalized_name)
+
+
+def _hyrox_target(step: CorosWorkoutStep) -> WorkoutTarget | None:
+    if step.kind != "training":
+        return None
+    normalized_name = re.sub(r"[^a-z0-9]+", "", step.name.lower())
+    return _HYROX_TARGET_CONFIG.get(normalized_name)
+
+
+def _allowed_targets(sport: WorkoutSport, kind: WorkoutStepKind) -> frozenset[WorkoutTarget]:
+    if sport in {"indoor_climb", "bouldering"}:
+        return frozenset({"routes", "time", "open"})
+    if kind == "rest":
+        if sport in {"strength", "hyrox"}:
+            return frozenset({"time", "hr_recovery", "open"})
+        if sport in {"trail_run", "xc_ski"}:
+            return frozenset({"time", "distance", "load", "hr_recovery", "elevation_gain", "open"})
+        return frozenset({"time", "distance", "load", "hr_recovery", "open"})
+    if sport == "strength":
+        return frozenset({"reps", "time", "open"})
+    if sport == "hyrox":
+        return frozenset({"time", "distance", "load", "reps", "open"})
+    if sport in {"trail_run", "xc_ski"}:
+        return frozenset({"time", "distance", "load", "elevation_gain", "open"})
+    return frozenset({"time", "distance", "load", "open"})
+
+
 def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
     sport_type, pb_version, overview = _SPORT_CONFIG[draft.sport]
     exercises: list[ScheduleObject] = []
@@ -524,22 +589,10 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
     def build_exercise(
         step: CorosWorkoutStep, exercise_id: int, sort_no: int, group_id: str
     ) -> tuple[ScheduleObject, int, int]:
-        if step.target == "hr_recovery" and step.kind != "rest":
-            raise HTTPException(
-                status_code=422, detail="HR Recovery is only available for Rest steps."
-            )
-        if step.target == "reps" and draft.sport not in {"strength", "hyrox"}:
-            raise HTTPException(
-                status_code=422, detail="Reps are only available for Strength and HYROX."
-            )
-        if step.target == "elevation_gain" and draft.sport not in {"trail_run", "xc_ski"}:
-            raise HTTPException(
-                status_code=422, detail="Elevation gain is only available for Trail Run and XC Ski."
-            )
-        if step.target == "routes" and draft.sport not in {"indoor_climb", "bouldering"}:
+        if step.target not in _allowed_targets(draft.sport, step.kind):
             raise HTTPException(
                 status_code=422,
-                detail="Routes are only available for Indoor Climb and Bouldering.",
+                detail=f"{step.target} is not available for {draft.sport} {step.kind} steps.",
             )
         if (
             draft.sport in {"strength", "hyrox"}
@@ -562,6 +615,18 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
             target_value = round(step.value)
             distance = 0
             duration = target_value if step.target == "time" else 0
+        hyrox_fields = _hyrox_exercise_fields(step) if draft.sport == "hyrox" else None
+        expected_hyrox_target = _hyrox_target(step) if draft.sport == "hyrox" else None
+        if expected_hyrox_target is not None and step.target != expected_hyrox_target:
+            raise HTTPException(
+                status_code=422,
+                detail=f"HYROX {step.name.strip()} must use a {expected_hyrox_target} target.",
+            )
+        exercise_name, exercise_subtype, exercise_overview = hyrox_fields or (
+            step.name.strip() or _friendly_step_name(step.kind),
+            0,
+            "sid_strength_training" if draft.sport in {"strength", "hyrox"} else overview,
+        )
         return (
             {
                 "id": exercise_id,
@@ -577,10 +642,10 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
                 "status": 1,
                 "userId": 0,
                 "videoUrl": "",
-                "name": step.name.strip() or _friendly_step_name(step.kind),
+                "name": exercise_name,
                 "exerciseType": _STEP_EXERCISE_TYPE[step.kind],
                 "sportType": sport_type,
-                "subType": 0,
+                "subType": exercise_subtype,
                 **_intensity_fields(step, draft.sport),
                 "targetType": target_type,
                 "targetValue": target_value,
@@ -592,9 +657,7 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
                 "groupId": group_id,
                 "isGroup": False,
                 "originId": "0",
-                "overview": "sid_strength_training"
-                if draft.sport in {"strength", "hyrox"}
-                else overview,
+                "overview": exercise_overview,
             },
             distance,
             duration,

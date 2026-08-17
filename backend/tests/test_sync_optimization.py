@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.api.routes import sync_routes
 from src.api.routes.sync_routes import _utc_iso
 from src.db.models import SportType
 from src.mcp.daily_health_client import _build_daily_health_args
@@ -76,6 +77,25 @@ def test_sync_timestamp_is_serialized_as_utc() -> None:
     assert _utc_iso(datetime(2026, 7, 31, 10, 43, 6, tzinfo=UTC)) == (
         "2026-07-31T10:43:06+00:00"
     )
+
+
+@pytest.mark.asyncio
+async def test_sync_status_exposes_the_active_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    monkeypatch.setattr(sync_routes, "_active_sync_job_id", "active-job")
+    monkeypatch.setattr(sync_routes, "load_coros_credentials", AsyncMock(return_value=None))
+
+    await sync_routes._sync_lock.acquire()
+    try:
+        status = await sync_routes.sync_status(db)
+    finally:
+        sync_routes._sync_lock.release()
+
+    assert status["is_syncing"] is True
+    assert status["active_job_id"] == "active-job"
 
 
 def test_daily_health_uses_one_declared_argument_shape() -> None:

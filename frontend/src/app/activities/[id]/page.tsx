@@ -64,6 +64,7 @@ interface ActivityDetail {
   cardiac_drift_pct_app?: number;
   strength_detail?: StrengthDetail;
   postmortem?: string;
+  activity_note?: string;
   threshold_hr_bpm?: number;
   threshold_pace_s_per_km?: number;
   laps: ActivityLap[];
@@ -657,6 +658,9 @@ export default function ActivityDetailPage() {
   const [records, setRecords] = useState<RecordPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [postmortem, setPostmortem] = useState<string | null>(null);
+  const [activityNote, setActivityNote] = useState("");
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [noteSaveError, setNoteSaveError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [expandedLapIndex, setExpandedLapIndex] = useState<number | null>(null);
   const [expandedTriathlonLeg, setExpandedTriathlonLeg] = useState<string | null>(null);
@@ -706,6 +710,7 @@ export default function ActivityDetailPage() {
           const detailData = await detailRes.json();
           setActivity(detailData);
           setPostmortem(detailData.postmortem || null);
+          setActivityNote(detailData.activity_note || "");
           setExpandedLapIndex(null);
           setExpandedTriathlonLeg(null);
         }
@@ -722,6 +727,26 @@ export default function ActivityDetailPage() {
 
     if (activityId) fetchDetail();
   }, [activityId]);
+
+  async function saveActivityNote() {
+    setIsSavingNote(true);
+    setNoteSaveError(null);
+    try {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res = await fetch(`${apiBase}/api/activities/${activityId}/note`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activity_note: activityNote }),
+      });
+      if (!res.ok) throw new Error("Unable to save note");
+      const data = await res.json();
+      setActivityNote(data.activity_note || "");
+      setActivity((current) => current ? { ...current, activity_note: data.activity_note } : current);
+    } catch {
+      setNoteSaveError("Could not save note. Please try again.");
+    }
+    setIsSavingNote(false);
+  }
 
   async function generatePostmortem() {
     setIsGenerating(true);
@@ -1942,6 +1967,33 @@ export default function ActivityDetailPage() {
               </div>
             </div>
           )}
+
+          <section className="card" style={{ marginTop: "var(--space-6)", marginBottom: "var(--space-6)" }}>
+            <div className="card-header">
+              <div>
+                <span className="card-title">Athlete note</span>
+                <p className="ai-analysis-meta">Context for AI Coach.</p>
+              </div>
+            </div>
+            <div className="settings-field">
+              <label htmlFor="activity-note-input">What should your coach know?</label>
+              <textarea
+                id="activity-note-input"
+                value={activityNote}
+                onChange={(event) => setActivityNote(event.target.value)}
+                maxLength={4000}
+                rows={4}
+                placeholder="How did this activity feel?"
+              />
+              <span className="settings-help">Add how it felt, any pain, or context that explains the result.</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "var(--space-4)" }}>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={saveActivityNote} disabled={isSavingNote}>
+                {isSavingNote ? "Saving" : "Save note"}
+              </button>
+            </div>
+            {noteSaveError && <p role="alert" style={{ color: "var(--color-error, #dc2626)", marginTop: "var(--space-2)" }}>{noteSaveError}</p>}
+          </section>
 
           {/* AI Performance Coach Analysis */}
           <div className="card ai-analysis-card" id="ai-analysis-card">

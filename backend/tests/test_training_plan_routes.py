@@ -131,6 +131,109 @@ def test_structured_hyrox_workout_uses_coros_units() -> None:
     assert exercises[1]["targetType"] == 5
     assert exercises[1]["targetValue"] == 5_000
     assert exercises[1]["intensityType"] == 1
+    assert exercises[1]["name"] == "T1394"
+    assert exercises[1]["subType"] == 2
+    assert exercises[1]["overview"] == "sid_strength_sledpush"
+
+
+def test_structured_hyrox_workout_maps_all_eight_stations() -> None:
+    program = _build_coros_program(
+        CorosWorkoutDraft(
+            date="2026-08-12",
+            name="HYROX stations",
+            sport="hyrox",
+            steps=[
+                CorosWorkoutStep(
+                    name=name,
+                    target="reps" if name == "Wall Balls" else "distance",
+                    value=100 if name == "Wall Balls" else 50,
+                )
+                for name in (
+                    "Ski Erg", "Sled Push", "Sled Pull", "Burpee Broad Jumps",
+                    "Indoor Rower", "Farmer's Carry", "Sandbag Lunges", "Wall Balls",
+                )
+            ],
+        )
+    )
+
+    exercises = program["exercises"]
+    assert isinstance(exercises, list)
+    assert [(exercise["name"], exercise["subType"]) for exercise in exercises] == [
+        ("T1393", 2),
+        ("T1394", 2),
+        ("T1395", 2),
+        ("T1396", 2),
+        ("T1207", 2),
+        ("T1310", 2),
+        ("T1064", 2),
+        ("T1397", 2),
+    ]
+
+
+def test_structured_hyrox_workout_rejects_station_reps() -> None:
+    with pytest.raises(HTTPException, match="Ski Erg must use a distance target"):
+        _build_coros_program(
+            CorosWorkoutDraft(
+                date="2026-08-12",
+                name="HYROX stations",
+                sport="hyrox",
+                steps=[CorosWorkoutStep(name="Ski Erg", target="reps", value=15)],
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("sport", "kind", "target", "name"),
+    [
+        ("run", "training", "distance", ""),
+        ("ride", "training", "load", ""),
+        ("swim", "training", "time", ""),
+        ("strength", "training", "reps", "Squat"),
+        ("trail_run", "training", "elevation_gain", ""),
+        ("indoor_climb", "training", "routes", ""),
+        ("bouldering", "training", "routes", ""),
+        ("xc_ski", "rest", "elevation_gain", ""),
+        ("hyrox", "training", "reps", "Wall Balls"),
+    ],
+)
+def test_structured_workout_accepts_supported_targets(
+    sport: str, kind: str, target: str, name: str,
+) -> None:
+    _build_coros_program(
+        CorosWorkoutDraft(
+            date="2026-08-12",
+            name="Target check",
+            sport=sport,  # type: ignore[arg-type]
+            steps=[CorosWorkoutStep(kind=kind, target=target, name=name)],  # type: ignore[arg-type]
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("sport", "kind", "target"),
+    [
+        ("run", "training", "reps"),
+        ("ride", "training", "reps"),
+        ("swim", "training", "routes"),
+        ("strength", "training", "distance"),
+        ("trail_run", "training", "reps"),
+        ("indoor_climb", "training", "distance"),
+        ("bouldering", "training", "distance"),
+        ("xc_ski", "training", "reps"),
+    ],
+)
+def test_structured_workout_rejects_unsupported_targets(
+    sport: str, kind: str, target: str,
+) -> None:
+    with pytest.raises(HTTPException, match="is not available"):
+        _build_coros_program(
+            CorosWorkoutDraft(
+                date="2026-08-12",
+                name="Target check",
+                sport=sport,  # type: ignore[arg-type]
+                steps=[CorosWorkoutStep(kind=kind, target=target)],  # type: ignore[arg-type]
+            )
+        )
 
 
 def test_structured_workout_intensity_uses_coros_metric_units() -> None:

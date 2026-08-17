@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, extract, func, or_, select
 
 from src.activity_laps import (
@@ -18,6 +19,7 @@ from src.activity_laps import (
 )
 from src.db.engine import get_db_session
 from src.db.models import Activity, ActivityLap, ActivityRecord, FitnessEstimate
+from src.db.owner import get_owner_id
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +38,10 @@ ActivitySort = Literal[
     "distance_desc",
     "distance_asc",
 ]
+
+
+class ActivityNoteUpdate(BaseModel):
+    activity_note: str | None = Field(default=None, max_length=4_000)
 
 
 def _period_bounds(
@@ -616,6 +622,7 @@ async def get_activity(
         "hr_quality_flag": activity.hr_quality_flag,
         "strength_detail": activity.strength_detail,
         "postmortem": activity.postmortem,
+        "activity_note": activity.activity_note,
         "source_type": activity.source_type,
         "threshold_hr_bpm": (
             fitness.lactate_threshold_hr if (fitness and fitness.lactate_threshold_hr) else 173
@@ -626,6 +633,29 @@ async def get_activity(
         "laps": lap_payload,
         "lap_splits": lap_splits,
     }
+
+
+@router.put("/{activity_id}/note")
+async def update_activity_note(
+    activity_id: str,
+    payload: ActivityNoteUpdate,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, str | None]:
+    """Save the owner's private note for an activity."""
+    activity = (
+        await db.execute(
+            select(Activity).where(
+                Activity.id == activity_id,
+                Activity.user_id == get_owner_id(),
+            )
+        )
+    ).scalar_one_or_none()
+    if activity is None:
+        raise HTTPException(status_code=404, detail="Activity not found")
+
+    activity.activity_note = payload.activity_note.strip() if payload.activity_note else None
+    await db.commit()
+    return {"activity_note": activity.activity_note}
 
 
 @router.get("/{activity_id}/records")

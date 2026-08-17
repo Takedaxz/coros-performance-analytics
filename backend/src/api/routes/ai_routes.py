@@ -5,6 +5,7 @@ import datetime
 import json
 import logging
 from collections.abc import AsyncIterator, Iterator
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -66,6 +67,67 @@ def _unique_tool_calls(tool_calls: list[ToolCallRecord]) -> list[ToolCallRecord]
     return unique
 
 
+async def _display_tool_calls(
+    db: AsyncSession, user_id: str, tool_calls: list[ToolCallRecord]
+) -> list[ToolCallRecord]:
+    activity_ids: set[str] = set()
+    for tool_call in tool_calls:
+        arguments = tool_call["arguments"]
+        activity_id = arguments.get("activity_id")
+        if isinstance(activity_id, str):
+            try:
+                UUID(activity_id)
+            except ValueError:
+                pass
+            else:
+                activity_ids.add(activity_id)
+        multiple_activity_ids = arguments.get("activity_ids")
+        if isinstance(multiple_activity_ids, list):
+            for value in multiple_activity_ids:
+                if not isinstance(value, str):
+                    continue
+                try:
+                    UUID(value)
+                except ValueError:
+                    continue
+                activity_ids.add(value)
+    labels: dict[str, str] = {}
+    if activity_ids:
+        activities = (
+            await db.execute(
+                select(Activity).where(Activity.id.in_(activity_ids), Activity.user_id == user_id)
+            )
+        ).scalars().all()
+        labels = {
+            activity.id: f"{activity.title or str(activity.sport).replace('_', ' ').title()} · {activity.start_time.date().isoformat()}"
+            for activity in activities
+        }
+    displayed: list[ToolCallRecord] = []
+    for tool_call in tool_calls:
+        arguments = tool_call["arguments"]
+        activity_id = arguments.get("activity_id")
+        activity_ids_argument = arguments.get("activity_ids")
+        if isinstance(activity_id, str) and activity_id in labels:
+            displayed.append({**tool_call, "display_arguments": {"activity": labels[activity_id]}})
+        elif isinstance(activity_id, str):
+            displayed.append({**tool_call, "display_arguments": {"activity": "Activity unavailable"}})
+        elif isinstance(activity_ids_argument, list):
+            activity_labels = [
+                labels.get(activity_id, "Activity unavailable")
+                if isinstance(activity_id, str)
+                else "Activity unavailable"
+                for activity_id in activity_ids_argument
+            ]
+            displayed.append(
+                {**tool_call, "display_arguments": {"activities": activity_labels}}
+                if activity_labels
+                else tool_call
+            )
+        else:
+            displayed.append(tool_call)
+    return displayed
+
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -75,6 +137,7 @@ class AskRequest(BaseModel):
     question: str
     context_days: int = 14
     history: list[ChatMessage] = []
+    images: list[str] = []
 
 
 class AskResponse(BaseModel):
@@ -112,6 +175,7 @@ async def ask_ai(
         context,
         history_dicts,
         model=None,
+        images=req.images,
         user_id=get_owner_id(),
         tool_calls=tool_calls,
         event_loop=asyncio.get_running_loop(),
@@ -170,6 +234,7 @@ async def ask_ai_stream(
             req.question,
             context,
             history_dicts,
+            images=req.images,
             user_id=get_owner_id(),
             tool_calls=tool_calls,
             event_loop=loop,
@@ -183,7 +248,9 @@ async def ask_ai_stream(
                 if item is None:
                     break
                 yield f"data: {json.dumps({'text': item})}\n\n"
-            for tool_call in _unique_tool_calls(tool_calls):
+            for tool_call in await _display_tool_calls(
+                db, get_owner_id(), _unique_tool_calls(tool_calls)
+            ):
                 yield f"data: {json.dumps({'tool': tool_call})}\n\n"
         finally:
             await producer
@@ -525,6 +592,7 @@ class MessageItem(BaseModel):
     id: str
     role: str
     content: str
+    images: list[str] | None = None
     tool_calls: list[ToolCallRecord | str] | None = None
     created_at: str
 
@@ -552,6 +620,13 @@ async def get_models() -> ModelsResponse:
     )
 
 
+def _capitalize_title(val: str | None) -> str:
+    if not val:
+        return "New Chat"
+    s = val.strip()
+    return (s[0].upper() + s[1:]) if s else "New Chat"
+
+
 @router.get("/sessions", response_model=list[SessionListItem])
 async def list_sessions(db: AsyncSession = Depends(get_db_session)) -> list[SessionListItem]:
     """Return all chat sessions for the user, newest first."""
@@ -564,7 +639,7 @@ async def list_sessions(db: AsyncSession = Depends(get_db_session)) -> list[Sess
     return [
         SessionListItem(
             id=s.id,
-            title=s.title,
+            title=_capitalize_title(s.title),
             is_pinned=s.is_pinned,
             model_name=s.model_name or _active_model(),
             created_at=s.created_at.isoformat(),
@@ -611,7 +686,7 @@ async def update_session(
         raise HTTPException(status_code=404, detail="Session not found.")
 
     if req.title is not None:
-        session.title = req.title
+        session.title = _capitalize_title(req.title)
     if req.is_pinned is not None:
         session.is_pinned = req.is_pinned
     if req.model_name is not None:
@@ -620,7 +695,7 @@ async def update_session(
     await db.commit()
     return SessionListItem(
         id=session.id,
-        title=session.title,
+        title=_capitalize_title(session.title),
         is_pinned=session.is_pinned,
         model_name=session.model_name or _active_model(),
         created_at=session.created_at.isoformat(),
@@ -648,9 +723,24 @@ async def get_session_messages(
         .order_by(DBChatMessage.created_at.asc())
     )
     msgs = msg_res.scalars().all()
+    tool_calls_by_message = {
+        message.id: await _display_tool_calls(
+            db,
+            get_owner_id(),
+            [tool_call for tool_call in (message.tool_calls or []) if isinstance(tool_call, dict)],
+        )
+        for message in msgs
+    }
     return [
-        MessageItem(id=m.id, role=m.role, content=m.content, tool_calls=m.tool_calls, created_at=m.created_at.isoformat())
-        for m in msgs
+        MessageItem(
+            id=message.id,
+            role=message.role,
+            content=message.content,
+            images=message.images,
+            tool_calls=tool_calls_by_message.get(message.id) or message.tool_calls,
+            created_at=message.created_at.replace(tzinfo=datetime.UTC).isoformat(),
+        )
+        for message in msgs
     ]
 
 
@@ -690,12 +780,14 @@ async def session_ask_stream(
     ]
 
     # Persist user message
-    user_msg = DBChatMessage(session_id=session_id, role="user", content=req.question)
+    user_msg = DBChatMessage(
+        session_id=session_id, role="user", content=req.question, images=req.images or None
+    )
     db.add(user_msg)
 
     # Auto-title from first message (truncated to 60 chars)
     if session.title == "New Chat":
-        session.title = req.question[:60]
+        session.title = _capitalize_title(req.question[:60])
 
     # Commit immediately so the user message + title are durable before streaming starts.
     # get_db_session commits on exit, but for StreamingResponse that exit is delayed until
@@ -732,6 +824,7 @@ async def session_ask_stream(
             context,
             history_dicts,
             model=session.model_name or _active_model(),
+            images=req.images,
             user_id=get_owner_id(),
             tool_calls=tool_calls,
             event_loop=loop,
@@ -744,7 +837,9 @@ async def session_ask_stream(
                 if item is None:
                     break
                 yield f"data: {json.dumps({'text': item})}\n\n"
-            for tool_call in _unique_tool_calls(tool_calls):
+            for tool_call in await _display_tool_calls(
+                db, get_owner_id(), _unique_tool_calls(tool_calls)
+            ):
                 yield f"data: {json.dumps({'tool': tool_call})}\n\n"
         finally:
             # Fire the DB persist as a background task so the generator exits immediately.

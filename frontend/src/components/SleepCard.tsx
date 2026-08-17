@@ -99,7 +99,10 @@ export default function SleepCard({
               >
                 <span className="sleep-stage-segment-fill" style={{ background: stage.color }} aria-hidden="true" />
                 <span className="sleep-stage-popover" role="tooltip">
-                  <strong>{stage.label}</strong>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                    <i style={{ width: 6, height: 6, borderRadius: "50%", background: stage.color, display: "inline-block" }} />
+                    <strong>{stage.label}</strong>
+                  </span>
                   <small>{`${formatHoursMins(stage.seconds)} · ${stage.percentage}%`}</small>
                 </span>
               </button>

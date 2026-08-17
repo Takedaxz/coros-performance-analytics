@@ -501,6 +501,10 @@ async def _fetch_user_goal(db: AsyncSession, user_id: str) -> str:
                 )
             if goal.goal_target_time:
                 goal_details.append(f"  - **Goal Finish Time:** {goal.goal_target_time}")
+            if goal.goal_result_time:
+                goal_details.append(f"  - **Actual Finish Time:** {goal.goal_result_time}")
+            if goal.goal_race_note:
+                goal_details.append(f"  - **Race Notes:** {goal.goal_race_note}")
             if goal.weekly_training_hours:
                 goal_details.append(
                     f"  - **Weekly Training Target:** {goal.weekly_training_hours}h"
@@ -529,6 +533,10 @@ async def _fetch_user_goal(db: AsyncSession, user_id: str) -> str:
             )
             if goal.goal_target_time:
                 parts.append(f"  - **Goal Finish Time:** {goal.goal_target_time}")
+            if goal.goal_result_time:
+                parts.append(f"  - **Actual Finish Time:** {goal.goal_result_time}")
+            if goal.goal_race_note:
+                parts.append(f"  - **Race Notes:** {goal.goal_race_note}")
             if goal.weekly_training_hours:
                 parts.append(
                     f"  - **Pre-race Weekly Training Target:** {goal.weekly_training_hours}h"

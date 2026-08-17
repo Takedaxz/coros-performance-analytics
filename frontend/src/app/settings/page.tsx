@@ -14,6 +14,8 @@ interface UserGoal {
   goal_race_name: string;
   goal_race_date: string;
   goal_target_time: string;
+  goal_result_time: string;
+  goal_race_note: string;
   weekly_training_hours: string;
   is_active?: boolean;
 }
@@ -38,6 +40,8 @@ const EMPTY_GOAL: UserGoal = {
   goal_race_name: "",
   goal_race_date: "",
   goal_target_time: "",
+  goal_result_time: "",
+  goal_race_note: "",
   weekly_training_hours: "",
   is_active: true,
 };
@@ -59,8 +63,21 @@ const EMPTY_PROFILE: UserProfile = {
 
 function daysUntil(dateStr: string): number | null {
   if (!dateStr) return null;
-  const diff = new Date(dateStr).getTime() - new Date().setHours(0, 0, 0, 0);
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+  const [year, month, day] = dateStr.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const bangkokToday = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date()).reduce<Record<string, string>>((parts, part) => {
+    if (part.type !== "literal") parts[part.type] = part.value;
+    return parts;
+  }, {});
+  return Math.round(
+    (Date.UTC(year, month - 1, day) - Date.UTC(Number(bangkokToday.year), Number(bangkokToday.month) - 1, Number(bangkokToday.day))) /
+      86_400_000,
+  );
 }
 
 /** Returns the goal's lifecycle state based on race date vs. today */
@@ -137,6 +154,8 @@ export default function SettingsPage() {
           goal_race_name: item.goal_race_name ?? "",
           goal_race_date: item.goal_race_date ?? "",
           goal_target_time: item.goal_target_time ?? "",
+          goal_result_time: item.goal_result_time ?? "",
+          goal_race_note: item.goal_race_note ?? "",
           weekly_training_hours: item.weekly_training_hours?.toString() ?? "",
           is_active: item.is_active,
         })));
@@ -341,10 +360,11 @@ export default function SettingsPage() {
       goal_race_name: goalForm.goal_race_name || null,
       goal_race_date: goalForm.goal_race_date || null,
       goal_target_time: normalizedTargetTime(goalForm.goal_target_time),
+      goal_result_time: normalizedTargetTime(goalForm.goal_result_time),
+      goal_race_note: goalForm.goal_race_note || null,
       weekly_training_hours: goalForm.weekly_training_hours
         ? parseFloat(goalForm.weekly_training_hours)
         : null,
-      is_active: goalForm.is_active ?? true,
     };
 
     try {
@@ -415,6 +435,8 @@ export default function SettingsPage() {
       goal_race_name: g.goal_race_name,
       goal_race_date: g.goal_race_date,
       goal_target_time: g.goal_target_time,
+      goal_result_time: g.goal_result_time,
+      goal_race_note: g.goal_race_note,
       weekly_training_hours: g.weekly_training_hours,
       is_active: g.is_active,
     });
@@ -441,6 +463,9 @@ export default function SettingsPage() {
   }
 
   const [targetHours, targetMinutes, targetSeconds] = targetTimeParts(goalForm.goal_target_time);
+  const [resultHours, resultMinutes, resultSeconds] = targetTimeParts(goalForm.goal_result_time);
+  const canEnterGoalResult = Boolean(goalForm.goal_race_date)
+    && goalRaceState(goalForm.goal_race_date) !== "upcoming";
   const savedMessage = profileSaving
     ? "Saving changes…"
     : corosSaved
@@ -599,7 +624,7 @@ export default function SettingsPage() {
                         placeholder="Select birthdate"
                       />
                     </div>
-                    <div className="settings-field">
+                    <div className="settings-field" style={{ gridColumn: "span 2" }}>
                       <label id="profile-sex-label">Sex</label>
                       <SingleSelect
                         ariaLabel="Sex"
@@ -749,6 +774,49 @@ export default function SettingsPage() {
                             </div>
                           </div>
                         </div>
+                        {canEnterGoalResult && (
+                          <div className="settings-field">
+                            <label id="goal-result-time-label">Actual result time</label>
+                            <div className="settings-target-time" aria-labelledby="goal-result-time-label">
+                              <div className="settings-target-time-part">
+                                <span>Hours</span>
+                                <NumberStepper
+                                  ariaLabel="Actual result hours"
+                                  id="goal-result-hours"
+                                  min={0}
+                                  max={99}
+                                  placeholder="0"
+                                  value={resultHours}
+                                  onChange={(value) => setGoalForm((goal) => ({ ...goal, goal_result_time: updateTargetTime(goal.goal_result_time, 0, value) }))}
+                                />
+                              </div>
+                              <div className="settings-target-time-part">
+                                <span>Minutes</span>
+                                <NumberStepper
+                                  ariaLabel="Actual result minutes"
+                                  id="goal-result-minutes"
+                                  min={0}
+                                  max={59}
+                                  placeholder="00"
+                                  value={resultMinutes}
+                                  onChange={(value) => setGoalForm((goal) => ({ ...goal, goal_result_time: updateTargetTime(goal.goal_result_time, 1, value) }))}
+                                />
+                              </div>
+                              <div className="settings-target-time-part">
+                                <span>Seconds</span>
+                                <NumberStepper
+                                  ariaLabel="Actual result seconds"
+                                  id="goal-result-seconds"
+                                  min={0}
+                                  max={59}
+                                  placeholder="00"
+                                  value={resultSeconds}
+                                  onChange={(value) => setGoalForm((goal) => ({ ...goal, goal_result_time: updateTargetTime(goal.goal_result_time, 2, value) }))}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
                         <div className="settings-field">
                           <label htmlFor="goal-hours">Weekly training</label>
                           <div className="settings-target-time-part">
@@ -770,15 +838,12 @@ export default function SettingsPage() {
                         <label htmlFor="goal-notes">Goal notes</label>
                         <textarea id="goal-notes" rows={3} placeholder="Experience, injury considerations, or pacing priorities." value={goalForm.goal_description} onChange={(e) => setGoalForm((g) => ({ ...g, goal_description: e.target.value }))} />
                       </div>
-                      <label className="settings-check" htmlFor="goal-active-checkbox">
-                        <input id="goal-active-checkbox" type="checkbox" checked={goalForm.is_active} onChange={(e) => setGoalForm((g) => ({ ...g, is_active: e.target.checked }))} />
-                        <span className="settings-check-control" aria-hidden="true">
-                          <svg viewBox="0 0 16 16">
-                            <path d="m3.5 8.25 2.75 2.75 6.25-6.25" />
-                          </svg>
-                        </span>
-                        <span>Keep this goal active</span>
-                      </label>
+                      {canEnterGoalResult && (
+                        <div className="settings-field">
+                          <label htmlFor="goal-race-notes">Race notes</label>
+                          <textarea id="goal-race-notes" rows={3} placeholder="How the race went, what worked, and what to improve next time." value={goalForm.goal_race_note} onChange={(e) => setGoalForm((g) => ({ ...g, goal_race_note: e.target.value }))} />
+                        </div>
+                      )}
                       <div className="settings-actions">
                         <button type="submit" className="btn btn-primary" disabled={goalSaving}>{goalSaving ? "Saving…" : "Save goal"}</button>
                         <button type="button" className="btn btn-secondary" onClick={cancelGoalForm}>Cancel</button>
@@ -809,12 +874,20 @@ export default function SettingsPage() {
                             const daysLeft = daysUntil(g.goal_race_date);
                             const raceState = goalRaceState(g.goal_race_date);
                             const isFrozen = g.is_active && (raceState === "recovery" || raceState === "expired");
+                            const isPast = raceState === "recovery" || raceState === "expired";
                             return (
-                              <article className={`settings-goal ${g.is_active ? "" : "is-archived"}`} key={g.id}>
+                              <article className={`settings-goal ${!g.is_active || isPast ? "is-archived" : ""}`} key={g.id}>
                                 <div>
                                   <div className="settings-title-line">
                                     <h4>{g.goal_race_name || "General fitness goal"}</h4>
-                                    <span className={`settings-state ${g.is_active && raceState !== "expired" ? "is-connected" : ""}`}>
+                                    <span
+                                      className={`settings-state ${raceState === "recovery" ? "is-warning" : raceState === "expired" ? "is-expired" : g.is_active ? "is-connected" : ""}`}
+                                      title={raceState === "recovery"
+                                        ? "Available to the coach for post-race recovery planning for 30 days."
+                                        : raceState === "expired"
+                                          ? "This race is no longer included in automatic coaching context."
+                                          : undefined}
+                                    >
                                       {raceState === "recovery" ? "Recovery" : raceState === "expired" ? "Expired" : g.is_active ? "Active" : "Archived"}
                                     </span>
                                     {g.is_active && raceState === "upcoming" && daysLeft !== null && (
@@ -824,25 +897,18 @@ export default function SettingsPage() {
                                   <div className="settings-goal-meta">
                                     {g.goal_race_date && <span>{g.goal_race_date}</span>}
                                     {g.goal_target_time && <span>Target {g.goal_target_time}</span>}
+                                    {g.goal_result_time && <span>Result {g.goal_result_time}</span>}
                                     {g.weekly_training_hours && <span>{g.weekly_training_hours} hr / week</span>}
                                   </div>
                                   {g.goal_description && <p>{g.goal_description}</p>}
-                                  {isFrozen && (
-                                    <p className="settings-goal-notice">
-                                      {raceState === "recovery"
-                                        ? "Available to the coach for post-race recovery planning for 30 days."
-                                        : "This race is no longer included in coaching context."}
-                                    </p>
-                                  )}
+                                  {g.goal_race_note && <p>Race note: {g.goal_race_note}</p>}
                                 </div>
                                 <div className="settings-goal-actions">
+                                  <button className="btn btn-ghost btn-sm" onClick={() => startEditGoal(g)}>Edit</button>
                                   {!isFrozen && (
-                                    <>
-                                      <button className="btn btn-ghost btn-sm" onClick={() => startEditGoal(g)}>Edit</button>
-                                      <button className="btn btn-ghost btn-sm" onClick={() => g.id && toggleActive(g.id)}>
-                                        {g.is_active ? "Archive" : "Activate"}
-                                      </button>
-                                    </>
+                                    <button className="btn btn-ghost btn-sm" onClick={() => g.id && toggleActive(g.id)}>
+                                      {g.is_active ? "Archive" : "Activate"}
+                                    </button>
                                   )}
                                   <button className="btn btn-ghost btn-sm settings-danger-action" onClick={() => g.id && deleteGoal(g.id)}>Delete</button>
                                 </div>

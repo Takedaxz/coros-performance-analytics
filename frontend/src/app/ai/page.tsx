@@ -6,6 +6,7 @@ import PageTitle from "@/components/PageTitle";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { WaveThinkingText } from "@/components/WaveThinkingText";
+import AIModelIcon from "@/components/AIModelIcon";
 import { removeLegacyEvidenceUsed } from "./answer-display";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -16,6 +17,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_activity_detail: "Workout details",
   get_fitness_history: "Fitness history",
   get_health_trend: "Health & recovery",
+  get_past_race_goals: "Past competitions",
   get_scheduled_workout_details: "Workout details",
   get_training_plan: "Training plan",
   search_coaching_knowledge: "Coaching library",
@@ -27,9 +29,17 @@ function toolLabel(tool: string): string {
   return TOOL_LABELS[tool] ?? tool.replace(/^get_/, "").replaceAll("_", " ");
 }
 
+function capitalizeFirstLetter(str: string): string {
+  if (!str) return "";
+  const trimmed = str.trim();
+  return trimmed ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1) : "";
+}
+
 type ToolCall = {
   name: string;
   arguments: Record<string, unknown>;
+  display_arguments?: Record<string, unknown>;
+  display_result?: { knowledge?: string[] };
 };
 
 function normalizeToolCall(tool: ToolCall | string): ToolCall {
@@ -40,6 +50,14 @@ function formatToolArguments(arguments_: Record<string, unknown>): string {
   return Object.entries(arguments_)
     .map(([name, value]) => `${name}: ${JSON.stringify(value)}`)
     .join(", ");
+}
+
+function formatToolTooltip(tool: ToolCall): string {
+  const knowledge = tool.display_result?.knowledge;
+  if (tool.name === "search_coaching_knowledge" && knowledge?.length) {
+    return `Query: ${String(tool.arguments.query ?? "")}\n\n${knowledge.join("\n\n")}`;
+  }
+  return formatToolArguments(tool.display_arguments ?? tool.arguments);
 }
 
 function uniqueToolCalls(tools: (ToolCall | string)[]): ToolCall[] {
@@ -249,19 +267,245 @@ type ModelsResponse = {
   default_model: string;
 };
 
+function formatModelShortPillName(id: string, name?: string): string {
+  const raw = name || (id.includes(":") ? id.split(":", 2)[1] : id.includes("/") ? id.split("/").pop()! : id);
+  if (!raw) return "Model";
+
+  let formatted = raw
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+  // Specific brand capitalization rules
+  formatted = formatted
+    .replace(/\bDeepseek\b/gi, "DeepSeek")
+    .replace(/\bClaude\b/gi, "Claude")
+    .replace(/\bGpt\b/gi, "GPT")
+    .replace(/\bOpenai\b/gi, "OpenAI")
+    .replace(/\bQwen\b/gi, "Qwen")
+    .replace(/\bGemini\b/gi, "Gemini")
+    .replace(/\bSonar\b/gi, "Sonar")
+    .replace(/\bPerplexity\b/gi, "Perplexity")
+    .replace(/\bMistral\b/gi, "Mistral")
+    .replace(/\bLlama\b/gi, "Llama")
+    .replace(/\bNova\b/gi, "Nova")
+    .replace(/\bGrok\b/gi, "Grok")
+    .replace(/\bXai\b/gi, "xAI")
+    .replace(/\bOllama\b/gi, "Ollama")
+    .replace(/\bGroq\b/gi, "Groq");
+
+  return formatted;
+}
+
+function getModelSubtitle(id: string, name?: string): string {
+  const target = ((name || "") + " " + id).toLowerCase();
+  if (target.includes("flash-lite")) return "Fastest answers";
+  if (target.includes("flash")) return "All-around help";
+  if (target.includes("pro") || target.includes("4o")) return "Advanced math & code";
+  if (target.includes("r1") || target.includes("think") || target.includes("reasoning")) return "Complex problem solving";
+  return "All-around training help";
+}
+
+type ModelItem = {
+  id: string;
+  name: string;
+  description: string;
+  badge?: string;
+};
+
+function GeminiModelSelector({
+  selectedModel,
+  onModelChange,
+  disabled,
+  providers,
+  availableModels,
+}: {
+  selectedModel: string;
+  onModelChange: (model: string) => void;
+  disabled: boolean;
+  providers: ProviderGroup[];
+  availableModels: string[];
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [direction, setDirection] = useState<"up" | "down">("up");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [isOpen]);
+
+  const toggleOpen = () => {
+    if (!isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const spaceAbove = rect.top;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceAbove < 360 && spaceBelow > spaceAbove) {
+        setDirection("down");
+      } else {
+        setDirection("up");
+      }
+    }
+    setIsOpen((prev) => !prev);
+  };
+
+  const items: ModelItem[] = [];
+  if (providers.length > 0) {
+    providers.forEach((provider) => {
+      provider.models.forEach((m) => {
+        const formattedName = formatModelShortPillName(m.id, m.name);
+        items.push({
+          id: m.id,
+          name: formattedName,
+          description: getModelSubtitle(m.id, m.name),
+        });
+      });
+    });
+  } else {
+    availableModels.forEach((model) => {
+      const formattedName = formatModelShortPillName(model);
+      items.push({
+        id: model,
+        name: formattedName,
+        description: getModelSubtitle(model, formattedName),
+      });
+    });
+  }
+
+  const selectedItem = items.find((item) => item.id === selectedModel);
+  const pillLabel = selectedItem ? selectedItem.name : formatModelShortPillName(selectedModel);
+
+  // Build grouped structure for rendering
+  const groups: { label: string | null; items: ModelItem[] }[] = [];
+  if (providers.length > 0) {
+    providers.forEach((provider) => {
+      groups.push({
+        label: provider.name,
+        items: provider.models.map((m) => ({
+          id: m.id,
+          name: formatModelShortPillName(m.id, m.name),
+          description: getModelSubtitle(m.id, m.name),
+        })),
+      });
+    });
+  } else {
+    groups.push({ label: null, items });
+  }
+
+  return (
+    <div className="gemini-model-picker-wrap" ref={containerRef}>
+      <button
+        type="button"
+        className={`gemini-model-pill ${isOpen ? "is-open" : ""}`}
+        onClick={toggleOpen}
+        disabled={disabled}
+        aria-expanded={isOpen}
+        aria-label="Select AI model"
+      >
+        <span>{pillLabel}</span>
+        <svg
+          className={`gemini-chevron ${isOpen ? "is-open" : ""}`}
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div className={`gemini-model-popover ${direction === "down" ? "direction-down" : "direction-up"}`} role="menu" aria-label="AI Models">
+          <div className="gemini-model-popover-scroll">
+            {groups.map((group, gi) => (
+              <div key={group.label ?? "default"} className="gemini-model-group">
+                {group.label && (
+                  <div className="gemini-model-group-label">
+                    {gi > 0 && <div className="gemini-model-divider" />}
+                    <span>{group.label}</span>
+                  </div>
+                )}
+                {group.items.map((item) => {
+                  const isSelected = item.id === selectedModel;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`gemini-model-item ${isSelected ? "is-selected" : ""}`}
+                      role="menuitem"
+                      onClick={() => {
+                        onModelChange(item.id);
+                        setIsOpen(false);
+                      }}
+                    >
+                      <span className="gemini-model-tier">
+                        <AIModelIcon modelId={item.id} modelName={item.name} size={16} />
+                      </span>
+                      <div className="gemini-model-info">
+                        <div className="gemini-model-title-row">
+                          <span className="gemini-model-name">{item.name}</span>
+                          {item.badge && <span className="gemini-model-badge">{item.badge}</span>}
+                        </div>
+                        <span className="gemini-model-desc">{item.description}</span>
+                      </div>
+                      {isSelected && (
+                        <span className="gemini-model-check-mark">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 type Message = {
   role: "user" | "ai";
   content: string;
+  images?: string[];
   tools?: (ToolCall | string)[];
+  createdAt?: string;
 };
 
 type DBMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  images?: string[];
   tool_calls?: (ToolCall | string)[];
   created_at: string;
 };
+
+function formatMessageTimestamp(value: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Bangkok",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value));
+}
 
 type SuggestedPrompt = {
   label: string;
@@ -344,7 +588,64 @@ export default function AiPage() {
   const [providers, setProviders] = useState<ProviderGroup[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setActivePreviewImage(null);
+    };
+    if (activePreviewImage) {
+      window.addEventListener("keydown", handleKeyDown);
+    }
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activePreviewImage]);
+
+  const processImageFiles = useCallback((files: FileList | File[]) => {
+    const fileArray = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (!fileArray.length) return;
+
+    fileArray.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result;
+        if (typeof result === "string") {
+          setPendingImages((prev) => [...prev, result]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  }, []);
+
+  const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      processImageFiles(e.target.files);
+      e.target.value = "";
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        const file = items[i].getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+
+    if (imageFiles.length > 0) {
+      processImageFiles(imageFiles);
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index));
+  };
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const aiResponseRef = useRef("");
   const sessionScrollRef = useRef(false);
@@ -429,7 +730,9 @@ export default function AiPage() {
         setMessages(dbMsgs.map((m) => ({
           role: m.role === "assistant" ? "ai" : "user",
           content: m.content,
+          images: m.images,
           tools: m.tool_calls,
+          createdAt: m.created_at,
         })));
       } catch (err) {
         if (err instanceof Error && err.name !== "AbortError") {
@@ -484,11 +787,15 @@ export default function AiPage() {
     id: string,
     updates: { title?: string; is_pinned?: boolean; model_name?: string },
   ) => {
+    const payload = {
+      ...updates,
+      ...(updates.title ? { title: capitalizeFirstLetter(updates.title) } : {}),
+    };
     try {
       const res = await fetch(`${API_BASE}/api/ai/sessions/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         fetchSessions();
@@ -521,21 +828,28 @@ export default function AiPage() {
 
   async function handleSend(forcedInput?: string, sessionId?: string, overrideHistory?: Message[]) {
     const userMsg = (forcedInput ?? input).trim();
+    const currentImages = [...pendingImages];
     const sid = sessionId ?? activeSessionId;
-    if (!userMsg || !sid) return;
+    if ((!userMsg && currentImages.length === 0) || !sid) return;
+
+    const displayQuestion = userMsg || (currentImages.length > 0 ? "[Attached Image]" : "");
 
     const baseHistory = overrideHistory ?? messages;
     // Optimistic sidebar update — title and timestamp update immediately on send
     setSessions((prev) =>
       prev.map((s) =>
         s.id === sid
-          ? { ...s, title: s.title === "New Chat" ? userMsg.slice(0, 60) : s.title, updated_at: new Date().toISOString() }
+          ? { ...s, title: s.title === "New Chat" ? capitalizeFirstLetter(displayQuestion.slice(0, 60)) : capitalizeFirstLetter(s.title), updated_at: new Date().toISOString() }
           : s
       )
     );
     isStreamingRef.current = true;
-    setMessages((prev) => [...(overrideHistory ?? prev), { role: "user", content: userMsg }]);
+    setMessages((prev) => [
+      ...(overrideHistory ?? prev),
+      { role: "user", content: userMsg, images: currentImages.length > 0 ? currentImages : undefined, createdAt: new Date().toISOString() },
+    ]);
     setInput("");
+    setPendingImages([]);
     setIsLoading(true);
 
     try {
@@ -543,8 +857,9 @@ export default function AiPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question: userMsg,
+          question: userMsg || "Please analyze the attached image.",
           context_days: 14,
+          images: currentImages,
           history: baseHistory.slice(-12).map((m) => ({
             role: m.role === "ai" ? "assistant" : "user",
             content: m.content,
@@ -553,7 +868,7 @@ export default function AiPage() {
       });
 
       if (!res.ok) {
-        setMessages((prev) => [...prev, { role: "ai", content: "Error communicating with AI backend." }]);
+        setMessages((prev) => [...prev, { role: "ai", content: "Error communicating with AI backend.", createdAt: new Date().toISOString() }]);
         isStreamingRef.current = false;
         setIsLoading(false);
         return;
@@ -561,7 +876,7 @@ export default function AiPage() {
 
       const reader = res.body?.getReader();
       if (!reader) {
-        setMessages((prev) => [...prev, { role: "ai", content: "No readable response body." }]);
+        setMessages((prev) => [...prev, { role: "ai", content: "No readable response body.", createdAt: new Date().toISOString() }]);
         isStreamingRef.current = false;
         setIsLoading(false);
         return;
@@ -609,9 +924,15 @@ export default function AiPage() {
           boundary = buffer.indexOf("\n\n");
         }
       }
+      setMessages((prev) => {
+        const updated = [...prev];
+        const last = updated.at(-1);
+        if (last?.role === "ai") updated[updated.length - 1] = { ...last, createdAt: new Date().toISOString() };
+        return updated;
+      });
 
     } catch {
-      setMessages((prev) => [...prev, { role: "ai", content: "Failed to connect to AI coach." }]);
+      setMessages((prev) => [...prev, { role: "ai", content: "Failed to connect to AI coach.", createdAt: new Date().toISOString() }]);
     }
     isStreamingRef.current = false;
     setIsLoading(false);
@@ -697,12 +1018,55 @@ export default function AiPage() {
       <div className="ai-link-empty-prompt">
         <div className="ai-link-empty-intro">
           <h1>How can I help with your training?</h1>
-          <p>Ask about training, recovery, sleep, or your COROS calendar.</p>
+          <p>Ask about training, recovery, sleep, or your calendar.</p>
         </div>
 
         <div className="ai-link-empty-composer">
           <label className="sr-only" htmlFor={inputId}>Ask AI Coach</label>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: "none" }}
+            onChange={handleImageFileSelect}
+          />
+
           <div className="cmd-bar-wrap">
+            {pendingImages.length > 0 && (
+              <div className="staged-images-bar">
+                {pendingImages.map((img, idx) => (
+                  <div key={idx} className="staged-image-item">
+                    <img
+                      src={img}
+                      alt={`Preview ${idx + 1}`}
+                      onClick={() => setActivePreviewImage(img)}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <button
+                      type="button"
+                      className="staged-image-remove"
+                      onClick={() => handleRemoveImage(idx)}
+                      title="Remove image"
+                      aria-label="Remove image"
+                    >
+                      <XIcon />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              className="cmd-bar-attach-btn"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading}
+              aria-label="Attach image"
+              title="Attach image or paste from clipboard"
+            >
+              <PlusIcon />
+            </button>
             <textarea
               id={inputId}
               className="cmd-bar"
@@ -711,10 +1075,11 @@ export default function AiPage() {
               onChange={(e) => {
                 setInput(e.target.value);
               }}
+              onPaste={handlePaste}
               onKeyDown={async (e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  if (!input.trim()) return;
+                  if (!input.trim() && pendingImages.length === 0) return;
                   const msg = input.trim();
                   if (!sessionId) {
                     const s = await createRealSession();
@@ -733,24 +1098,33 @@ export default function AiPage() {
               }}
               rows={1}
             />
-            <button
-              id={sessionId ? "new-session-send-btn" : "empty-state-send-btn"}
-              className="cmd-bar-send"
-              onClick={async () => {
-                if (!input.trim()) return;
-                const msg = input.trim();
-                if (!sessionId) {
-                  const s = await createRealSession();
-                  if (s) handleSend(msg, s.id);
-                } else {
-                  handleSend(msg, sessionId);
-                }
-              }}
-              disabled={isLoading || !input.trim()}
-              aria-label="Send message"
-            >
-              <SendIcon />
-            </button>
+            <div className="cmd-bar-actions">
+              <GeminiModelSelector
+                selectedModel={selectedModel}
+                onModelChange={handleModelChange}
+                disabled={isLoading || availableModels.length === 0}
+                providers={providers}
+                availableModels={availableModels}
+              />
+              <button
+                id={sessionId ? "new-session-send-btn" : "empty-state-send-btn"}
+                className="cmd-bar-send"
+                onClick={async () => {
+                  if (!input.trim() && pendingImages.length === 0) return;
+                  const msg = input.trim();
+                  if (!sessionId) {
+                    const s = await createRealSession();
+                    if (s) handleSend(msg, s.id);
+                  } else {
+                    handleSend(msg, sessionId);
+                  }
+                }}
+                disabled={isLoading || (!input.trim() && pendingImages.length === 0)}
+                aria-label="Send message"
+              >
+                <SendIcon />
+              </button>
+            </div>
           </div>
           <p className="ai-link-composer-meta">AI can make mistakes. Verify critical training decisions.</p>
         </div>
@@ -808,40 +1182,13 @@ export default function AiPage() {
         <header className="page-header print-hide">
           <PageTitle>AI Coach</PageTitle>
           <div className="ai-link-header-actions">
-            <label className="ai-link-model-picker">
-              <span>Model</span>
-              <select
-                aria-label="AI model"
-                value={selectedModel}
-                onChange={(event) => handleModelChange(event.target.value)}
-                disabled={isLoading || availableModels.length === 0}
-              >
-                {providers.length > 0 ? (
-                  providers.map((provider) => (
-                    <optgroup key={provider.id} label={provider.name}>
-                      {provider.models.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))
-                ) : (
-                  availableModels.map((model) => (
-                    <option key={model} value={model}>
-                      {model.includes(":") ? model.split(":", 2)[1] : model}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
             {activeSessionId && !isEmpty && (
               <>
-                <button className="ai-link-tool-button" onClick={handleExportMarkdown} title="Export as Markdown">
-                  <DownloadIcon /> Export MD
+                <button className="ai-link-tool-button ai-link-tool-icon-button" onClick={handleExportMarkdown} title="Export as Markdown" aria-label="Export as Markdown">
+                  <DownloadIcon />
                 </button>
-                <button className="ai-link-tool-button" onClick={handlePrint} title="Print / Save as PDF">
-                  <PrintIcon /> Print PDF
+                <button className="ai-link-tool-button ai-link-tool-icon-button" onClick={handlePrint} title="Print / Save as PDF" aria-label="Print or save as PDF">
+                  <PrintIcon />
                 </button>
               </>
             )}
@@ -959,7 +1306,7 @@ export default function AiPage() {
                               margin: 0,
                               lineHeight: 1.4,
                             }}>
-                              {s.title}
+                              {capitalizeFirstLetter(s.title)}
                             </p>
                             <p style={{ alignItems: "center", display: "flex", fontSize: "10px", gap: "6px", color: "var(--color-text-muted)", margin: "2px 0 0", lineHeight: 1 }}>
                               {relativeTime(s.updated_at)}
@@ -1054,22 +1401,37 @@ export default function AiPage() {
                           return (
                             <div key={idx} className="msg-row user-row msg-enter" style={{ animationDelay: "0ms" }}>
                               <div className="user-message-content">
-                                <div className="user-pill">{msg.content}</div>
+                                {msg.images && msg.images.length > 0 && (
+                                  <div className="user-attached-images">
+                                    {msg.images.map((img, imgIdx) => (
+                                      <img
+                                        key={imgIdx}
+                                        src={img}
+                                        alt="Attached image"
+                                        className="user-attached-image-thumb"
+                                        onClick={() => setActivePreviewImage(img)}
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                                {msg.content && <div className="user-pill">{msg.content}</div>}
                                 <div className="message-copy-actions">
                                   <CopyMessageButton content={msg.content} label="your message" />
+                                  {msg.createdAt && <time className="message-timestamp" dateTime={msg.createdAt}>{formatMessageTimestamp(msg.createdAt)}</time>}
                                 </div>
                               </div>
                             </div>
                           );
                         }
-                        const { thinking, answer, isThinkingActive } = parseThinkingAndAnswer(msg.content);
+                        const { thinking, answer, isThinkingActive: hasOpenThinking } = parseThinkingAndAnswer(msg.content);
+                        const isAwaitingAnswer = isLoading && idx === messages.length - 1 && !answer;
                         const displayAnswer = removeLegacyEvidenceUsed(answer);
                         const tools = msg.tools ? uniqueToolCalls(msg.tools) : [];
                         return (
                           <div key={idx} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
                             <div className="ai-text">
                               {thinking && (
-                                <ThinkingAccordion thinking={thinking} isThinkingActive={isThinkingActive} />
+                                <ThinkingAccordion thinking={thinking} isThinkingActive={hasOpenThinking || isAwaitingAnswer} />
                               )}
                               {msg.content === "" && isLoading ? (
                                 <WaveThinkingText text="thinking" />
@@ -1084,7 +1446,7 @@ export default function AiPage() {
                                     <SourcesIcon />
                                   </span>
                                   {tools.map((tool, toolIndex) => {
-                                    const argumentsText = formatToolArguments(tool.arguments);
+                                    const argumentsText = formatToolTooltip(tool);
                                     return (
                                       <span
                                         aria-label={argumentsText ? `${toolLabel(tool.name)}: ${argumentsText}` : toolLabel(tool.name)}
@@ -1101,6 +1463,7 @@ export default function AiPage() {
                               {displayAnswer && (
                                 <div className="message-copy-actions">
                                   <CopyMessageButton content={displayAnswer} label="coach response" />
+                                  {msg.createdAt && <time className="message-timestamp" dateTime={msg.createdAt}>{formatMessageTimestamp(msg.createdAt)}</time>}
                                 </div>
                               )}
                               {isErrorMsg && (
@@ -1129,6 +1492,39 @@ export default function AiPage() {
                   <div className="chat-input-bar ai-link-composer print-hide">
                     <div className="chat-input-bar-inner">
                       <div className="cmd-bar-wrap" style={{ maxWidth: "100%" }}>
+                        {pendingImages.length > 0 && (
+                          <div className="staged-images-bar">
+                            {pendingImages.map((img, idx) => (
+                              <div key={idx} className="staged-image-item">
+                                <img
+                                  src={img}
+                                  alt={`Preview ${idx + 1}`}
+                                  onClick={() => setActivePreviewImage(img)}
+                                  style={{ cursor: "pointer" }}
+                                />
+                                <button
+                                  type="button"
+                                  className="staged-image-remove"
+                                  onClick={() => handleRemoveImage(idx)}
+                                  title="Remove image"
+                                  aria-label="Remove image"
+                                >
+                                  <XIcon />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          className="cmd-bar-attach-btn"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isLoading}
+                          aria-label="Attach image"
+                          title="Attach image or paste from clipboard"
+                        >
+                          <PlusIcon />
+                        </button>
                         <textarea
                           id="chat-input"
                           className="cmd-bar"
@@ -1137,10 +1533,11 @@ export default function AiPage() {
                           onChange={(e) => {
                             setInput(e.target.value);
                           }}
+                          onPaste={handlePaste}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.shiftKey) {
                               e.preventDefault();
-                              if (!input.trim()) return;
+                              if (!input.trim() && pendingImages.length === 0) return;
                               handleSend();
                             }
                           }}
@@ -1154,18 +1551,27 @@ export default function AiPage() {
                           }}
                           rows={1}
                         />
-                        <button
-                          id="chat-send-btn"
-                          className="cmd-bar-send"
-                          onClick={() => {
-                            if (!input.trim()) return;
-                            handleSend();
-                          }}
-                          disabled={isLoading || !input.trim()}
-                          aria-label="Send message"
-                        >
-                          <SendIcon />
-                        </button>
+                        <div className="cmd-bar-actions">
+                          <GeminiModelSelector
+                            selectedModel={selectedModel}
+                            onModelChange={handleModelChange}
+                            disabled={isLoading || availableModels.length === 0}
+                            providers={providers}
+                            availableModels={availableModels}
+                          />
+                          <button
+                            id="chat-send-btn"
+                            className="cmd-bar-send"
+                            onClick={() => {
+                              if (!input.trim() && pendingImages.length === 0) return;
+                              handleSend();
+                            }}
+                            disabled={isLoading || (!input.trim() && pendingImages.length === 0)}
+                            aria-label="Send message"
+                          >
+                            <SendIcon />
+                          </button>
+                        </div>
                       </div>
                       <p className="input-hint">AI can make mistakes. Verify critical training decisions.</p>
                     </div>
@@ -1216,6 +1622,36 @@ export default function AiPage() {
             </div>
           </div>
         </dialog>
+
+        {activePreviewImage && (
+          <div
+            className="image-preview-modal-overlay"
+            onClick={() => setActivePreviewImage(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image preview"
+          >
+            <div
+              className="image-preview-modal-content"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="image-preview-modal-close"
+                onClick={() => setActivePreviewImage(null)}
+                aria-label="Close preview"
+                title="Close preview (Esc)"
+              >
+                <XIcon />
+              </button>
+              <img
+                src={activePreviewImage}
+                alt="Enlarged preview"
+                className="image-preview-modal-img"
+              />
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

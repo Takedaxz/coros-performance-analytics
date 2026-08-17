@@ -7,13 +7,17 @@ import pytest
 
 from src.ai import coach_tools
 from src.ai.coach_tools import (
+    _activity_detail,
+    _execute_tool,
     _health_trend,
     _pace_s_km,
+    _past_race_goals,
     _scheduled_workout_details,
     _sport_type,
     coach_tool_functions,
 )
 from src.api.routes import training_plan_routes
+from src.api.routes.activity_routes import ActivityNoteUpdate, update_activity_note
 from src.api.routes.training_plan_routes import CorosWorkoutStep, TrainingEvent
 from src.db.models import SportType
 
@@ -32,6 +36,26 @@ def test_activity_tool_rejects_unknown_sport() -> None:
 def test_activity_tool_computes_compact_pace() -> None:
     assert _pace_s_km(3.0) == 333
     assert _pace_s_km(None) is None
+
+
+@pytest.mark.asyncio
+async def test_activity_detail_tool_rejects_non_uuid_without_querying_database() -> None:
+    result = await _execute_tool(
+        "get_activity_detail", "owner", {"activity_id": "2026-08-16-hyrox-race"}
+    )
+
+    assert result == {"error": "activity_id must be a UUID returned by get_activities"}
+
+
+@pytest.mark.asyncio
+async def test_activity_comparison_tool_rejects_non_uuid_without_querying_database() -> None:
+    result = await _execute_tool(
+        "compare_activities",
+        "owner",
+        {"activity_ids": ["2026-08-16-hyrox-race", "also-not-a-uuid"]},
+    )
+
+    assert result == {"error": "activity_ids must be UUIDs returned by get_activities"}
 
 
 @pytest.mark.asyncio
@@ -110,6 +134,83 @@ async def test_health_trend_keeps_rich_data_without_nulls() -> None:
     assert result["activities"][0]["km"] == 8.0
 
 
+@pytest.mark.asyncio
+async def test_activity_detail_tool_includes_a_saved_note() -> None:
+    activity = SimpleNamespace(
+        id="activity-1",
+        start_time=dt.datetime(2026, 8, 16, 9, 40),
+        sport=SportType.RUN,
+        title="Race",
+        distance_m=10_000.0,
+        elapsed_time_s=2_400.0,
+        avg_speed_mps=4.16,
+        avg_hr_bpm=160,
+        max_hr_bpm=178,
+        avg_cadence=178,
+        avg_power_w=300,
+        normalized_power_w=305,
+        training_load_vendor=120,
+        cardiac_drift_pct_app=2.1,
+        elevation_gain_m=50.0,
+        elevation_loss_m=50.0,
+        activity_note="Legs felt heavy after the sled push.",
+    )
+
+    class Result:
+        def __init__(self, value: object) -> None:
+            self.value = value
+
+        def scalar_one_or_none(self) -> object:
+            return self.value
+
+        def scalars(self) -> "Result":
+            return self
+
+        def all(self) -> list[object]:
+            return []
+
+    class Db:
+        def __init__(self) -> None:
+            self.results = iter([Result(activity), Result([])])
+
+        async def execute(self, _statement: object) -> Result:
+            return next(self.results)
+
+    result = await _activity_detail(Db(), "owner", "activity-1")
+
+    assert result["activity"]["note"] == "Legs felt heavy after the sled push."
+
+
+@pytest.mark.asyncio
+async def test_activity_note_update_trims_and_persists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    activity = SimpleNamespace(activity_note=None)
+
+    class Result:
+        def scalar_one_or_none(self) -> object:
+            return activity
+
+    class Db:
+        committed = False
+
+        async def execute(self, _statement: object) -> Result:
+            return Result()
+
+        async def commit(self) -> None:
+            self.committed = True
+
+    monkeypatch.setattr("src.api.routes.activity_routes.get_owner_id", lambda: "owner")
+    db = Db()
+
+    result = await update_activity_note(
+        "activity-1", ActivityNoteUpdate(activity_note="  Good effort.  "), db  # type: ignore[arg-type]
+    )
+
+    assert result == {"activity_note": "Good effort."}
+    assert db.committed
+
+
 def test_scheduled_workout_details_tool_is_exposed() -> None:
     loop = asyncio.new_event_loop()
     try:
@@ -118,8 +219,51 @@ def test_scheduled_workout_details_tool_is_exposed() -> None:
         loop.close()
 
     assert "get_scheduled_workout_details" in names
+    assert "get_past_race_goals" in names
     assert "search_coaching_knowledge" in names
     assert "web_search" in names
+
+
+@pytest.mark.asyncio
+async def test_past_race_goals_tool_returns_result_time_and_notes() -> None:
+    goal = SimpleNamespace(
+        id="goal-1",
+        goal_race_name="HYROX Bangkok",
+        goal_race_date=dt.date(2026, 6, 14),
+        goal_target_time="1:35:00",
+        goal_result_time="1:38:42",
+        goal_description="First HYROX race; sled push was the limiter.",
+        goal_race_note="Went out too hard but finished strong.",
+        weekly_training_hours=8.0,
+        is_active=False,
+    )
+
+    class Result:
+        def scalars(self) -> "Result":
+            return self
+
+        def all(self) -> list[object]:
+            return [goal]
+
+    class Db:
+        async def execute(self, _statement: object) -> Result:
+            return Result()
+
+    result = await _past_race_goals(Db(), "owner")
+
+    assert result["races"] == [
+        {
+            "id": "goal-1",
+            "race": "HYROX Bangkok",
+            "date": "2026-06-14",
+            "target_time": "1:35:00",
+            "result_time": "1:38:42",
+            "notes": "First HYROX race; sled push was the limiter.",
+            "race_notes": "Went out too hard but finished strong.",
+            "weekly_training_hours": 8.0,
+            "active": False,
+        }
+    ]
 
 
 def test_scheduled_workout_details_waits_longer_and_cancels_on_timeout(

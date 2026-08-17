@@ -4,7 +4,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "20260809_tool_calls"
-down_revision = "20260731_running_dynamics"
+down_revision = "20260804_backfill_sport_types"
 branch_labels = None
 depends_on = None
 

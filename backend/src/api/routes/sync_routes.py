@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 _sync_events: dict[str, list[dict[str, str]]] = {}
 # ponytail: process-local lock; replace with Redis only if multiple API workers are added.
 _sync_lock = asyncio.Lock()
+_active_sync_job_id: str | None = None
 
 
 def _push_sync_event(job_id: str, event_type: str, data: str) -> None:
@@ -41,6 +42,8 @@ async def _run_sync_job(
     days: int | None,
     on_event: Callable[[str, str], None] | None,
 ) -> None:
+    global _active_sync_job_id
+
     from src.sync.sync_manager import run_sync
 
     redis_client = aioredis.from_url(settings.redis_url, decode_responses=False)
@@ -65,6 +68,8 @@ async def _run_sync_job(
         try:
             await redis_client.aclose()
         finally:
+            if _active_sync_job_id == job_id:
+                _active_sync_job_id = None
             _sync_lock.release()
 
 
@@ -118,7 +123,10 @@ async def trigger_sync(
         raise HTTPException(status_code=409, detail="A sync is already running.")
     await _sync_lock.acquire()
 
+    global _active_sync_job_id
+
     job_id = str(uuid4())
+    _active_sync_job_id = job_id
     _sync_events[job_id] = []
 
     def _on_event(evt_type: str, evt_data: str) -> None:
@@ -186,7 +194,7 @@ async def sync_stream(
 @router.get("/status")
 async def sync_status(
     db: AsyncSession = Depends(get_db_session),
-) -> dict[str, str | bool]:
+) -> dict[str, str | bool | None]:
     """Current sync configuration and last sync time."""
     result = await db.execute(
         select(SyncEvent)
@@ -199,6 +207,8 @@ async def sync_status(
     api_enabled = bool(creds or (settings.coros_email and settings.coros_password))
     return {
         "api_enabled": api_enabled,
+        "is_syncing": _sync_lock.locked(),
+        "active_job_id": _active_sync_job_id,
         "sync_interval_minutes": str(settings.sync_interval_minutes),
         "last_sync_at": _utc_iso(last.completed_at) if last and last.completed_at else "never",
         "last_sync_status": last.status if last else "none",

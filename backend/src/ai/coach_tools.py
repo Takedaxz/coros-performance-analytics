@@ -4,7 +4,9 @@ import asyncio
 import datetime as dt
 from collections.abc import Callable
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from typing import Any
+from typing import Any, NotRequired
+from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from typing_extensions import TypedDict
@@ -19,6 +21,7 @@ from src.db.models import (
     ActivityLap,
     DailyHealth,
     FitnessEstimate,
+    Goal,
     SleepSession,
     SportType,
 )
@@ -26,6 +29,7 @@ from src.db.models import (
 _TREND_DAYS = frozenset({7, 14, 28, 56})
 _FITNESS_DAYS = frozenset({28, 56, 90, 180})
 MAX_TOOL_CALLS = 2
+_USER_TZ = ZoneInfo("Asia/Bangkok")
 _SPORT_ALIASES: dict[str, SportType] = {
     "running": SportType.RUN,
     "road_run": SportType.RUN,
@@ -41,6 +45,8 @@ _SPORT_ALIASES: dict[str, SportType] = {
 class ToolCallRecord(TypedDict):
     name: str
     arguments: dict[str, Any]
+    display_arguments: NotRequired[dict[str, str | list[str]]]
+    display_result: NotRequired[dict[str, list[str]]]
 
 
 def coach_tool_functions(
@@ -91,6 +97,10 @@ def coach_tool_functions(
         """Get fitness estimates and race predictions for 28, 56, 90, or 180 days."""
         return run("get_fitness_history", days=days)
 
+    def get_past_race_goals() -> dict[str, Any]:
+        """Retrieve saved past races with times, notes, and dates."""
+        return run("get_past_race_goals")
+
     def search_coaching_knowledge(query: str, topic: str | None = None) -> dict[str, Any]:
         """Find cited general coaching guidance."""
         return run("search_coaching_knowledge", query=query, topic=topic)
@@ -107,6 +117,7 @@ def coach_tool_functions(
         get_training_plan,
         get_scheduled_workout_details,
         get_fitness_history,
+        get_past_race_goals,
         search_coaching_knowledge,
         web_search,
     ]
@@ -129,12 +140,33 @@ def _pace_s_km(speed_mps: float | None) -> int | None:
     return round(1_000 / speed_mps) if speed_mps and speed_mps > 0 else None
 
 
+def _activity_uuid(value: object) -> str | None:
+    try:
+        return str(UUID(str(value)))
+    except (TypeError, ValueError):
+        return None
+
+
 async def _execute_tool(name: str, user_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "web_search":
         query = arguments.get("query", "").strip()
         if not 3 <= len(query) <= 300:
             return {"error": "query must be 3-300 characters"}
         return await search_web(query)
+
+    if name == "get_activity_detail":
+        activity_id = _activity_uuid(arguments.get("activity_id"))
+        if activity_id is None:
+            return {"error": "activity_id must be a UUID returned by get_activities"}
+        arguments = {**arguments, "activity_id": activity_id}
+    if name == "compare_activities":
+        activity_ids = arguments.get("activity_ids")
+        if not isinstance(activity_ids, list) or not 2 <= len(activity_ids) <= 6:
+            return {"error": "activity_ids must contain 2 to 6 activities"}
+        valid_activity_ids = [_activity_uuid(activity_id) for activity_id in activity_ids]
+        if any(activity_id is None for activity_id in valid_activity_ids):
+            return {"error": "activity_ids must be UUIDs returned by get_activities"}
+        arguments = {**arguments, "activity_ids": valid_activity_ids}
 
     async with async_session_factory() as db:
         if name == "get_health_trend":
@@ -160,8 +192,6 @@ async def _execute_tool(name: str, user_id: str, arguments: dict[str, Any]) -> d
             return await _activity_detail(db, user_id, arguments["activity_id"])
         if name == "compare_activities":
             activity_ids = arguments["activity_ids"]
-            if not 2 <= len(activity_ids) <= 6:
-                return {"error": "activity_ids must contain 2 to 6 activities"}
             return {
                 "activities": [
                     await _activity_detail(db, user_id, activity_id) for activity_id in activity_ids
@@ -169,6 +199,8 @@ async def _execute_tool(name: str, user_id: str, arguments: dict[str, Any]) -> d
             }
         if name == "get_fitness_history":
             return await _fitness_history(db, user_id, arguments["days"])
+        if name == "get_past_race_goals":
+            return await _past_race_goals(db, user_id)
         if name == "search_coaching_knowledge":
             query = arguments.get("query", "").strip()
             topic = arguments.get("topic")
@@ -443,6 +475,7 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
             "drift": activity.cardiac_drift_pct_app,
             "elev_gain_m": activity.elevation_gain_m,
             "elev_loss_m": activity.elevation_loss_m,
+            **({"note": activity.activity_note} if activity.activity_note else {}),
         },
         "laps": [
             {
@@ -490,5 +523,40 @@ async def _fitness_history(db: Any, user_id: str, days: int) -> dict[str, Any]:
                 "pred_half_s": item.race_pred_half_s,
             }
             for item in rows
+        ],
+    }
+
+
+async def _past_race_goals(db: Any, user_id: str) -> dict[str, Any]:
+    """Return every saved race whose Bangkok race date has passed."""
+    today = dt.datetime.now(_USER_TZ).date()
+    rows = (
+        (
+            await db.execute(
+                select(Goal)
+                .where(Goal.user_id == user_id, Goal.goal_race_date < today)
+                .order_by(Goal.goal_race_date.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "as_of": today.isoformat(),
+        "races": [
+            _without_nulls(
+                {
+                    "id": goal.id,
+                    "race": goal.goal_race_name,
+                    "date": goal.goal_race_date.isoformat(),
+                    "target_time": goal.goal_target_time,
+                    "result_time": goal.goal_result_time,
+                    "notes": goal.goal_description,
+                    "race_notes": goal.goal_race_note,
+                    "weekly_training_hours": goal.weekly_training_hours,
+                    "active": goal.is_active,
+                }
+            )
+            for goal in rows
         ],
     }

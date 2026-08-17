@@ -142,8 +142,8 @@ def retry_generator_with_backoff(
 
 
 def get_client() -> genai.Client | None:
-    """Get the initialized Gemini client if API key is configured."""
-    if not settings.gemini_api_key:
+    """Get the initialized Gemini client if API key is configured and enabled."""
+    if not settings.gemini_enabled or not settings.gemini_api_key:
         return None
     return genai.Client(api_key=settings.gemini_api_key)
 
@@ -151,6 +151,7 @@ def get_client() -> genai.Client | None:
 def list_models() -> list[str]:
     """Return available direct Gemini models."""
     return [
+        "gemini-3.7-flash",
         "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
         "gemini-3.5-flash",
