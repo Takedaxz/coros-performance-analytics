@@ -1,12 +1,12 @@
 """Regression tests for AI session route transaction boundaries."""
 
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from fastapi import HTTPException
 
 from src.api.routes import ai_routes
-from src.db.models import ChatSession
+from src.db.models import ChatMessage, ChatSession
 
 
 def test_project_moves_do_not_automatically_update_session_timestamp() -> None:
@@ -26,6 +26,32 @@ async def test_delete_session_commits_before_responding(monkeypatch) -> None:
     await ai_routes.delete_session("session-id", db)
 
     db.delete.assert_awaited_once_with(session)
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_exchange_removes_user_and_following_assistant(monkeypatch) -> None:
+    session = object()
+    user = ChatMessage(id="user-id", session_id="session-id", role="user", content="Question")
+    assistant = ChatMessage(
+        id="assistant-id", session_id="session-id", role="assistant", content="Answer"
+    )
+    later_user = ChatMessage(
+        id="later-user-id", session_id="session-id", role="user", content="Later"
+    )
+    session_result = type("Result", (), {"scalar_one_or_none": lambda self: session})()
+    messages_result = type(
+        "Result",
+        (),
+        {"scalars": lambda self: type("Scalars", (), {"all": lambda self: [user, assistant, later_user]})()},
+    )()
+    db = AsyncMock()
+    db.execute.side_effect = [session_result, messages_result]
+    monkeypatch.setattr(ai_routes, "get_owner_id", lambda: "owner")
+
+    await ai_routes.delete_exchange("session-id", "user-id", db)
+
+    assert db.delete.await_args_list == [call(user), call(assistant)]
     db.commit.assert_awaited_once()
 
 

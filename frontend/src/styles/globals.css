@@ -6213,6 +6213,10 @@ table.data-table .lap-split-table tr:hover td {
   text-transform: uppercase;
 }
 
+.ai-delete-dialog-label.is-retry {
+  color: var(--color-accent-primary);
+}
+
 .ai-delete-dialog h2 {
   font-size: var(--text-xl);
   letter-spacing: -0.02em;
@@ -6247,6 +6251,12 @@ table.data-table .lap-split-table tr:hover td {
 
 .ai-delete-dialog-confirm:active:not(:disabled) {
   transform: scale(0.98);
+}
+
+.ai-delete-dialog-confirm.is-retry {
+  background: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+  color: var(--color-bg-primary);
 }
 
 .ai-delete-dialog button:focus-visible {
@@ -7709,7 +7719,7 @@ table.data-table .lap-split-table tr:hover td {
   align-items: flex-end;
   display: flex;
   flex-direction: column;
-  max-width: 100%;
+  max-width: 70%;
 }
 
 [data-theme="light"] .user-pill {
@@ -7845,6 +7855,29 @@ table.data-table .lap-split-table tr:hover td {
 
 .message-copy-button.is-failed {
   color: var(--color-error);
+}
+
+.message-copy-button.is-danger:hover,
+.message-copy-button.is-danger:focus-visible {
+  color: var(--color-error);
+}
+
+.message-copy-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.ai-delete-dialog-preview {
+  background: var(--color-surface-secondary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary) !important;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  max-height: 7em;
+  overflow: hidden;
+  padding: var(--space-3);
+  white-space: pre-wrap;
 }
 
 .markdown-body {

@@ -139,6 +139,8 @@ class AskRequest(BaseModel):
     context_days: int = 14
     history: list[ChatMessage] = []
     images: list[str] = []
+    user_message_id: UUID | None = None
+    assistant_message_id: UUID | None = None
 
 
 class AskResponse(BaseModel):
@@ -925,6 +927,8 @@ async def session_ask_stream(
     user_msg = DBChatMessage(
         session_id=session_id, role="user", content=req.question, images=req.images or None
     )
+    if req.user_message_id:
+        user_msg.id = str(req.user_message_id)
     db.add(user_msg)
 
     # Auto-title from first message (truncated to 60 chars)
@@ -984,12 +988,10 @@ async def session_ask_stream(
             ):
                 yield f"data: {json.dumps({'tool': tool_call})}\n\n"
         finally:
-            # Fire the DB persist as a background task so the generator exits immediately.
-            # This closes the SSE stream for the client (reader.read() returns done=True)
-            # without waiting for the DB write. The task runs independently on the event
-            # loop and is NOT cancelled by client disconnect.
-            asyncio.create_task(
-                _persist_ai_response(session_id, req.question, accumulated, producer, tool_calls)
+            # Keep the stream open until the response is durable so message actions cannot
+            # race a pending assistant-message write.
+            await _persist_ai_response(
+                session_id, req.question, accumulated, producer, tool_calls
             )
 
     async def _persist_ai_response(
@@ -1010,6 +1012,8 @@ async def session_ask_stream(
                 content=full_response,
                 tool_calls=_unique_tool_calls(tool_calls),
             )
+            if req.assistant_message_id:
+                ai_msg.id = str(req.assistant_message_id)
             sess_res = await persist_db.execute(
                 select(DBChatSession).where(DBChatSession.id == sid)
             )
@@ -1030,6 +1034,44 @@ async def session_ask_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.delete("/sessions/{session_id}/exchanges/{user_message_id}", status_code=204)
+async def delete_exchange(
+    session_id: str,
+    user_message_id: str,
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    """Delete one user message and its immediately following assistant response."""
+    session_res = await db.execute(
+        select(DBChatSession).where(
+            DBChatSession.id == session_id, DBChatSession.user_id == get_owner_id()
+        )
+    )
+    if not session_res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    message_res = await db.execute(
+        select(DBChatMessage)
+        .where(DBChatMessage.session_id == session_id)
+        .order_by(DBChatMessage.created_at.asc())
+    )
+    messages = list(message_res.scalars().all())
+    user_index = next(
+        (
+            index
+            for index, message in enumerate(messages)
+            if message.id == user_message_id and message.role == "user"
+        ),
+        None,
+    )
+    if user_index is None:
+        raise HTTPException(status_code=404, detail="Message not found.")
+
+    await db.delete(messages[user_index])
+    if user_index + 1 < len(messages) and messages[user_index + 1].role == "assistant":
+        await db.delete(messages[user_index + 1])
+    await db.commit()
 
 
 @router.delete("/sessions/{session_id}", status_code=204)

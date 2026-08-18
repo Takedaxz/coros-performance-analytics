@@ -165,6 +165,17 @@ function RetryIcon() {
   );
 }
 
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v5M14 11v5" />
+    </svg>
+  );
+}
+
 function PlusIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -561,6 +572,7 @@ function GeminiModelSelector({
 }
 
 type Message = {
+  id: string;
   role: "user" | "ai";
   content: string;
   images?: string[];
@@ -670,6 +682,11 @@ export default function AiPage() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [sessionPendingDelete, setSessionPendingDelete] = useState<Session | null>(null);
+  const [messagePendingAction, setMessagePendingAction] = useState<{
+    action: "delete" | "retry";
+    messageId: string;
+    preview: string;
+  } | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
@@ -785,10 +802,10 @@ export default function AiPage() {
   useEffect(() => {
     const dialog = deleteDialogRef.current;
     if (!dialog) return;
-    const pending = sessionPendingDelete || projectPendingDelete;
+    const pending = sessionPendingDelete || projectPendingDelete || messagePendingAction;
     if (pending && !dialog.open) dialog.showModal();
     if (!pending && dialog.open) dialog.close();
-  }, [sessionPendingDelete, projectPendingDelete]);
+  }, [sessionPendingDelete, projectPendingDelete, messagePendingAction]);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -870,6 +887,7 @@ export default function AiPage() {
         if (!res.ok) { setMessages([]); return; }
         const dbMsgs: DBMessage[] = await res.json();
         setMessages(dbMsgs.map((m) => ({
+          id: m.id,
           role: m.role === "assistant" ? "ai" : "user",
           content: m.content,
           images: m.images,
@@ -1123,13 +1141,16 @@ export default function AiPage() {
       )
     );
 
+    const userMessageId = crypto.randomUUID();
+    const assistantMessageId = crypto.randomUUID();
     const userMsgObj: Message = {
+      id: userMessageId,
       role: "user",
       content: userMsg,
       images: currentImages.length > 0 ? currentImages : undefined,
       createdAt: new Date().toISOString(),
     };
-    const initialAiMsg: Message = { role: "ai", content: "" };
+    const initialAiMsg: Message = { id: assistantMessageId, role: "ai", content: "" };
     const initialStreamMsgs = [...baseHistory, userMsgObj, initialAiMsg];
 
     inFlightStreamsRef.current.set(sid, initialStreamMsgs);
@@ -1155,11 +1176,13 @@ export default function AiPage() {
             role: m.role === "ai" ? "assistant" : "user",
             content: m.content,
           })),
+          user_message_id: userMessageId,
+          assistant_message_id: assistantMessageId,
         }),
       });
 
       if (!res.ok) {
-        const errorMsgs: Message[] = [...initialStreamMsgs.slice(0, -1), { role: "ai", content: "Error communicating with AI backend.", createdAt: new Date().toISOString() }];
+        const errorMsgs: Message[] = [...initialStreamMsgs.slice(0, -1), { id: assistantMessageId, role: "ai", content: "Error communicating with AI backend.", createdAt: new Date().toISOString() }];
         inFlightStreamsRef.current.set(sid, errorMsgs);
         if (routeSessionIdRef.current === sid) setMessages(errorMsgs);
         return;
@@ -1167,7 +1190,7 @@ export default function AiPage() {
 
       const reader = res.body?.getReader();
       if (!reader) {
-        const errorMsgs: Message[] = [...initialStreamMsgs.slice(0, -1), { role: "ai", content: "No readable response body.", createdAt: new Date().toISOString() }];
+        const errorMsgs: Message[] = [...initialStreamMsgs.slice(0, -1), { id: assistantMessageId, role: "ai", content: "No readable response body.", createdAt: new Date().toISOString() }];
         inFlightStreamsRef.current.set(sid, errorMsgs);
         if (routeSessionIdRef.current === sid) setMessages(errorMsgs);
         return;
@@ -1232,7 +1255,7 @@ export default function AiPage() {
         if (routeSessionIdRef.current === sid) setMessages(updated);
       }
     } catch {
-      const errorMsgs: Message[] = [...initialStreamMsgs.slice(0, -1), { role: "ai", content: "Failed to connect to AI coach.", createdAt: new Date().toISOString() }];
+      const errorMsgs: Message[] = [...initialStreamMsgs.slice(0, -1), { id: assistantMessageId, role: "ai", content: "Failed to connect to AI coach.", createdAt: new Date().toISOString() }];
       inFlightStreamsRef.current.set(sid, errorMsgs);
       if (routeSessionIdRef.current === sid) setMessages(errorMsgs);
     } finally {
@@ -1245,13 +1268,43 @@ export default function AiPage() {
     }
   }
 
-  async function handleRetry() {
-    if (messages.length < 2 || messages[messages.length - 1].role !== "ai") return;
-    const lastUserMsg = messages.filter((m) => m.role === "user").at(-1)?.content;
-    if (!lastUserMsg) return;
-    const cleanHistory = messages.slice(0, -2);
+  async function handleMessageAction() {
+    const action = messagePendingAction;
+    setMessagePendingAction(null);
+    if (!action || !routeSessionId) return;
+
+    const messageIndex = messages.findIndex((message) => message.id === action.messageId);
+    if (messageIndex < 0) return;
+
+    if (action.action === "delete") {
+      const userMessage = messages[messageIndex];
+      const userMessageId = userMessage.role === "user"
+        ? userMessage.id
+        : messages[messageIndex - 1]?.id;
+      if (!userMessageId) return;
+      const response = await fetch(
+        `${API_BASE}/api/ai/sessions/${routeSessionId}/exchanges/${userMessageId}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) return;
+      const next = messages.filter((_, index) => index !== messageIndex && index !== messageIndex + 1);
+      setMessages(next);
+      void fetchSessions();
+      return;
+    }
+
+    const userMessage = messages[messageIndex - 1];
+    if (userMessage?.role !== "user") return;
+    const cleanHistory = messages.slice(0, messageIndex - 1);
+    const response = await fetch(
+      `${API_BASE}/api/ai/sessions/${routeSessionId}/exchanges/${userMessage.id}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) return;
     setMessages(cleanHistory);
-    await handleSend(lastUserMsg, undefined, cleanHistory);
+    const retryImages = userMessage.images ?? [];
+    setPendingImages(retryImages);
+    await handleSend(userMessage.content, routeSessionId, cleanHistory);
   }
 
   async function generateBriefing(sid: string) {
@@ -1950,10 +2003,9 @@ export default function AiPage() {
                   <div ref={chatHistoryRef} id="chat-history" className="ai-link-chat-history print-block">
                     <div className="ai-link-thread print-block">
                       {messages.map((msg, idx) => {
-                        const isErrorMsg = idx === messages.length - 1 && msg.role === "ai" && (msg.content.includes("Error") || msg.content.includes("Failed"));
                         if (msg.role === "user") {
                           return (
-                            <div key={idx} className="msg-row user-row msg-enter" style={{ animationDelay: "0ms" }}>
+                            <div key={msg.id} className="msg-row user-row msg-enter" style={{ animationDelay: "0ms" }}>
                               <div className="user-message-content">
                                 {msg.images && msg.images.length > 0 && (
                                   <div className="user-attached-images">
@@ -1971,6 +2023,20 @@ export default function AiPage() {
                                 {msg.content && <div className="user-pill">{msg.content}</div>}
                                 <div className="message-copy-actions">
                                   <CopyMessageButton content={msg.content} label="your message" />
+                                  <button
+                                    type="button"
+                                    className="message-copy-button is-danger"
+                                    aria-label="Delete this message and response"
+                                    title="Delete exchange"
+                                    disabled={streamingSessionIds.has(routeSessionId!)}
+                                    onClick={() => setMessagePendingAction({
+                                      action: "delete",
+                                      messageId: msg.id,
+                                      preview: msg.content || "[Attached image]",
+                                    })}
+                                  >
+                                    <TrashIcon />
+                                  </button>
                                   {msg.createdAt && <time className="message-timestamp" dateTime={msg.createdAt}>{formatMessageTimestamp(msg.createdAt)}</time>}
                                 </div>
                               </div>
@@ -1983,7 +2049,7 @@ export default function AiPage() {
                         const displayAnswer = removeLegacyEvidenceUsed(answer);
                         const tools = msg.tools ? uniqueToolCalls(msg.tools) : [];
                         return (
-                          <div key={idx} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
+                          <div key={msg.id} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
                             <div className="ai-text">
                               {thinking && (
                                 <ThinkingAccordion thinking={thinking} isThinkingActive={hasOpenThinking || isAwaitingAnswer} />
@@ -2018,14 +2084,21 @@ export default function AiPage() {
                               {displayAnswer && (
                                 <div className="message-copy-actions">
                                   <CopyMessageButton content={displayAnswer} label="coach response" />
-                                  {msg.createdAt && <time className="message-timestamp" dateTime={msg.createdAt}>{formatMessageTimestamp(msg.createdAt)}</time>}
-                                </div>
-                              )}
-                              {isErrorMsg && (
-                                <div style={{ marginTop: "var(--space-3)" }}>
-                                  <button id="retry-btn" className="btn btn-secondary btn-sm" onClick={handleRetry} disabled={isLoading} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                                    <RetryIcon /> Retry
+                                  <button
+                                    type="button"
+                                    className="message-copy-button"
+                                    aria-label="Retry this response"
+                                    title="Retry response"
+                                    disabled={isCurrentSessionStreaming || messages[idx - 1]?.role !== "user"}
+                                    onClick={() => setMessagePendingAction({
+                                      action: "retry",
+                                      messageId: msg.id,
+                                      preview: displayAnswer,
+                                    })}
+                                  >
+                                    <RetryIcon />
                                   </button>
+                                  {msg.createdAt && <time className="message-timestamp" dateTime={msg.createdAt}>{formatMessageTimestamp(msg.createdAt)}</time>}
                                 </div>
                               )}
                             </div>
@@ -2142,40 +2215,70 @@ export default function AiPage() {
           className="ai-delete-dialog"
           aria-labelledby="delete-session-title"
           aria-describedby="delete-session-description"
-          onCancel={() => { setSessionPendingDelete(null); setProjectPendingDelete(null); }}
+          onCancel={() => { setSessionPendingDelete(null); setProjectPendingDelete(null); setMessagePendingAction(null); }}
           onKeyDown={(event) => {
-            if (event.key === "Escape") { setSessionPendingDelete(null); setProjectPendingDelete(null); }
+            if (event.key === "Escape") { setSessionPendingDelete(null); setProjectPendingDelete(null); setMessagePendingAction(null); }
           }}
           onClick={(event) => {
-            if (event.target === event.currentTarget) { setSessionPendingDelete(null); setProjectPendingDelete(null); }
+            if (event.target === event.currentTarget) { setSessionPendingDelete(null); setProjectPendingDelete(null); setMessagePendingAction(null); }
           }}
         >
           <div className="ai-delete-dialog-content">
-            <span className="ai-delete-dialog-label">{projectPendingDelete ? "Delete project" : "Delete session"}</span>
-            <h2 id="delete-session-title">{projectPendingDelete ? "Delete this project?" : "Delete this chat?"}</h2>
+            <span className={`ai-delete-dialog-label${messagePendingAction?.action === "retry" ? " is-retry" : ""}`}>
+              {messagePendingAction?.action === "retry"
+                ? "Retry response"
+                : messagePendingAction
+                  ? "Delete exchange"
+                  : projectPendingDelete
+                    ? "Delete project"
+                    : "Delete session"}
+            </span>
+            <h2 id="delete-session-title">
+              {messagePendingAction?.action === "retry"
+                ? "Replace this response?"
+                : messagePendingAction
+                  ? "Delete this exchange?"
+                  : projectPendingDelete
+                    ? "Delete this project?"
+                    : "Delete this chat?"}
+            </h2>
             <p id="delete-session-description">
-              {projectPendingDelete
-                ? `“${projectPendingDelete.name}” will be removed. Its chats stay and move back out of the project.`
-                : `“${sessionPendingDelete?.title}” and its messages will be permanently deleted.`}
+              {messagePendingAction?.action === "retry"
+                ? "The current response will be permanently removed and generated again from its original message."
+                : messagePendingAction
+                  ? "This message and its following AI response will be permanently deleted."
+                  : projectPendingDelete
+                    ? `“${projectPendingDelete.name}” will be removed. Its chats stay and move back out of the project.`
+                    : `“${sessionPendingDelete?.title}” and its messages will be permanently deleted.`}
             </p>
+            {messagePendingAction && (
+              <p className="ai-delete-dialog-preview">{messagePendingAction.preview}</p>
+            )}
             <div className="ai-delete-dialog-actions">
               <button
                 type="button"
                 className="btn btn-secondary"
                 autoFocus
-                onClick={() => { setSessionPendingDelete(null); setProjectPendingDelete(null); }}
+                onClick={() => { setSessionPendingDelete(null); setProjectPendingDelete(null); setMessagePendingAction(null); }}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                className="btn ai-delete-dialog-confirm"
+                className={`btn ai-delete-dialog-confirm${messagePendingAction?.action === "retry" ? " is-retry" : ""}`}
                 onClick={() => {
-                  if (projectPendingDelete) handleDeleteProject(projectPendingDelete.id);
+                  if (messagePendingAction) void handleMessageAction();
+                  else if (projectPendingDelete) handleDeleteProject(projectPendingDelete.id);
                   else if (sessionPendingDelete) handleDeleteSession(sessionPendingDelete.id);
                 }}
               >
-                {projectPendingDelete ? "Delete project" : "Delete chat"}
+                {messagePendingAction?.action === "retry"
+                  ? "Retry response"
+                  : messagePendingAction
+                    ? "Delete exchange"
+                    : projectPendingDelete
+                      ? "Delete project"
+                      : "Delete chat"}
               </button>
             </div>
           </div>
