@@ -6,6 +6,12 @@ import pytest
 from fastapi import HTTPException
 
 from src.api.routes import ai_routes
+from src.db.models import ChatSession
+
+
+def test_project_moves_do_not_automatically_update_session_timestamp() -> None:
+    """Changing only project_id must not make an old chat appear recent."""
+    assert ChatSession.__table__.c.updated_at.onupdate is None
 
 
 @pytest.mark.asyncio

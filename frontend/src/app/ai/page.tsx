@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, type DragEvent } from "react";
 import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import ReactMarkdown from "react-markdown";
@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import { WaveThinkingText } from "@/components/WaveThinkingText";
 import AIModelIcon from "@/components/AIModelIcon";
 import { removeLegacyEvidenceUsed } from "./answer-display";
+import { usePathname } from "next/navigation";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -97,6 +98,65 @@ function SendIcon() {
   );
 }
 
+function GreetingIcon() {
+  return (
+    <svg
+      className="ai-greeting-icon"
+      width="32"
+      height="32"
+      viewBox="0 0 128 128"
+      aria-hidden="true"
+    >
+      <circle
+        className="ai-greeting-icon-ring"
+        cx="64"
+        cy="64"
+        r="42"
+        fill="none"
+        stroke="var(--color-text-secondary)"
+        strokeWidth="7"
+        strokeLinecap="round"
+        strokeDasharray="74 26"
+      />
+      <circle
+        cx="64"
+        cy="64"
+        r="23"
+        fill="none"
+        stroke="var(--color-text-primary)"
+        strokeWidth="7"
+      />
+      <circle cx="64" cy="64" r="8" fill="var(--color-text-primary)" />
+    </svg>
+  );
+}
+
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function SessionLoadingSkeleton() {
+  return (
+    <div className="ai-session-skeleton" role="status" aria-label="Loading conversation">
+      <div className="ai-session-skeleton-row is-user">
+        <span className="skeleton ai-session-skeleton-bubble short" />
+      </div>
+      <div className="ai-session-skeleton-row">
+        <span className="skeleton ai-session-skeleton-bubble long" />
+      </div>
+      <div className="ai-session-skeleton-row is-user">
+        <span className="skeleton ai-session-skeleton-bubble medium" />
+      </div>
+      <div className="ai-session-skeleton-row">
+        <span className="skeleton ai-session-skeleton-bubble longest" />
+      </div>
+    </div>
+  );
+}
+
 function RetryIcon() {
   return (
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -118,6 +178,14 @@ function FolderIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z" />
+    </svg>
+  );
+}
+
+function ChatIcon() {
+  return (
+    <svg className="ai-session-chat-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.8 8.8 0 0 1-4-.9L4 20l1.4-3.5A7.4 7.4 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z" />
     </svg>
   );
 }
@@ -587,9 +655,13 @@ function relativeTime(iso: string): string {
 }
 
 export default function AiPage() {
+  const pathname = usePathname();
+  const routeSessionId = pathname.startsWith("/ai/")
+    ? decodeURIComponent(pathname.slice(4).split("/", 1)[0])
+    : null;
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(routeSessionId !== null);
   const [goals, setGoals] = useState<any[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -600,8 +672,8 @@ export default function AiPage() {
   const [sessionPendingDelete, setSessionPendingDelete] = useState<Session | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
-  const [movingSessionId, setMovingSessionId] = useState<string | null>(null);
-  const [movingProjectName, setMovingProjectName] = useState("");
+  const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
+  const [sessionDropTarget, setSessionDropTarget] = useState<string | "chats" | null>(null);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renamingProjectName, setRenamingProjectName] = useState("");
   const [projectPendingDelete, setProjectPendingDelete] = useState<Project | null>(null);
@@ -615,7 +687,10 @@ export default function AiPage() {
   const [selectedModel, setSelectedModel] = useState("");
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
+  const [nickname, setNickname] = useState<string>("");
+  const [expandedPillGroup, setExpandedPillGroup] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatHistoryRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -627,6 +702,16 @@ export default function AiPage() {
     }
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activePreviewImage]);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/settings/profile`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.nickname) setNickname(data.nickname);
+        else if (data?.first_name) setNickname(data.first_name);
+      })
+      .catch(() => {});
+  }, []);
 
   const processImageFiles = useCallback((files: FileList | File[]) => {
     const fileArray = Array.from(files).filter((f) => f.type.startsWith("image/"));
@@ -674,14 +759,19 @@ export default function AiPage() {
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const aiResponseRef = useRef("");
   const sessionScrollRef = useRef(false);
-  // Prevents the activeSessionId effect from fetching + overwriting messages while a send is in progress
+  const skipSessionLoadRef = useRef<string | null>(null);
+  // Prevents route changes from fetching and overwriting messages while a send is in progress.
   const isStreamingRef = useRef(false);
 
   useLayoutEffect(() => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: sessionScrollRef.current ? "auto" : "smooth",
-    });
-    sessionScrollRef.current = false;
+    if (sessionScrollRef.current) {
+      const chatHistory = chatHistoryRef.current;
+      if (!chatHistory) return;
+      chatHistory.scrollTop = chatHistory.scrollHeight;
+      sessionScrollRef.current = false;
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages, isLoading]);
 
   useEffect(() => {
@@ -697,19 +787,21 @@ export default function AiPage() {
       const res = await fetch(`${API_BASE}/api/ai/sessions`);
       if (res.ok) {
         const data: Session[] = await res.json();
-        setSessions(data);
-        // Auto-restore the exact session the user had open before navigation.
-        // Only restore if that session still exists — never auto-select data[0]
-        // to avoid silently landing on an empty ghost session.
-        const saved = sessionStorage.getItem("ai_active_session");
-        const match = saved && data.find((session) => session.id === saved);
-        setActiveSessionId((current) => current || (match ? match.id : null));
-        if (match) setSelectedModel(match.model_name);
+        setSessions((current) => data.map((session) => {
+          const local = current.find((item) => item.id === session.id);
+          return local && local.title !== "New Chat" && session.title === "New Chat"
+            ? { ...session, title: local.title, updated_at: local.updated_at }
+            : session;
+        }));
+        const routeSession = routeSessionId
+          ? data.find((session) => session.id === routeSessionId)
+          : null;
+        if (routeSession) setSelectedModel(routeSession.model_name);
       }
     } finally {
       setSessionsLoading(false);
     }
-  }, []);
+  }, [routeSessionId]);
 
   useEffect(() => { fetchSessions(); }, [fetchSessions]);
 
@@ -744,20 +836,25 @@ export default function AiPage() {
       .catch(() => setGoals([]));
   }, []);
 
-  // Persist active session to sessionStorage so navigation-remount can restore it
   useEffect(() => {
-    if (activeSessionId) sessionStorage.setItem("ai_active_session", activeSessionId);
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    if (!activeSessionId) { setMessages([]); return; }
-    sessionScrollRef.current = true;
-    // Skip fetch if a send is in flight — messages are managed by handleSend during streaming
-    if (isStreamingRef.current) return;
     const controller = new AbortController();
     (async () => {
+      if (routeSessionId && skipSessionLoadRef.current === routeSessionId) {
+        skipSessionLoadRef.current = null;
+        setMessagesLoading(false);
+        return;
+      }
+      setMessages([]);
+      setMessagesLoading(routeSessionId !== null);
+      if (!routeSessionId) return;
+      sessionScrollRef.current = true;
+      // Skip fetch if a send is in flight; handleSend owns messages during streaming.
+      if (isStreamingRef.current) {
+        setMessagesLoading(false);
+        return;
+      }
       try {
-        const res = await fetch(`${API_BASE}/api/ai/sessions/${activeSessionId}/messages`, {
+        const res = await fetch(`${API_BASE}/api/ai/sessions/${routeSessionId}/messages`, {
           signal: controller.signal,
         });
         if (!res.ok) { setMessages([]); return; }
@@ -773,10 +870,12 @@ export default function AiPage() {
         if (err instanceof Error && err.name !== "AbortError") {
           setMessages([]);
         }
+      } finally {
+        if (!controller.signal.aborted) setMessagesLoading(false);
       }
     })();
     return () => controller.abort();
-  }, [activeSessionId]);
+  }, [routeSessionId]);
 
 
   async function createRealSession(): Promise<Session | null> {
@@ -788,29 +887,28 @@ export default function AiPage() {
     if (!res.ok) return null;
     const session: Session = await res.json();
     setSessions((prev) => [session, ...prev]);
-    setActiveSessionId(session.id);
     setSelectedModel(session.model_name);
+    skipSessionLoadRef.current = session.id;
+    window.history.pushState(null, "", `/ai/${encodeURIComponent(session.id)}`);
     return session;
   }
 
   function handleNewChat() {
     if (isLoading) return;
-    setActiveSessionId(null);
     setMessages([]);
     setInput("");
     setSelectedModel(defaultModel);
-    sessionStorage.removeItem("ai_active_session");
+    window.history.pushState(null, "", "/ai");
   }
 
   const handleDeleteSession = async (id: string) => {
     setSessionPendingDelete(null);
     try {
       await fetch(`${API_BASE}/api/ai/sessions/${id}`, { method: "DELETE" });
-      if (activeSessionId === id) {
-        setActiveSessionId(null);
+      if (routeSessionId === id) {
         setMessages([]);
         setSelectedModel(defaultModel);
-        sessionStorage.removeItem("ai_active_session");
+        window.history.replaceState(null, "", "/ai");
       }
       fetchSessions();
     } catch (err) {
@@ -821,7 +919,7 @@ export default function AiPage() {
   const handleUpdateSession = async (
     id: string,
     updates: { title?: string; is_pinned?: boolean; model_name?: string; project_name?: string },
-  ) => {
+  ): Promise<boolean> => {
     const payload = {
       ...updates,
       ...(updates.title ? { title: capitalizeFirstLetter(updates.title) } : {}),
@@ -835,10 +933,68 @@ export default function AiPage() {
       if (res.ok) {
         fetchSessions();
         if (updates.project_name !== undefined) fetchProjects();
+        return true;
       }
     } catch (err) {
       console.error("Failed to update session", err);
     }
+    return false;
+  };
+
+  const handleSessionDragStart = (event: DragEvent<HTMLDivElement>, sessionId: string) => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", sessionId);
+    setDraggedSessionId(sessionId);
+  };
+
+  const handleSessionDragEnd = () => {
+    setDraggedSessionId(null);
+    setSessionDropTarget(null);
+  };
+
+  const handleSessionDragOver = (
+    event: DragEvent<HTMLElement>,
+    target: string | "chats",
+  ) => {
+    if (!draggedSessionId) return;
+    const draggedSession = sessions.find((session) => session.id === draggedSessionId);
+    const targetProjectId = target === "chats" ? null : target;
+    if (!draggedSession || draggedSession.project_id === targetProjectId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setSessionDropTarget(target);
+  };
+
+  const handleSessionDrop = async (
+    event: DragEvent<HTMLElement>,
+    target: string | "chats",
+  ) => {
+    event.preventDefault();
+    const sessionId = draggedSessionId || event.dataTransfer.getData("text/plain");
+    const targetProject = target === "chats"
+      ? null
+      : projects.find((project) => project.id === target);
+    const session = sessions.find((item) => item.id === sessionId);
+    const targetProjectId = targetProject?.id ?? null;
+
+    handleSessionDragEnd();
+    if (!session || session.project_id === targetProjectId) return;
+
+    setSessions((current) => current.map((item) => (
+      item.id === sessionId ? { ...item, project_id: targetProjectId } : item
+    )));
+    if (targetProject) {
+      setCollapsedProjects((current) => {
+        const next = new Set(current);
+        next.delete(targetProject.id);
+        return next;
+      });
+    }
+
+    const moved = await handleUpdateSession(sessionId, {
+      project_name: targetProject?.name ?? "",
+    });
+    if (!moved) fetchSessions();
   };
 
   const handleCreateProject = async (name: string) => {
@@ -900,10 +1056,10 @@ export default function AiPage() {
   async function handleModelChange(modelName: string) {
     const previousModel = selectedModel;
     setSelectedModel(modelName);
-    if (!activeSessionId) return;
+    if (!routeSessionId) return;
 
     try {
-      const res = await fetch(`${API_BASE}/api/ai/sessions/${activeSessionId}`, {
+      const res = await fetch(`${API_BASE}/api/ai/sessions/${routeSessionId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model_name: modelName }),
@@ -921,7 +1077,7 @@ export default function AiPage() {
   async function handleSend(forcedInput?: string, sessionId?: string, overrideHistory?: Message[]) {
     const userMsg = (forcedInput ?? input).trim();
     const currentImages = [...pendingImages];
-    const sid = sessionId ?? activeSessionId;
+    const sid = sessionId ?? routeSessionId;
     if ((!userMsg && currentImages.length === 0) || !sid) return;
 
     const displayQuestion = userMsg || (currentImages.length > 0 ? "[Attached Image]" : "");
@@ -1046,7 +1202,7 @@ export default function AiPage() {
 
   async function handleChipClick(chip: SuggestedPrompt) {
     if (isLoading) return;
-    let sid = activeSessionId;
+    let sid = routeSessionId;
     if (!sid) {
       const s = await createRealSession();
       if (!s) return;
@@ -1061,7 +1217,7 @@ export default function AiPage() {
 
   function handleExportMarkdown() {
     if (messages.length === 0) return;
-    const session = sessions.find(s => s.id === activeSessionId);
+    const session = sessions.find(s => s.id === routeSessionId);
     const title = session ? session.title : "AI Coach Session";
 
     let mdContent = `# ${title}\n\n`;
@@ -1109,8 +1265,7 @@ export default function AiPage() {
     return (
       <div className="ai-link-empty-prompt">
         <div className="ai-link-empty-intro">
-          <h1>How can I help with your training?</h1>
-          <p>Ask about training, recovery, sleep, or your calendar.</p>
+          <h1><GreetingIcon />{getGreeting()}{nickname ? `, ${nickname}` : ""}</h1>
         </div>
 
         <div className="ai-link-empty-composer">
@@ -1218,51 +1373,84 @@ export default function AiPage() {
               </button>
             </div>
           </div>
-          <p className="ai-link-composer-meta">AI can make mistakes. Verify critical training decisions.</p>
         </div>
 
-        <div className="ai-link-suggestions">
-          <h2>Try asking</h2>
-          <ul className="prompt-chips-row" aria-label="Suggested prompts">
-            {promptStarters.map((chip) => (
-              <li key={chip.label}>
-                <button
-                  id={`chip-${sessionId ?? "empty"}-${chip.label.toLowerCase().replace(/\s+/g, "-")}`}
-                  className="prompt-chip"
-                  onClick={() => handleChipClick(chip)}
-                  disabled={isLoading}
-                >
-                  <strong>{chip.label}</strong>
-                  <small>{chip.detail}</small>
-                </button>
-              </li>
-            ))}
-          </ul>
-          <details className="ai-link-prompt-gallery">
-            <summary>More prompts <span>{morePrompts.length}</span></summary>
-            <ul className="prompt-chips-row" aria-label="More suggested prompts">
-              {morePrompts.map((chip) => (
-                <li key={chip.label}>
-                  <button
-                    id={`chip-${sessionId ?? "empty"}-${chip.label.toLowerCase().replace(/\s+/g, "-")}`}
-                    className="prompt-chip"
-                    onClick={() => handleChipClick(chip)}
-                    disabled={isLoading}
-                  >
-                    <strong>{chip.label}</strong>
-                    <small>{chip.detail}</small>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </details>
-          <div className="ai-link-empty-scope" aria-label="Data used by AI Coach">
-            <span>Training</span>
-            <span>Recovery</span>
-            <span>Sleep</span>
-            <span>Calendar</span>
-          </div>
-        </div>
+        {(() => {
+          const pillGroups: { key: string; label: string; items: SuggestedPrompt[] }[] = [
+            {
+              key: "plan",
+              label: "Plan",
+              items: [
+                ...racePrompts,
+                { label: "Plan my next workout", detail: "", prompt: "What should my next workout be based on my recent training and recovery?", action: "ask" },
+                { label: "Review upcoming plan", detail: "", prompt: "Review my COROS training plan for the next seven days and suggest what to adjust.", action: "ask" },
+              ],
+            },
+            {
+              key: "review",
+              label: "Review",
+              items: [
+                { label: "Weekly briefing", detail: "", prompt: "Generate a weekly briefing", action: "briefing" },
+                { label: "Review training load", detail: "", prompt: "Review my training load this week and explain whether it is balanced.", action: "ask" },
+                { label: "Check fitness progress", detail: "", prompt: "Review my recent fitness progress and explain the most important changes.", action: "ask" },
+              ],
+            },
+            {
+              key: "recovery",
+              label: "Recovery",
+              items: [
+                { label: "Check my recovery", detail: "", prompt: "How is my recovery today? Review my HRV, sleep, and recent training.", action: "ask" },
+                { label: "Analyze sleep trends", detail: "", prompt: "Analyze my recent sleep trends and explain what may be affecting my recovery.", action: "ask" },
+              ],
+            },
+            {
+              key: "analyze",
+              label: "Analyze",
+              items: [
+                { label: "Compare recent runs", detail: "", prompt: "Compare my last 5 runs and highlight key differences in pace, heart rate, and effort.", action: "ask" },
+                { label: "Zone distribution", detail: "", prompt: "Show my heart rate zone distribution over the last 2 weeks and explain if the balance is right.", action: "ask" },
+              ],
+            },
+          ];
+
+          return (
+            <div className="prompt-pill-groups">
+              <ul className="prompt-pills-row" aria-label="Prompt categories">
+                {pillGroups.map((group) => (
+                  <li key={group.key}>
+                    <button
+                      className={`prompt-pill${expandedPillGroup === group.key ? " is-active" : ""}`}
+                      onClick={() => setExpandedPillGroup(expandedPillGroup === group.key ? null : group.key)}
+                      disabled={isLoading}
+                    >
+                      {group.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+
+              {expandedPillGroup && (() => {
+                const active = pillGroups.find((g) => g.key === expandedPillGroup);
+                if (!active || active.items.length === 0) return null;
+                return (
+                  <ul className="prompt-pills-row prompt-pills-sub" aria-label={`${active.label} options`}>
+                    {active.items.map((item) => (
+                      <li key={item.label}>
+                        <button
+                          className="prompt-pill prompt-pill--sub"
+                          onClick={() => handleChipClick(item)}
+                          disabled={isLoading}
+                        >
+                          {item.label}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                );
+              })()}
+            </div>
+          );
+        })()}
       </div>
     );
   }
@@ -1275,12 +1463,17 @@ export default function AiPage() {
     list?: string;
     placeholder?: string;
     disabled?: boolean;
+    inputClassName?: string;
+    ariaLabel?: string;
   }) {
     return (
-      <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+      <span className="ai-inline-input-row">
         <input
+          type="text"
           autoFocus
           value={opts.value}
+          className={["ai-inline-input-control", opts.inputClassName].filter(Boolean).join(" ")}
+          aria-label={opts.ariaLabel}
           disabled={opts.disabled}
           list={opts.list}
           placeholder={opts.placeholder}
@@ -1290,16 +1483,6 @@ export default function AiPage() {
             else if (e.key === "Escape") opts.onCancel();
           }}
           onClick={(e) => e.stopPropagation()}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: "var(--text-xs)",
-            padding: "2px 4px",
-            border: "1px solid var(--border-color)",
-            borderRadius: "4px",
-            background: "var(--color-bg-primary)",
-            color: "var(--color-text-primary)",
-          }}
         />
         <button
           type="button"
@@ -1317,7 +1500,7 @@ export default function AiPage() {
           type="button"
           className="btn btn-ghost"
           disabled={opts.disabled}
-          style={{ padding: "2px", color: "var(--color-text-muted)" }}
+          style={{ padding: "2px", color: "var(--color-text-primary)" }}
           onClick={(e) => {
             e.stopPropagation();
             opts.onCancel();
@@ -1325,23 +1508,26 @@ export default function AiPage() {
         >
           <XIcon />
         </button>
-      </div>
+      </span>
     );
   }
 
   function renderSessionRow(s: Session) {
-    const isActive = s.id === activeSessionId;
+    const isActive = s.id === routeSessionId;
     const isHovered = s.id === hoveredSessionId;
     const isEditing = editingSessionId === s.id;
-    const isMoving = movingSessionId === s.id;
+    const isDragging = draggedSessionId === s.id;
     return (
       <div
         key={s.id}
         id={`session-${s.id}`}
+        draggable={!isEditing}
+        onDragStart={(event) => handleSessionDragStart(event, s.id)}
+        onDragEnd={handleSessionDragEnd}
         onClick={() => {
           if (!isLoading) {
-            setActiveSessionId(s.id);
             setSelectedModel(s.model_name);
+            window.history.pushState(null, "", `/ai/${encodeURIComponent(s.id)}`);
           }
         }}
         onMouseEnter={() => setHoveredSessionId(s.id)}
@@ -1359,7 +1545,9 @@ export default function AiPage() {
           gap: "var(--space-1)",
           marginBottom: "2px",
         }}
+        className={isDragging ? "ai-session-row is-dragging" : "ai-session-row"}
       >
+        <ChatIcon />
         <div style={{ flex: 1, minWidth: 0 }}>
           {isEditing ? (
             renderInlineInput({
@@ -1370,18 +1558,6 @@ export default function AiPage() {
                 setEditingSessionId(null);
               },
               onCancel: () => setEditingSessionId(null),
-            })
-          ) : isMoving ? (
-            renderInlineInput({
-              value: movingProjectName,
-              onChange: setMovingProjectName,
-              list: "ai-project-names",
-              placeholder: "Project name",
-              onSave: () => {
-                handleUpdateSession(s.id, { project_name: movingProjectName });
-                setMovingSessionId(null);
-              },
-              onCancel: () => setMovingSessionId(null),
             })
           ) : (
             <>
@@ -1404,7 +1580,7 @@ export default function AiPage() {
             </>
           )}
         </div>
-        {!isEditing && !isMoving && (s.is_pinned || isHovered || isActive) && (
+        {!isEditing && (isHovered || isActive) && (
           <details
             className="ai-session-menu"
             name="ai-session-menu"
@@ -1444,17 +1620,6 @@ export default function AiPage() {
               <button
                 type="button"
                 role="menuitem"
-                onClick={(event) => {
-                  setMovingSessionId(s.id);
-                  setMovingProjectName(projects.find((p) => p.id === s.project_id)?.name || "");
-                  event.currentTarget.closest("details")?.removeAttribute("open");
-                }}
-              >
-                Move to project…
-              </button>
-              <button
-                type="button"
-                role="menuitem"
                 className="is-danger"
                 onClick={(event) => {
                   setSessionPendingDelete(s);
@@ -1472,8 +1637,14 @@ export default function AiPage() {
 
   function renderProjectGroup(p: Project) {
     const grouped = sessions.filter((s) => s.project_id === p.id);
+    const isDropTarget = sessionDropTarget === p.id;
     return (
-      <div key={p.id} className="ai-session-group">
+      <div
+        key={p.id}
+        className={`ai-session-group${isDropTarget ? " is-drop-target" : ""}`}
+        onDragOver={(event) => handleSessionDragOver(event, p.id)}
+        onDrop={(event) => void handleSessionDrop(event, p.id)}
+      >
         <details
           open={!collapsedProjects.has(p.id)}
           onToggle={(event) => {
@@ -1486,7 +1657,7 @@ export default function AiPage() {
             });
           }}
         >
-          <summary className="ai-session-group-summary">
+          <summary className={`ai-session-group-summary${renamingProjectId === p.id ? " is-renaming" : ""}`}>
             <FolderIcon />
             {renamingProjectId === p.id ? (
               renderInlineInput({
@@ -1554,6 +1725,11 @@ export default function AiPage() {
     );
   }
 
+  const ungroupedSessions = sessions.filter((s) => !s.project_id);
+  const sessionNotFound = !sessionsLoading
+    && routeSessionId !== null
+    && !sessions.some((session) => session.id === routeSessionId);
+
   return (
     <div className="ai-link-layout print-block">
       <Sidebar />
@@ -1561,7 +1737,7 @@ export default function AiPage() {
         <header className="page-header print-hide">
           <PageTitle>AI Coach</PageTitle>
           <div className="ai-link-header-actions">
-            {activeSessionId && !isEmpty && (
+            {routeSessionId && !sessionNotFound && !isEmpty && (
               <>
                 <button className="ai-link-tool-button ai-link-tool-icon-button" onClick={handleExportMarkdown} title="Export as Markdown" aria-label="Export as Markdown">
                   <DownloadIcon />
@@ -1592,7 +1768,6 @@ export default function AiPage() {
                   aria-label="Add project"
                 >
                   <FolderIcon />
-                  <span>Add project</span>
                 </button>
                 <button
                   id="new-chat-btn"
@@ -1600,48 +1775,65 @@ export default function AiPage() {
                   onClick={handleNewChat}
                   disabled={isLoading}
                 >
-                  <PlusIcon /> New
+                  <PlusIcon />
                 </button>
               </div>
             </div>
 
             <div className="ai-link-session-list">
-              {creatingProject && (
-                <div className="ai-project-create-form">
-                  <div className="ai-project-create-row">
-                    <FolderIcon />
-                    {renderInlineInput({
-                      value: newProjectName,
-                      onChange: setNewProjectName,
-                      onSave: () => handleCreateProject(newProjectName),
-                      onCancel: () => {
-                        if (projectCreateSaving) return;
-                        setCreatingProject(false);
-                        setNewProjectName("");
-                        setProjectCreateError("");
-                      },
-                      placeholder: "Project name",
-                      disabled: projectCreateSaving,
-                    })}
-                  </div>
-                  {projectCreateError && (
-                    <p className="ai-project-create-error" role="alert">{projectCreateError}</p>
-                  )}
-                </div>
-              )}
               {sessionsLoading ? (
                 <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>Loading…</p>
-              ) : sessions.length === 0 && projects.length === 0 ? (
+              ) : sessions.length === 0 && projects.length === 0 && !creatingProject ? (
                 <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>No sessions yet.</p>
               ) : (
                 <>
-                  {projects.map(renderProjectGroup)}
-                  {sessions.filter((s) => !s.project_id).map(renderSessionRow)}
+                  {(projects.length > 0 || creatingProject) && (
+                    <section className="ai-session-section" aria-labelledby="ai-projects-section-title">
+                      <h2 id="ai-projects-section-title" className="ai-session-section-heading">Projects</h2>
+                      {creatingProject && (
+                        <div className="ai-project-create-form">
+                          <div className="ai-project-create-row">
+                            <FolderIcon />
+                            {renderInlineInput({
+                              value: newProjectName,
+                              onChange: setNewProjectName,
+                              onSave: () => handleCreateProject(newProjectName),
+                              onCancel: () => {
+                                if (projectCreateSaving) return;
+                                setCreatingProject(false);
+                                setNewProjectName("");
+                                setProjectCreateError("");
+                              },
+                              placeholder: "Project name",
+                              disabled: projectCreateSaving,
+                              inputClassName: "ai-project-name-input",
+                              ariaLabel: "Project name",
+                            })}
+                          </div>
+                          {projectCreateError && (
+                            <p className="ai-project-create-error" role="alert">{projectCreateError}</p>
+                          )}
+                        </div>
+                      )}
+                      {projects.map(renderProjectGroup)}
+                    </section>
+                  )}
+                  {(ungroupedSessions.length > 0 || projects.length > 0) && (
+                    <section
+                      className={`ai-session-section${sessionDropTarget === "chats" ? " is-drop-target" : ""}`}
+                      aria-labelledby="ai-chats-section-title"
+                      onDragOver={(event) => handleSessionDragOver(event, "chats")}
+                      onDrop={(event) => void handleSessionDrop(event, "chats")}
+                    >
+                      <h2 id="ai-chats-section-title" className="ai-session-section-heading">Chats</h2>
+                      {ungroupedSessions.map(renderSessionRow)}
+                      {ungroupedSessions.length === 0 && draggedSessionId && (
+                        <p className="ai-session-drop-hint">Drop chats here</p>
+                      )}
+                    </section>
+                  )}
                 </>
               )}
-              <datalist id="ai-project-names">
-                {projects.map((p) => <option key={p.id} value={p.name} />)}
-              </datalist>
             </div>
           </aside>
 
@@ -1650,15 +1842,29 @@ export default function AiPage() {
             <div className="ai-link-chat-body">
 
               {/* No session selected */}
-            {!activeSessionId ? (
+            {sessionNotFound ? (
+              <div className="ai-link-empty print-hide">
+                <div className="ai-link-empty-intro">
+                  <h1>Session not found</h1>
+                  <p>This chat may have been deleted or the link may be invalid.</p>
+                  <button type="button" className="btn btn-primary" onClick={handleNewChat}>
+                    Start a new chat
+                  </button>
+                </div>
+              </div>
+            ) : !routeSessionId ? (
               <div className="ai-link-empty print-hide">
                 {renderEmptyPrompt()}
               </div>
 
+            ) : messagesLoading ? (
+              <div className="ai-link-empty print-hide">
+                <SessionLoadingSkeleton />
+              </div>
             ) : isEmpty ? (
               /* Session created but no messages yet */
               <div className="ai-link-empty print-hide">
-                {renderEmptyPrompt(activeSessionId)}
+                {renderEmptyPrompt(routeSessionId)}
               </div>
 
               ) : (
@@ -1670,10 +1876,10 @@ export default function AiPage() {
                       <span className="print-date">{new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}</span>
                     </div>
                     <h1 className="print-only-title">
-                      {sessions.find((s) => s.id === activeSessionId)?.title || "AI Coach Session Report"}
+                      {sessions.find((s) => s.id === routeSessionId)?.title || "AI Coach Session Report"}
                     </h1>
                   </div>
-                  <div id="chat-history" className="ai-link-chat-history print-block">
+                  <div ref={chatHistoryRef} id="chat-history" className="ai-link-chat-history print-block">
                     <div className="ai-link-thread print-block">
                       {messages.map((msg, idx) => {
                         const isErrorMsg = idx === messages.length - 1 && msg.role === "ai" && (msg.content.includes("Error") || msg.content.includes("Failed"));

@@ -815,6 +815,8 @@ async def update_session(
         session.model_name = await _validated_model(req.model_name)
     if req.project_name is not None:
         session.project_id = await _resolve_project_id(db, req.project_name)
+    if req.title is not None or req.is_pinned is not None or req.model_name is not None:
+        session.updated_at = datetime.datetime.utcnow()
 
     await db.commit()
     return SessionListItem(
