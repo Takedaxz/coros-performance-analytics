@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.ai import (
@@ -29,6 +29,7 @@ from src.config import get_settings
 from src.db.engine import async_session_factory, get_db_session
 from src.db.models import Activity, ActivityLap, ActivityRecord
 from src.db.models import ChatMessage as DBChatMessage
+from src.db.models import ChatProject as DBChatProject
 from src.db.models import ChatSession as DBChatSession
 from src.db.owner import get_owner_id
 
@@ -547,6 +548,7 @@ class SessionCreateResponse(BaseModel):
     id: str
     title: str
     is_pinned: bool
+    project_id: str | None
     model_name: str
     created_at: str
     updated_at: str
@@ -556,6 +558,7 @@ class SessionListItem(BaseModel):
     id: str
     title: str
     is_pinned: bool
+    project_id: str | None
     model_name: str
     created_at: str
     updated_at: str
@@ -569,6 +572,18 @@ class SessionUpdateRequest(BaseModel):
     title: str | None = None
     is_pinned: bool | None = None
     model_name: str | None = None
+    # Folder to move the session into. A blank name moves it back out to ungrouped;
+    # an unknown name creates the project.
+    project_name: str | None = None
+
+
+class ProjectItem(BaseModel):
+    id: str
+    name: str
+
+
+class ProjectNameRequest(BaseModel):
+    name: str
 
 
 class ModelItem(BaseModel):
@@ -627,6 +642,111 @@ def _capitalize_title(val: str | None) -> str:
     return (s[0].upper() + s[1:]) if s else "New Chat"
 
 
+async def _resolve_project_id(db: AsyncSession, name: str) -> str | None:
+    """Return the id of the owner's project called `name`, creating it when new.
+
+    A blank name resolves to None, which moves the session out of every folder.
+    Matching is case-insensitive so the sidebar typeahead cannot create "cardio"
+    alongside "Cardio".
+    """
+    clean = name.strip()[:100]
+    if not clean:
+        return None
+    res = await db.execute(
+        select(DBChatProject).where(
+            DBChatProject.user_id == get_owner_id(),
+            func.lower(DBChatProject.name) == clean.lower(),
+        )
+    )
+    existing = res.scalar_one_or_none()
+    if existing:
+        return existing.id
+    project = DBChatProject(user_id=get_owner_id(), name=clean)
+    db.add(project)
+    await db.flush()
+    return project.id
+
+
+@router.get("/projects", response_model=list[ProjectItem])
+async def list_projects(db: AsyncSession = Depends(get_db_session)) -> list[ProjectItem]:
+    """Return the owner's chat projects, alphabetically."""
+    res = await db.execute(
+        select(DBChatProject)
+        .where(DBChatProject.user_id == get_owner_id())
+        .order_by(func.lower(DBChatProject.name))
+    )
+    return [ProjectItem(id=p.id, name=p.name) for p in res.scalars().all()]
+
+
+@router.post("/projects", response_model=ProjectItem, status_code=201)
+async def create_project(
+    req: ProjectNameRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> ProjectItem:
+    """Create an empty chat project. An existing name resolves to that project."""
+    project_id = await _resolve_project_id(db, req.name)
+    if not project_id:
+        raise HTTPException(status_code=400, detail="Project name cannot be empty.")
+    await db.commit()
+    project = await db.get(DBChatProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    return ProjectItem(id=project.id, name=project.name)
+
+
+@router.put("/projects/{project_id}", response_model=ProjectItem)
+async def rename_project(
+    project_id: str,
+    req: ProjectNameRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> ProjectItem:
+    """Rename a chat project."""
+    name = req.name.strip()[:100]
+    if not name:
+        raise HTTPException(status_code=400, detail="Project name cannot be empty.")
+
+    res = await db.execute(
+        select(DBChatProject).where(
+            DBChatProject.id == project_id, DBChatProject.user_id == get_owner_id()
+        )
+    )
+    project = res.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    clash = await db.execute(
+        select(DBChatProject).where(
+            DBChatProject.user_id == get_owner_id(),
+            DBChatProject.id != project_id,
+            func.lower(DBChatProject.name) == name.lower(),
+        )
+    )
+    if clash.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="A project with that name already exists.")
+
+    project.name = name
+    await db.commit()
+    return ProjectItem(id=project.id, name=project.name)
+
+
+@router.delete("/projects/{project_id}", status_code=204)
+async def delete_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    """Delete a chat project. Its sessions stay, moving back out to ungrouped."""
+    res = await db.execute(
+        select(DBChatProject).where(
+            DBChatProject.id == project_id, DBChatProject.user_id == get_owner_id()
+        )
+    )
+    project = res.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    await db.delete(project)
+    await db.commit()
+
+
 @router.get("/sessions", response_model=list[SessionListItem])
 async def list_sessions(db: AsyncSession = Depends(get_db_session)) -> list[SessionListItem]:
     """Return all chat sessions for the user, newest first."""
@@ -641,6 +761,7 @@ async def list_sessions(db: AsyncSession = Depends(get_db_session)) -> list[Sess
             id=s.id,
             title=_capitalize_title(s.title),
             is_pinned=s.is_pinned,
+            project_id=s.project_id,
             model_name=s.model_name or _active_model(),
             created_at=s.created_at.isoformat(),
             updated_at=s.updated_at.isoformat(),
@@ -663,6 +784,7 @@ async def create_session(
         id=session.id,
         title=session.title,
         is_pinned=session.is_pinned,
+        project_id=session.project_id,
         model_name=model_name,
         created_at=session.created_at.isoformat(),
         updated_at=session.updated_at.isoformat(),
@@ -675,7 +797,7 @@ async def update_session(
     req: SessionUpdateRequest,
     db: AsyncSession = Depends(get_db_session),
 ) -> SessionListItem:
-    """Update a chat session (title, pinned status)."""
+    """Update a chat session (title, pinned status, model, project)."""
     res = await db.execute(
         select(DBChatSession).where(
             DBChatSession.id == session_id, DBChatSession.user_id == get_owner_id()
@@ -691,12 +813,15 @@ async def update_session(
         session.is_pinned = req.is_pinned
     if req.model_name is not None:
         session.model_name = await _validated_model(req.model_name)
+    if req.project_name is not None:
+        session.project_id = await _resolve_project_id(db, req.project_name)
 
     await db.commit()
     return SessionListItem(
         id=session.id,
         title=_capitalize_title(session.title),
         is_pinned=session.is_pinned,
+        project_id=session.project_id,
         model_name=session.model_name or _active_model(),
         created_at=session.created_at.isoformat(),
         updated_at=session.updated_at.isoformat(),

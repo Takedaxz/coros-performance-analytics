@@ -515,6 +515,21 @@ class AIOutput(Base):
 # ---------------------------------------------------------------------------
 
 
+class ChatProject(Base):
+    """Named folder grouping chat sessions in the sidebar."""
+
+    __tablename__ = "chat_projects"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_chat_projects_user_name"),)
+
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
@@ -522,6 +537,9 @@ class ChatSession(Base):
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
     )
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("chat_projects.id", ondelete="SET NULL"), nullable=True
+    )
     title: Mapped[str] = mapped_column(String(200), nullable=False, default="New Chat")
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)

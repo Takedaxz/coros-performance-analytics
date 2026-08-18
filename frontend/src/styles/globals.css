@@ -5898,9 +5898,33 @@ table.data-table .lap-split-table tr:hover td {
   width: 12px;
 }
 
+.ai-link-new-chat span {
+  white-space: nowrap;
+}
+
 .ai-link-new-chat:hover:not(:disabled) {
   border-color: rgba(33, 230, 165, 0.28);
   color: var(--color-accent-primary);
+}
+
+.ai-project-create-form {
+  padding: var(--space-2);
+}
+
+.ai-project-create-row {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ai-project-create-row > svg {
+  flex: 0 0 auto;
+}
+
+.ai-project-create-error {
+  color: var(--color-danger, #ff6b6b);
+  font-size: 10px;
+  margin: var(--space-1) 0 0;
 }
 
 .ai-link-session-list {
@@ -5912,6 +5936,63 @@ table.data-table .lap-split-table tr:hover td {
 .ai-session-menu {
   flex: 0 0 auto;
   position: relative;
+}
+
+.ai-session-group {
+  margin-bottom: var(--space-1);
+  position: relative;
+}
+
+.ai-session-group-summary {
+  align-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: flex;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  gap: 6px;
+  list-style: none;
+  padding: var(--space-2);
+  padding-right: 32px;
+  user-select: none;
+}
+
+.ai-session-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-session-group-summary:hover {
+  background: var(--color-surface-secondary);
+}
+
+.ai-session-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-session-group-count {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: var(--weight-regular);
+}
+
+.ai-session-group-body {
+  padding-left: var(--space-3);
+}
+
+.ai-session-group-empty {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  margin: 0;
+  padding: var(--space-1) var(--space-2) var(--space-2);
+}
+
+.ai-session-group-menu {
+  position: absolute;
+  right: 4px;
+  top: 4px;
 }
 
 .ai-session-pinned-label {

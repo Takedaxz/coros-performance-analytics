@@ -114,6 +114,14 @@ function PlusIcon() {
   );
 }
 
+function FolderIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z" />
+    </svg>
+  );
+}
+
 function DownloadIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -250,9 +258,15 @@ type Session = {
   id: string;
   title: string;
   is_pinned: boolean;
+  project_id: string | null;
   model_name: string;
   created_at: string;
   updated_at: string;
+};
+
+type Project = {
+  id: string;
+  name: string;
 };
 
 type ProviderGroup = {
@@ -584,6 +598,17 @@ export default function AiPage() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [sessionPendingDelete, setSessionPendingDelete] = useState<Session | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
+  const [movingSessionId, setMovingSessionId] = useState<string | null>(null);
+  const [movingProjectName, setMovingProjectName] = useState("");
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
+  const [renamingProjectName, setRenamingProjectName] = useState("");
+  const [projectPendingDelete, setProjectPendingDelete] = useState<Project | null>(null);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [projectCreateError, setProjectCreateError] = useState("");
+  const [projectCreateSaving, setProjectCreateSaving] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [providers, setProviders] = useState<ProviderGroup[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
@@ -662,9 +687,10 @@ export default function AiPage() {
   useEffect(() => {
     const dialog = deleteDialogRef.current;
     if (!dialog) return;
-    if (sessionPendingDelete && !dialog.open) dialog.showModal();
-    if (!sessionPendingDelete && dialog.open) dialog.close();
-  }, [sessionPendingDelete]);
+    const pending = sessionPendingDelete || projectPendingDelete;
+    if (pending && !dialog.open) dialog.showModal();
+    if (!pending && dialog.open) dialog.close();
+  }, [sessionPendingDelete, projectPendingDelete]);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -686,6 +712,15 @@ export default function AiPage() {
   }, []);
 
   useEffect(() => { fetchSessions(); }, [fetchSessions]);
+
+  const fetchProjects = useCallback(() => {
+    fetch(`${API_BASE}/api/ai/projects`)
+      .then((res) => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)))
+      .then((data: Project[]) => setProjects(data))
+      .catch((err) => console.error("Failed to load projects", err));
+  }, []);
+
+  useEffect(() => { fetchProjects(); }, [fetchProjects]);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/ai/models`)
@@ -785,7 +820,7 @@ export default function AiPage() {
 
   const handleUpdateSession = async (
     id: string,
-    updates: { title?: string; is_pinned?: boolean; model_name?: string },
+    updates: { title?: string; is_pinned?: boolean; model_name?: string; project_name?: string },
   ) => {
     const payload = {
       ...updates,
@@ -799,9 +834,66 @@ export default function AiPage() {
       });
       if (res.ok) {
         fetchSessions();
+        if (updates.project_name !== undefined) fetchProjects();
       }
     } catch (err) {
       console.error("Failed to update session", err);
+    }
+  };
+
+  const handleCreateProject = async (name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setProjectCreateError("Enter a project name.");
+      return;
+    }
+
+    setProjectCreateSaving(true);
+    setProjectCreateError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmedName }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.detail || `Unable to create project (HTTP ${res.status}).`);
+      }
+      setCreatingProject(false);
+      setNewProjectName("");
+      fetchProjects();
+    } catch (err) {
+      console.error("Failed to create project", err);
+      setProjectCreateError(err instanceof Error ? err.message : "Unable to create project.");
+    } finally {
+      setProjectCreateSaving(false);
+    }
+  };
+
+  const handleRenameProject = async (id: string, name: string) => {
+    setRenamingProjectId(null);
+    if (!name.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/projects/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) fetchProjects();
+    } catch (err) {
+      console.error("Failed to rename project", err);
+    }
+  };
+
+  const handleDeleteProject = async (id: string) => {
+    setProjectPendingDelete(null);
+    try {
+      await fetch(`${API_BASE}/api/ai/projects/${id}`, { method: "DELETE" });
+      fetchProjects();
+      fetchSessions();
+    } catch (err) {
+      console.error("Failed to delete project", err);
     }
   };
 
@@ -1175,6 +1267,293 @@ export default function AiPage() {
     );
   }
 
+  function renderInlineInput(opts: {
+    value: string;
+    onChange: (value: string) => void;
+    onSave: () => void;
+    onCancel: () => void;
+    list?: string;
+    placeholder?: string;
+    disabled?: boolean;
+  }) {
+    return (
+      <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+        <input
+          autoFocus
+          value={opts.value}
+          disabled={opts.disabled}
+          list={opts.list}
+          placeholder={opts.placeholder}
+          onChange={(e) => opts.onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") opts.onSave();
+            else if (e.key === "Escape") opts.onCancel();
+          }}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: "var(--text-xs)",
+            padding: "2px 4px",
+            border: "1px solid var(--border-color)",
+            borderRadius: "4px",
+            background: "var(--color-bg-primary)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={opts.disabled}
+          style={{ padding: "2px", color: "var(--color-text-primary)" }}
+          onClick={(e) => {
+            e.stopPropagation();
+            opts.onSave();
+          }}
+        >
+          <CheckIcon />
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={opts.disabled}
+          style={{ padding: "2px", color: "var(--color-text-muted)" }}
+          onClick={(e) => {
+            e.stopPropagation();
+            opts.onCancel();
+          }}
+        >
+          <XIcon />
+        </button>
+      </div>
+    );
+  }
+
+  function renderSessionRow(s: Session) {
+    const isActive = s.id === activeSessionId;
+    const isHovered = s.id === hoveredSessionId;
+    const isEditing = editingSessionId === s.id;
+    const isMoving = movingSessionId === s.id;
+    return (
+      <div
+        key={s.id}
+        id={`session-${s.id}`}
+        onClick={() => {
+          if (!isLoading) {
+            setActiveSessionId(s.id);
+            setSelectedModel(s.model_name);
+          }
+        }}
+        onMouseEnter={() => setHoveredSessionId(s.id)}
+        onMouseLeave={() => setHoveredSessionId(null)}
+        style={{
+          padding: "var(--space-2)",
+          borderRadius: "var(--radius-sm)",
+          cursor: "pointer",
+          background: isActive ? "rgba(33, 230, 165, 0.10)" : isHovered ? "var(--color-surface-secondary)" : "transparent",
+          border: isActive ? "1px solid rgba(33, 230, 165, 0.28)" : "1px solid transparent",
+          transition: "all var(--transition-fast)",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: "var(--space-1)",
+          marginBottom: "2px",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {isEditing ? (
+            renderInlineInput({
+              value: editingTitle,
+              onChange: setEditingTitle,
+              onSave: () => {
+                handleUpdateSession(s.id, { title: editingTitle });
+                setEditingSessionId(null);
+              },
+              onCancel: () => setEditingSessionId(null),
+            })
+          ) : isMoving ? (
+            renderInlineInput({
+              value: movingProjectName,
+              onChange: setMovingProjectName,
+              list: "ai-project-names",
+              placeholder: "Project name",
+              onSave: () => {
+                handleUpdateSession(s.id, { project_name: movingProjectName });
+                setMovingSessionId(null);
+              },
+              onCancel: () => setMovingSessionId(null),
+            })
+          ) : (
+            <>
+              <p style={{
+                fontSize: "var(--text-xs)",
+                fontWeight: isActive ? 600 : 400,
+                color: isActive ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                margin: 0,
+                lineHeight: 1.4,
+              }}>
+                {capitalizeFirstLetter(s.title)}
+              </p>
+              <p style={{ alignItems: "center", display: "flex", fontSize: "10px", gap: "6px", color: "var(--color-text-muted)", margin: "2px 0 0", lineHeight: 1 }}>
+                {relativeTime(s.updated_at)}
+                {s.is_pinned && <span className="ai-session-pinned-label">Pinned</span>}
+              </p>
+            </>
+          )}
+        </div>
+        {!isEditing && !isMoving && (s.is_pinned || isHovered || isActive) && (
+          <details
+            className="ai-session-menu"
+            name="ai-session-menu"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.currentTarget.removeAttribute("open");
+                event.currentTarget.querySelector("summary")?.focus();
+              }
+            }}
+          >
+            <summary className="ai-session-menu-trigger" aria-label={`Actions for ${s.title}`}>
+              <span aria-hidden="true">⋮</span>
+            </summary>
+            <div className="ai-session-menu-popover" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  handleUpdateSession(s.id, { is_pinned: !s.is_pinned });
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                {s.is_pinned ? "Unpin" : "Pin"}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  setEditingSessionId(s.id);
+                  setEditingTitle(s.title);
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                Rename
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  setMovingSessionId(s.id);
+                  setMovingProjectName(projects.find((p) => p.id === s.project_id)?.name || "");
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                Move to project…
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="is-danger"
+                onClick={(event) => {
+                  setSessionPendingDelete(s);
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </details>
+        )}
+      </div>
+    );
+  }
+
+  function renderProjectGroup(p: Project) {
+    const grouped = sessions.filter((s) => s.project_id === p.id);
+    return (
+      <div key={p.id} className="ai-session-group">
+        <details
+          open={!collapsedProjects.has(p.id)}
+          onToggle={(event) => {
+            const isOpen = event.currentTarget.open;
+            setCollapsedProjects((prev) => {
+              const next = new Set(prev);
+              if (isOpen) next.delete(p.id);
+              else next.add(p.id);
+              return next;
+            });
+          }}
+        >
+          <summary className="ai-session-group-summary">
+            <FolderIcon />
+            {renamingProjectId === p.id ? (
+              renderInlineInput({
+                value: renamingProjectName,
+                onChange: setRenamingProjectName,
+                onSave: () => handleRenameProject(p.id, renamingProjectName),
+                onCancel: () => setRenamingProjectId(null),
+              })
+            ) : (
+              <>
+                <span className="ai-session-group-name">{p.name}</span>
+                <span className="ai-session-group-count">{grouped.length}</span>
+              </>
+            )}
+          </summary>
+          <div className="ai-session-group-body">
+            {grouped.length === 0 ? (
+              <p className="ai-session-group-empty">No chats yet.</p>
+            ) : (
+              grouped.map(renderSessionRow)
+            )}
+          </div>
+        </details>
+        {renamingProjectId !== p.id && (
+          <details
+            className="ai-session-menu ai-session-group-menu"
+            name="ai-session-menu"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.currentTarget.removeAttribute("open");
+                event.currentTarget.querySelector("summary")?.focus();
+              }
+            }}
+          >
+            <summary className="ai-session-menu-trigger" aria-label={`Actions for project ${p.name}`}>
+              <span aria-hidden="true">⋮</span>
+            </summary>
+            <div className="ai-session-menu-popover" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  setRenamingProjectId(p.id);
+                  setRenamingProjectName(p.name);
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                Rename
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="is-danger"
+                onClick={(event) => {
+                  setProjectPendingDelete(p);
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </details>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="ai-link-layout print-block">
       <Sidebar />
@@ -1201,175 +1580,68 @@ export default function AiPage() {
           <aside className="ai-link-sessions print-hide">
             <div className="ai-link-session-header">
               <span>Sessions</span>
-              <button
-                id="new-chat-btn"
-                className="ai-link-new-chat"
-                onClick={handleNewChat}
-                disabled={isLoading}
-              >
-                <PlusIcon /> New
-              </button>
+              <div style={{ display: "flex", gap: "4px" }}>
+                <button
+                  className="ai-link-new-chat"
+                  onClick={() => {
+                    setNewProjectName("");
+                    setProjectCreateError("");
+                    setCreatingProject(true);
+                  }}
+                  title="Add project"
+                  aria-label="Add project"
+                >
+                  <FolderIcon />
+                  <span>Add project</span>
+                </button>
+                <button
+                  id="new-chat-btn"
+                  className="ai-link-new-chat"
+                  onClick={handleNewChat}
+                  disabled={isLoading}
+                >
+                  <PlusIcon /> New
+                </button>
+              </div>
             </div>
 
             <div className="ai-link-session-list">
+              {creatingProject && (
+                <div className="ai-project-create-form">
+                  <div className="ai-project-create-row">
+                    <FolderIcon />
+                    {renderInlineInput({
+                      value: newProjectName,
+                      onChange: setNewProjectName,
+                      onSave: () => handleCreateProject(newProjectName),
+                      onCancel: () => {
+                        if (projectCreateSaving) return;
+                        setCreatingProject(false);
+                        setNewProjectName("");
+                        setProjectCreateError("");
+                      },
+                      placeholder: "Project name",
+                      disabled: projectCreateSaving,
+                    })}
+                  </div>
+                  {projectCreateError && (
+                    <p className="ai-project-create-error" role="alert">{projectCreateError}</p>
+                  )}
+                </div>
+              )}
               {sessionsLoading ? (
                 <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>Loading…</p>
-              ) : sessions.length === 0 ? (
+              ) : sessions.length === 0 && projects.length === 0 ? (
                 <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>No sessions yet.</p>
               ) : (
-                sessions.map((s) => {
-                  const isActive = s.id === activeSessionId;
-                  const isHovered = s.id === hoveredSessionId;
-                  return (
-                    <div
-                      key={s.id}
-                      id={`session-${s.id}`}
-                      onClick={() => {
-                        if (!isLoading) {
-                          setActiveSessionId(s.id);
-                          setSelectedModel(s.model_name);
-                        }
-                      }}
-                      onMouseEnter={() => setHoveredSessionId(s.id)}
-                      onMouseLeave={() => setHoveredSessionId(null)}
-                      style={{
-                        padding: "var(--space-2)",
-                        borderRadius: "var(--radius-sm)",
-                        cursor: "pointer",
-                        background: isActive ? "rgba(33, 230, 165, 0.10)" : isHovered ? "var(--color-surface-secondary)" : "transparent",
-                        border: isActive ? "1px solid rgba(33, 230, 165, 0.28)" : "1px solid transparent",
-                        transition: "all var(--transition-fast)",
-                        display: "flex",
-                        alignItems: "flex-start",
-                        justifyContent: "space-between",
-                        gap: "var(--space-1)",
-                        marginBottom: "2px",
-                      }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        {editingSessionId === s.id ? (
-                          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                            <input
-                              autoFocus
-                              value={editingTitle}
-                              onChange={(e) => setEditingTitle(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  handleUpdateSession(s.id, { title: editingTitle });
-                                  setEditingSessionId(null);
-                                } else if (e.key === "Escape") {
-                                  setEditingSessionId(null);
-                                }
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              style={{
-                                flex: 1,
-                                fontSize: "var(--text-xs)",
-                                padding: "2px 4px",
-                                border: "1px solid var(--border-color)",
-                                borderRadius: "4px",
-                                background: "var(--color-bg-primary)",
-                                color: "var(--color-text-primary)",
-                              }}
-                            />
-                            <button
-                              className="btn btn-ghost"
-                              style={{ padding: "2px", color: "var(--color-text-primary)" }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleUpdateSession(s.id, { title: editingTitle });
-                                setEditingSessionId(null);
-                              }}
-                            >
-                              <CheckIcon />
-                            </button>
-                            <button
-                              className="btn btn-ghost"
-                              style={{ padding: "2px", color: "var(--color-text-muted)" }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingSessionId(null);
-                              }}
-                            >
-                              <XIcon />
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <p style={{
-                              fontSize: "var(--text-xs)",
-                              fontWeight: isActive ? 600 : 400,
-                              color: isActive ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              margin: 0,
-                              lineHeight: 1.4,
-                            }}>
-                              {capitalizeFirstLetter(s.title)}
-                            </p>
-                            <p style={{ alignItems: "center", display: "flex", fontSize: "10px", gap: "6px", color: "var(--color-text-muted)", margin: "2px 0 0", lineHeight: 1 }}>
-                              {relativeTime(s.updated_at)}
-                              {s.is_pinned && <span className="ai-session-pinned-label">Pinned</span>}
-                            </p>
-                          </>
-                        )}
-                      </div>
-                      {editingSessionId !== s.id && (s.is_pinned || isHovered || isActive) && (
-                        <details
-                          className="ai-session-menu"
-                          name="ai-session-menu"
-                          onClick={(event) => event.stopPropagation()}
-                          onKeyDown={(event) => {
-                            if (event.key === "Escape") {
-                              event.currentTarget.removeAttribute("open");
-                              event.currentTarget.querySelector("summary")?.focus();
-                            }
-                          }}
-                        >
-                          <summary className="ai-session-menu-trigger" aria-label={`Actions for ${s.title}`}>
-                            <span aria-hidden="true">⋮</span>
-                          </summary>
-                          <div className="ai-session-menu-popover" role="menu">
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={(event) => {
-                                handleUpdateSession(s.id, { is_pinned: !s.is_pinned });
-                                event.currentTarget.closest("details")?.removeAttribute("open");
-                              }}
-                            >
-                              {s.is_pinned ? "Unpin" : "Pin"}
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={(event) => {
-                                setEditingSessionId(s.id);
-                                setEditingTitle(s.title);
-                                event.currentTarget.closest("details")?.removeAttribute("open");
-                              }}
-                            >
-                              Rename
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className="is-danger"
-                              onClick={(event) => {
-                                setSessionPendingDelete(s);
-                                event.currentTarget.closest("details")?.removeAttribute("open");
-                              }}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </details>
-                      )}
-                    </div>
-                  );
-                })
+                <>
+                  {projects.map(renderProjectGroup)}
+                  {sessions.filter((s) => !s.project_id).map(renderSessionRow)}
+                </>
               )}
+              <datalist id="ai-project-names">
+                {projects.map((p) => <option key={p.id} value={p.name} />)}
+              </datalist>
             </div>
           </aside>
 
@@ -1595,26 +1867,28 @@ export default function AiPage() {
           className="ai-delete-dialog"
           aria-labelledby="delete-session-title"
           aria-describedby="delete-session-description"
-          onCancel={() => setSessionPendingDelete(null)}
+          onCancel={() => { setSessionPendingDelete(null); setProjectPendingDelete(null); }}
           onKeyDown={(event) => {
-            if (event.key === "Escape") setSessionPendingDelete(null);
+            if (event.key === "Escape") { setSessionPendingDelete(null); setProjectPendingDelete(null); }
           }}
           onClick={(event) => {
-            if (event.target === event.currentTarget) setSessionPendingDelete(null);
+            if (event.target === event.currentTarget) { setSessionPendingDelete(null); setProjectPendingDelete(null); }
           }}
         >
           <div className="ai-delete-dialog-content">
-            <span className="ai-delete-dialog-label">Delete session</span>
-            <h2 id="delete-session-title">Delete this chat?</h2>
+            <span className="ai-delete-dialog-label">{projectPendingDelete ? "Delete project" : "Delete session"}</span>
+            <h2 id="delete-session-title">{projectPendingDelete ? "Delete this project?" : "Delete this chat?"}</h2>
             <p id="delete-session-description">
-              “{sessionPendingDelete?.title}” and its messages will be permanently deleted.
+              {projectPendingDelete
+                ? `“${projectPendingDelete.name}” will be removed. Its chats stay and move back out of the project.`
+                : `“${sessionPendingDelete?.title}” and its messages will be permanently deleted.`}
             </p>
             <div className="ai-delete-dialog-actions">
               <button
                 type="button"
                 className="btn btn-secondary"
                 autoFocus
-                onClick={() => setSessionPendingDelete(null)}
+                onClick={() => { setSessionPendingDelete(null); setProjectPendingDelete(null); }}
               >
                 Cancel
               </button>
@@ -1622,10 +1896,11 @@ export default function AiPage() {
                 type="button"
                 className="btn ai-delete-dialog-confirm"
                 onClick={() => {
-                  if (sessionPendingDelete) handleDeleteSession(sessionPendingDelete.id);
+                  if (projectPendingDelete) handleDeleteProject(projectPendingDelete.id);
+                  else if (sessionPendingDelete) handleDeleteSession(sessionPendingDelete.id);
                 }}
               >
-                Delete chat
+                {projectPendingDelete ? "Delete project" : "Delete chat"}
               </button>
             </div>
           </div>
