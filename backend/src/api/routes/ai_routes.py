@@ -566,6 +566,8 @@ class SessionListItem(BaseModel):
 
 class SessionCreateRequest(BaseModel):
     model_name: str | None = None
+    project_name: str | None = None
+    project_id: str | None = None
 
 
 class SessionUpdateRequest(BaseModel):
@@ -777,7 +779,20 @@ async def create_session(
 ) -> SessionCreateResponse:
     """Create a new empty chat session."""
     model_name = await _validated_model(req.model_name if req else None)
-    session = DBChatSession(user_id=get_owner_id(), model_name=model_name)
+    project_id = None
+    if req:
+        if req.project_id:
+            res_p = await db.execute(
+                select(DBChatProject).where(
+                    DBChatProject.id == req.project_id, DBChatProject.user_id == get_owner_id()
+                )
+            )
+            if res_p.scalar_one_or_none():
+                project_id = req.project_id
+        elif req.project_name:
+            project_id = await _resolve_project_id(db, req.project_name)
+
+    session = DBChatSession(user_id=get_owner_id(), model_name=model_name, project_id=project_id)
     db.add(session)
     await db.flush()
     return SessionCreateResponse(

@@ -6,9 +6,19 @@ tags: strength, crossfit
 
 ## HYROX race demands
 
-HYROX alternates eight 1 km runs with eight functional workout stations. Training should therefore develop sustainable running under fatigue, station-specific movement skill, and transitions without repeatedly turning every session into a maximal simulation. Use the official current rulebook for station standards, distances, loads, and penalties because they can change by season and division.
+HYROX alternates eight 1 km runs with eight functional workout stations (8 km total running).
 
-Source: [HYROX race format](https://hyrox.com/the-fitness-race/) and [HYROX Singles Rulebook 2025/26](https://maintain.hyrox.com/rulebooks/HYROX_RulebookSingles_EN.pdf).
+Official Station Standards by Division:
+- **SkiErg**: 1000m across all divisions.
+- **Sled Push** (50m): Women Open (102kg) | Men Open / Women Pro (152kg) | Men Pro (202kg) *(all incl. sled)*.
+- **Sled Pull** (50m): Women Open (78kg) | Men Open / Women Pro (103kg) | Men Pro (153kg) *(all incl. sled)*.
+- **Burpee Broad Jump**: 80m across all divisions.
+- **Rowing**: 1000m across all divisions.
+- **Farmers Carry** (200m): Women Open (2x16kg) | Men Open / Women Pro (2x24kg) | Men Pro (2x32kg).
+- **Sandbag Lunges** (100m): Women Open (10kg) | Men Open / Women Pro (20kg) | Men Pro (30kg).
+- **Wall Balls** (100 reps): Women Open (4kg) | Men Open / Women Pro (6kg) | Men Pro (9kg).
+
+Source: [HYROX race format](https://hyrox.com/the-fitness-race/) and [HYROX Singles Rulebook](https://maintain.hyrox.com/rulebooks/HYROX_RulebookSingles_EN.pdf).
 
 ## Mixed-modal conditioning
 

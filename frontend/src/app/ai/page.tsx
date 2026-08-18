@@ -689,9 +689,17 @@ export default function AiPage() {
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
   const [nickname, setNickname] = useState<string>("");
   const [expandedPillGroup, setExpandedPillGroup] = useState<string | null>(null);
+  const [draftProjectId, setDraftProjectId] = useState<string | null>(null);
+  const inFlightStreamsRef = useRef<Map<string, Message[]>>(new Map());
+  const [streamingSessionIds, setStreamingSessionIds] = useState<Set<string>>(new Set());
+  const routeSessionIdRef = useRef<string | null>(routeSessionId);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    routeSessionIdRef.current = routeSessionId;
+  }, [routeSessionId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -844,15 +852,17 @@ export default function AiPage() {
         setMessagesLoading(false);
         return;
       }
+      if (routeSessionId && inFlightStreamsRef.current.has(routeSessionId)) {
+        const streamMsgs = inFlightStreamsRef.current.get(routeSessionId)!;
+        setMessages(streamMsgs);
+        setMessagesLoading(false);
+        return;
+      }
       setMessages([]);
       setMessagesLoading(routeSessionId !== null);
       if (!routeSessionId) return;
       sessionScrollRef.current = true;
-      // Skip fetch if a send is in flight; handleSend owns messages during streaming.
-      if (isStreamingRef.current) {
-        setMessagesLoading(false);
-        return;
-      }
+
       try {
         const res = await fetch(`${API_BASE}/api/ai/sessions/${routeSessionId}/messages`, {
           signal: controller.signal,
@@ -878,25 +888,45 @@ export default function AiPage() {
   }, [routeSessionId]);
 
 
-  async function createRealSession(): Promise<Session | null> {
+  async function createRealSession(projectIdOverride?: string | null): Promise<Session | null> {
+    const targetProjectId = projectIdOverride !== undefined ? projectIdOverride : draftProjectId;
     const res = await fetch(`${API_BASE}/api/ai/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model_name: selectedModel || defaultModel || null }),
+      body: JSON.stringify({
+        model_name: selectedModel || defaultModel || null,
+        project_id: targetProjectId || null,
+      }),
     });
     if (!res.ok) return null;
     const session: Session = await res.json();
     setSessions((prev) => [session, ...prev]);
     setSelectedModel(session.model_name);
+    setDraftProjectId(null);
     skipSessionLoadRef.current = session.id;
     window.history.pushState(null, "", `/ai/${encodeURIComponent(session.id)}`);
     return session;
   }
 
+  const handleNewChatInProject = (project: Project) => {
+    if (isLoading) return;
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      next.delete(project.id);
+      return next;
+    });
+    setDraftProjectId(project.id);
+    setMessages([]);
+    setInput("");
+    setSelectedModel(defaultModel);
+    window.history.pushState(null, "", "/ai");
+  };
+
   function handleNewChat() {
     if (isLoading) return;
     setMessages([]);
     setInput("");
+    setDraftProjectId(null);
     setSelectedModel(defaultModel);
     window.history.pushState(null, "", "/ai");
   }
@@ -1080,10 +1110,11 @@ export default function AiPage() {
     const sid = sessionId ?? routeSessionId;
     if ((!userMsg && currentImages.length === 0) || !sid) return;
 
-    const displayQuestion = userMsg || (currentImages.length > 0 ? "[Attached Image]" : "");
+    if (inFlightStreamsRef.current.has(sid)) return;
 
+    const displayQuestion = userMsg || (currentImages.length > 0 ? "[Attached Image]" : "");
     const baseHistory = overrideHistory ?? messages;
-    // Optimistic sidebar update — title and timestamp update immediately on send
+
     setSessions((prev) =>
       prev.map((s) =>
         s.id === sid
@@ -1091,14 +1122,26 @@ export default function AiPage() {
           : s
       )
     );
-    isStreamingRef.current = true;
-    setMessages((prev) => [
-      ...(overrideHistory ?? prev),
-      { role: "user", content: userMsg, images: currentImages.length > 0 ? currentImages : undefined, createdAt: new Date().toISOString() },
-    ]);
+
+    const userMsgObj: Message = {
+      role: "user",
+      content: userMsg,
+      images: currentImages.length > 0 ? currentImages : undefined,
+      createdAt: new Date().toISOString(),
+    };
+    const initialAiMsg: Message = { role: "ai", content: "" };
+    const initialStreamMsgs = [...baseHistory, userMsgObj, initialAiMsg];
+
+    inFlightStreamsRef.current.set(sid, initialStreamMsgs);
+    setStreamingSessionIds((prev) => new Set(prev).add(sid));
+
+    if (routeSessionIdRef.current === sid) {
+      setMessages(initialStreamMsgs);
+    }
     setInput("");
     setPendingImages([]);
-    setIsLoading(true);
+
+    let streamText = "";
 
     try {
       const res = await fetch(`${API_BASE}/api/ai/sessions/${sid}/ask/stream`, {
@@ -1116,23 +1159,21 @@ export default function AiPage() {
       });
 
       if (!res.ok) {
-        setMessages((prev) => [...prev, { role: "ai", content: "Error communicating with AI backend.", createdAt: new Date().toISOString() }]);
-        isStreamingRef.current = false;
-        setIsLoading(false);
+        const errorMsgs: Message[] = [...initialStreamMsgs.slice(0, -1), { role: "ai", content: "Error communicating with AI backend.", createdAt: new Date().toISOString() }];
+        inFlightStreamsRef.current.set(sid, errorMsgs);
+        if (routeSessionIdRef.current === sid) setMessages(errorMsgs);
         return;
       }
 
       const reader = res.body?.getReader();
       if (!reader) {
-        setMessages((prev) => [...prev, { role: "ai", content: "No readable response body.", createdAt: new Date().toISOString() }]);
-        isStreamingRef.current = false;
-        setIsLoading(false);
+        const errorMsgs: Message[] = [...initialStreamMsgs.slice(0, -1), { role: "ai", content: "No readable response body.", createdAt: new Date().toISOString() }];
+        inFlightStreamsRef.current.set(sid, errorMsgs);
+        if (routeSessionIdRef.current === sid) setMessages(errorMsgs);
         return;
       }
 
       const decoder = new TextDecoder();
-      setMessages((prev) => [...prev, { role: "ai", content: "" }]);
-      aiResponseRef.current = "";
       let buffer = "";
 
       while (true) {
@@ -1148,23 +1189,32 @@ export default function AiPage() {
               try {
                 const parsed = JSON.parse(line.substring(6));
                 if (parsed.text) {
-                  aiResponseRef.current += parsed.text;
-                  const snapshot = aiResponseRef.current;
-                  setMessages((prev) => {
-                    const updated = [...prev];
-                    if (updated.length > 0) {
-                      updated[updated.length - 1] = { ...updated[updated.length - 1], content: snapshot };
+                  streamText += parsed.text;
+                  const snapshotText = streamText;
+                  const streamMsgs = inFlightStreamsRef.current.get(sid);
+                  if (streamMsgs && streamMsgs.length > 0) {
+                    const updated = [...streamMsgs];
+                    updated[updated.length - 1] = { ...updated[updated.length - 1], content: snapshotText };
+                    inFlightStreamsRef.current.set(sid, updated);
+                    if (routeSessionIdRef.current === sid) {
+                      setMessages(updated);
                     }
-                    return updated;
-                  });
+                  }
                 }
                 if (parsed.tool) {
-                  setMessages((prev) => {
-                    const updated = [...prev];
-                    const last = updated.at(-1);
-                    if (last?.role === "ai") last.tools = [...(last.tools ?? []), parsed.tool];
-                    return updated;
-                  });
+                  const streamMsgs = inFlightStreamsRef.current.get(sid);
+                  if (streamMsgs && streamMsgs.length > 0) {
+                    const updated = [...streamMsgs];
+                    const last = { ...updated[updated.length - 1] };
+                    if (last.role === "ai") {
+                      last.tools = [...(last.tools ?? []), parsed.tool];
+                      updated[updated.length - 1] = last;
+                      inFlightStreamsRef.current.set(sid, updated);
+                      if (routeSessionIdRef.current === sid) {
+                        setMessages(updated);
+                      }
+                    }
+                  }
                 }
               } catch { /* incomplete chunk */ }
             }
@@ -1172,18 +1222,27 @@ export default function AiPage() {
           boundary = buffer.indexOf("\n\n");
         }
       }
-      setMessages((prev) => {
-        const updated = [...prev];
+
+      const streamMsgs = inFlightStreamsRef.current.get(sid);
+      if (streamMsgs && streamMsgs.length > 0) {
+        const updated = [...streamMsgs];
         const last = updated.at(-1);
         if (last?.role === "ai") updated[updated.length - 1] = { ...last, createdAt: new Date().toISOString() };
-        return updated;
-      });
-
+        inFlightStreamsRef.current.set(sid, updated);
+        if (routeSessionIdRef.current === sid) setMessages(updated);
+      }
     } catch {
-      setMessages((prev) => [...prev, { role: "ai", content: "Failed to connect to AI coach.", createdAt: new Date().toISOString() }]);
+      const errorMsgs: Message[] = [...initialStreamMsgs.slice(0, -1), { role: "ai", content: "Failed to connect to AI coach.", createdAt: new Date().toISOString() }];
+      inFlightStreamsRef.current.set(sid, errorMsgs);
+      if (routeSessionIdRef.current === sid) setMessages(errorMsgs);
+    } finally {
+      inFlightStreamsRef.current.delete(sid);
+      setStreamingSessionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(sid);
+        return next;
+      });
     }
-    isStreamingRef.current = false;
-    setIsLoading(false);
   }
 
   async function handleRetry() {
@@ -1525,10 +1584,8 @@ export default function AiPage() {
         onDragStart={(event) => handleSessionDragStart(event, s.id)}
         onDragEnd={handleSessionDragEnd}
         onClick={() => {
-          if (!isLoading) {
-            setSelectedModel(s.model_name);
-            window.history.pushState(null, "", `/ai/${encodeURIComponent(s.id)}`);
-          }
+          setSelectedModel(s.model_name);
+          window.history.pushState(null, "", `/ai/${encodeURIComponent(s.id)}`);
         }}
         onMouseEnter={() => setHoveredSessionId(s.id)}
         onMouseLeave={() => setHoveredSessionId(null)}
@@ -1575,6 +1632,7 @@ export default function AiPage() {
               </p>
               <p style={{ alignItems: "center", display: "flex", fontSize: "10px", gap: "6px", color: "var(--color-text-muted)", margin: "2px 0 0", lineHeight: 1 }}>
                 {relativeTime(s.updated_at)}
+                {streamingSessionIds.has(s.id) && <span className="ai-session-pinned-label" style={{ color: "var(--color-accent-primary)" }}>Thinking...</span>}
                 {s.is_pinned && <span className="ai-session-pinned-label">Pinned</span>}
               </p>
             </>
@@ -1696,6 +1754,16 @@ export default function AiPage() {
               <span aria-hidden="true">⋮</span>
             </summary>
             <div className="ai-session-menu-popover" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                  handleNewChatInProject(p);
+                }}
+              >
+                New Chat
+              </button>
               <button
                 type="button"
                 role="menuitem"
@@ -1910,7 +1978,8 @@ export default function AiPage() {
                           );
                         }
                         const { thinking, answer, isThinkingActive: hasOpenThinking } = parseThinkingAndAnswer(msg.content);
-                        const isAwaitingAnswer = isLoading && idx === messages.length - 1 && !answer;
+                        const isCurrentSessionStreaming = routeSessionId ? streamingSessionIds.has(routeSessionId) : false;
+                        const isAwaitingAnswer = isCurrentSessionStreaming && idx === messages.length - 1 && !answer;
                         const displayAnswer = removeLegacyEvidenceUsed(answer);
                         const tools = msg.tools ? uniqueToolCalls(msg.tools) : [];
                         return (
@@ -1919,7 +1988,7 @@ export default function AiPage() {
                               {thinking && (
                                 <ThinkingAccordion thinking={thinking} isThinkingActive={hasOpenThinking || isAwaitingAnswer} />
                               )}
-                              {msg.content === "" && isLoading ? (
+                              {msg.content === "" && isCurrentSessionStreaming ? (
                                 <WaveThinkingText text="thinking" />
                               ) : displayAnswer ? (
                                 <div className="markdown-body">
