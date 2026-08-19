@@ -5,10 +5,13 @@ import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { WaveThinkingText } from "@/components/WaveThinkingText";
 import AIModelIcon from "@/components/AIModelIcon";
+import { SPORT_ICON_URLS, SportIcon } from "@/components/SportActivityIcon";
 import { removeLegacyEvidenceUsed } from "./answer-display";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -36,12 +39,90 @@ function capitalizeFirstLetter(str: string): string {
   return trimmed ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1) : "";
 }
 
+type WebSource = {
+  title: string;
+  url: string;
+  snippet?: string;
+};
+
 type ToolCall = {
   name: string;
   arguments: Record<string, unknown>;
   display_arguments?: Record<string, unknown>;
-  display_result?: { knowledge?: string[] };
+  display_result?: {
+    knowledge?: string[];
+    sources?: WebSource[];
+  };
 };
+
+function getDomainFromUrl(urlStr: string): string {
+  try {
+    return new URL(urlStr).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function stripHtmlTags(str: string): string {
+  if (!str) return "";
+  return str.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+}
+
+function FaviconImage({ url }: { url: string }) {
+  const domain = getDomainFromUrl(url);
+  const [hasError, setHasError] = useState(false);
+  const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=32` : null;
+
+  if (!faviconUrl || hasError) {
+    return (
+      <svg className="ai-source-favicon-fallback" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    );
+  }
+
+  return (
+    <img
+      src={faviconUrl}
+      alt=""
+      className="ai-source-favicon"
+      onError={() => setHasError(true)}
+      loading="lazy"
+    />
+  );
+}
+
+function ExternalLinkIcon() {
+  return (
+    <svg className="ai-source-external-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      <polyline points="15 3 21 3 21 9" />
+      <line x1="10" y1="14" x2="21" y2="3" />
+    </svg>
+  );
+}
+
+function InlineCitationLink({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  if (!href || (!href.startsWith("http://") && !href.startsWith("https://"))) {
+    return <a href={href} {...props}>{children}</a>;
+  }
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-citation-link"
+      {...props}
+    >
+      <FaviconImage url={href} />
+      <span>{children}</span>
+      <ExternalLinkIcon />
+    </a>
+  );
+}
 
 function normalizeToolCall(tool: ToolCall | string): ToolCall {
   return typeof tool === "string" ? { name: tool, arguments: {} } : tool;
@@ -182,6 +263,145 @@ function PlusIcon() {
       <line x1="12" y1="5" x2="12" y2="19" />
       <line x1="5" y1="12" x2="19" y2="12" />
     </svg>
+  );
+}
+
+function PaperclipIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57a4 4 0 1 1 5.66 5.66l-8.59 8.58a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </svg>
+  );
+}
+
+function GlobeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+      <path d="M2 12h20" />
+    </svg>
+  );
+}
+
+type SearchMode = "none" | "web" | "deep";
+
+function MicroscopeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 18h8" />
+      <path d="M3 22h18" />
+      <path d="M14 22a7 7 0 1 0-14 0" />
+      <path d="M9 14h2" />
+      <path d="M9 12a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2" />
+      <path d="M12 2v2" />
+    </svg>
+  );
+}
+
+function AttachmentPopover({
+  isOpen,
+  onClose,
+  onAddPhotos,
+  searchMode,
+  onSelectSearchMode,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onAddPhotos: () => void;
+  searchMode: SearchMode;
+  onSelectSearchMode: (mode: SearchMode) => void;
+}) {
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="ai-attachment-popover" ref={popoverRef} role="menu" aria-label="Attachment options">
+      <button
+        type="button"
+        className="ai-attachment-option"
+        role="menuitem"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onAddPhotos();
+          onClose();
+        }}
+      >
+        <span className="ai-attachment-icon"><PaperclipIcon /></span>
+        <div className="ai-attachment-info">
+          <div className="ai-attachment-title">Add photos & files</div>
+          <div className="ai-attachment-subtitle">Upload from computer</div>
+        </div>
+      </button>
+
+      <button
+        type="button"
+        className={`ai-attachment-option${searchMode === "web" ? " is-active" : ""}`}
+        role="menuitem"
+        onClick={() => {
+          onSelectSearchMode(searchMode === "web" ? "none" : "web");
+          onClose();
+        }}
+      >
+        <span
+          className="ai-attachment-icon"
+          style={searchMode === "web" ? { color: "var(--color-accent-primary)", background: "rgba(33, 230, 165, 0.16)" } : undefined}
+        >
+          <GlobeIcon />
+        </span>
+        <div className="ai-attachment-info">
+          <div className="ai-attachment-title">
+            Web search
+            {searchMode === "web" && <span className="ai-attachment-badge">Active</span>}
+          </div>
+          <div className="ai-attachment-subtitle">Find real-time news and info</div>
+        </div>
+      </button>
+
+      <button
+        type="button"
+        className={`ai-attachment-option${searchMode === "deep" ? " is-active" : ""}`}
+        role="menuitem"
+        onClick={() => {
+          onSelectSearchMode(searchMode === "deep" ? "none" : "deep");
+          onClose();
+        }}
+      >
+        <span
+          className="ai-attachment-icon"
+          style={searchMode === "deep" ? { color: "#c084fc", background: "rgba(168, 85, 247, 0.16)" } : undefined}
+        >
+          <MicroscopeIcon />
+        </span>
+        <div className="ai-attachment-info">
+          <div className="ai-attachment-title">
+            Deep research
+            {searchMode === "deep" && <span className="ai-attachment-badge is-deep">Active</span>}
+          </div>
+          <div className="ai-attachment-subtitle">Multi-step iterative scientific research</div>
+        </div>
+      </button>
+    </div>
   );
 }
 
@@ -327,7 +547,7 @@ function ThinkingAccordion({ thinking, isThinkingActive }: { thinking: string; i
         <ChevronIcon isOpen={isOpen} />
       </summary>
       <div className="ai-thinking-accordion-content">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{thinking}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{thinking}</ReactMarkdown>
       </div>
     </details>
   );
@@ -346,7 +566,25 @@ type Session = {
 type Project = {
   id: string;
   name: string;
+  icon: string | null;
+  highlight_color: string | null;
 };
+
+const PROJECT_ICON_OPTIONS = Object.entries(SPORT_ICON_URLS)
+  .filter(([, url], index, entries) =>
+    entries.findIndex(([, candidateUrl]) => candidateUrl === url) === index
+  )
+  .map(([icon]) => icon);
+const PROJECT_COLOR_OPTIONS = [
+  { value: "#21E6A5", label: "Mint" },
+  { value: "#2D9BF0", label: "Blue" },
+  { value: "#F0D348", label: "Yellow" },
+  { value: "#FF4D62", label: "Coral" },
+  { value: "#9364F0", label: "Violet" },
+  { value: "#F08C3C", label: "Orange" },
+  { value: "#E06CBA", label: "Pink" },
+  { value: "#A5AFB4", label: "Silver" },
+];
 
 type ProviderGroup = {
   id: string;
@@ -589,6 +827,11 @@ type DBMessage = {
   created_at: string;
 };
 
+type DeleteExchangeResponse = {
+  session_deleted: boolean;
+  title: string | null;
+};
+
 function formatMessageTimestamp(value: string): string {
   return new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Bangkok",
@@ -667,6 +910,7 @@ function relativeTime(iso: string): string {
 }
 
 export default function AiPage() {
+  const router = useRouter();
   const pathname = usePathname();
   const routeSessionId = pathname.startsWith("/ai/")
     ? decodeURIComponent(pathname.slice(4).split("/", 1)[0])
@@ -688,11 +932,15 @@ export default function AiPage() {
     preview: string;
   } | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
   const [sessionDropTarget, setSessionDropTarget] = useState<string | "chats" | null>(null);
-  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
-  const [renamingProjectName, setRenamingProjectName] = useState("");
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState("");
+  const [editingProjectIcon, setEditingProjectIcon] = useState<string | null>(null);
+  const [editingProjectColor, setEditingProjectColor] = useState<string | null>(null);
+  const [projectEditError, setProjectEditError] = useState("");
+  const [projectEditSaving, setProjectEditSaving] = useState(false);
   const [projectPendingDelete, setProjectPendingDelete] = useState<Project | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
@@ -704,19 +952,42 @@ export default function AiPage() {
   const [selectedModel, setSelectedModel] = useState("");
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
+  const [activeAttachmentMenu, setActiveAttachmentMenu] = useState<"landing" | "chat" | null>(null);
+  const [searchMode, setSearchMode] = useState<SearchMode>("none");
   const [nickname, setNickname] = useState<string>("");
   const [expandedPillGroup, setExpandedPillGroup] = useState<string | null>(null);
   const [draftProjectId, setDraftProjectId] = useState<string | null>(null);
+  const [activeToolTooltip, setActiveToolTooltip] = useState<string | null>(null);
   const inFlightStreamsRef = useRef<Map<string, Message[]>>(new Map());
   const [streamingSessionIds, setStreamingSessionIds] = useState<Set<string>>(new Set());
   const routeSessionIdRef = useRef<string | null>(routeSessionId);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const projectEditDialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     routeSessionIdRef.current = routeSessionId;
   }, [routeSessionId]);
+
+  useEffect(() => {
+    if (!activeToolTooltip) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest(".ai-tool-chip")) {
+        setActiveToolTooltip(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setActiveToolTooltip(null);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeToolTooltip]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -807,6 +1078,13 @@ export default function AiPage() {
     if (!pending && dialog.open) dialog.close();
   }, [sessionPendingDelete, projectPendingDelete, messagePendingAction]);
 
+  useEffect(() => {
+    const dialog = projectEditDialogRef.current;
+    if (!dialog) return;
+    if (editingProject && !dialog.open) dialog.showModal();
+    if (!editingProject && dialog.open) dialog.close();
+  }, [editingProject]);
+
   const fetchSessions = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/ai/sessions`);
@@ -821,7 +1099,13 @@ export default function AiPage() {
         const routeSession = routeSessionId
           ? data.find((session) => session.id === routeSessionId)
           : null;
-        if (routeSession) setSelectedModel(routeSession.model_name);
+        if (routeSession) {
+          setSelectedModel(routeSession.model_name);
+          if (routeSession.project_id) {
+            const pid = routeSession.project_id;
+            setExpandedProjects((prev) => prev.has(pid) ? prev : new Set(prev).add(pid));
+          }
+        }
       }
     } finally {
       setSessionsLoading(false);
@@ -864,14 +1148,17 @@ export default function AiPage() {
   useEffect(() => {
     const controller = new AbortController();
     (async () => {
-      if (routeSessionId && skipSessionLoadRef.current === routeSessionId) {
-        skipSessionLoadRef.current = null;
+      if (!routeSessionId && inFlightStreamsRef.current.size > 0) {
         setMessagesLoading(false);
         return;
       }
       if (routeSessionId && inFlightStreamsRef.current.has(routeSessionId)) {
         const streamMsgs = inFlightStreamsRef.current.get(routeSessionId)!;
         setMessages(streamMsgs);
+        setMessagesLoading(false);
+        return;
+      }
+      if (routeSessionId && (skipSessionLoadRef.current === routeSessionId || streamingSessionIds.has(routeSessionId))) {
         setMessagesLoading(false);
         return;
       }
@@ -903,7 +1190,7 @@ export default function AiPage() {
       }
     })();
     return () => controller.abort();
-  }, [routeSessionId]);
+  }, [routeSessionId, streamingSessionIds]);
 
 
   async function createRealSession(projectIdOverride?: string | null): Promise<Session | null> {
@@ -922,22 +1209,18 @@ export default function AiPage() {
     setSelectedModel(session.model_name);
     setDraftProjectId(null);
     skipSessionLoadRef.current = session.id;
-    window.history.pushState(null, "", `/ai/${encodeURIComponent(session.id)}`);
+    routeSessionIdRef.current = session.id;
     return session;
   }
 
   const handleNewChatInProject = (project: Project) => {
     if (isLoading) return;
-    setCollapsedProjects((prev) => {
-      const next = new Set(prev);
-      next.delete(project.id);
-      return next;
-    });
+    setExpandedProjects((prev) => new Set(prev).add(project.id));
     setDraftProjectId(project.id);
     setMessages([]);
     setInput("");
     setSelectedModel(defaultModel);
-    window.history.pushState(null, "", "/ai");
+    router.push("/ai");
   };
 
   function handleNewChat() {
@@ -946,7 +1229,7 @@ export default function AiPage() {
     setInput("");
     setDraftProjectId(null);
     setSelectedModel(defaultModel);
-    window.history.pushState(null, "", "/ai");
+    router.push("/ai");
   }
 
   const handleDeleteSession = async (id: string) => {
@@ -956,7 +1239,7 @@ export default function AiPage() {
       if (routeSessionId === id) {
         setMessages([]);
         setSelectedModel(defaultModel);
-        window.history.replaceState(null, "", "/ai");
+        router.replace("/ai");
       }
       fetchSessions();
     } catch (err) {
@@ -1032,11 +1315,7 @@ export default function AiPage() {
       item.id === sessionId ? { ...item, project_id: targetProjectId } : item
     )));
     if (targetProject) {
-      setCollapsedProjects((current) => {
-        const next = new Set(current);
-        next.delete(targetProject.id);
-        return next;
-      });
+      setExpandedProjects((current) => new Set(current).add(targetProject.id));
     }
 
     const moved = await handleUpdateSession(sessionId, {
@@ -1075,19 +1354,40 @@ export default function AiPage() {
     }
   };
 
-  const handleRenameProject = async (id: string, name: string) => {
-    setRenamingProjectId(null);
-    if (!name.trim()) return;
+  const handleEditProject = async () => {
+    if (!editingProject || !editingProjectName.trim() || projectEditSaving) return;
+    setProjectEditSaving(true);
+    setProjectEditError("");
     try {
-      const res = await fetch(`${API_BASE}/api/ai/projects/${id}`, {
+      const res = await fetch(`${API_BASE}/api/ai/projects/${editingProject.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name: editingProjectName,
+          icon: editingProjectIcon,
+          highlight_color: editingProjectColor,
+        }),
       });
-      if (res.ok) fetchProjects();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.detail || `Unable to update project (HTTP ${res.status}).`);
+      }
+      const updated: Project = await res.json();
+      setProjects((current) => current.map((project) => project.id === updated.id ? updated : project));
+      setEditingProject(null);
     } catch (err) {
-      console.error("Failed to rename project", err);
+      setProjectEditError(err instanceof Error ? err.message : "Unable to update project.");
+    } finally {
+      setProjectEditSaving(false);
     }
+  };
+
+  const openProjectEditor = (project: Project) => {
+    setEditingProject(project);
+    setEditingProjectName(project.name);
+    setEditingProjectIcon(project.icon);
+    setEditingProjectColor(project.highlight_color);
+    setProjectEditError("");
   };
 
   const handleDeleteProject = async (id: string) => {
@@ -1129,6 +1429,7 @@ export default function AiPage() {
     if ((!userMsg && currentImages.length === 0) || !sid) return;
 
     if (inFlightStreamsRef.current.has(sid)) return;
+    setIsLoading(true);
 
     const displayQuestion = userMsg || (currentImages.length > 0 ? "[Attached Image]" : "");
     const baseHistory = overrideHistory ?? messages;
@@ -1156,9 +1457,8 @@ export default function AiPage() {
     inFlightStreamsRef.current.set(sid, initialStreamMsgs);
     setStreamingSessionIds((prev) => new Set(prev).add(sid));
 
-    if (routeSessionIdRef.current === sid) {
-      setMessages(initialStreamMsgs);
-    }
+    routeSessionIdRef.current = sid;
+    setMessages(initialStreamMsgs);
     setInput("");
     setPendingImages([]);
 
@@ -1172,6 +1472,8 @@ export default function AiPage() {
           question: userMsg || "Please analyze the attached image.",
           context_days: 14,
           images: currentImages,
+          force_web_search: searchMode === "web" || searchMode === "deep",
+          is_deep_research: searchMode === "deep",
           history: baseHistory.slice(-12).map((m) => ({
             role: m.role === "ai" ? "assistant" : "user",
             content: m.content,
@@ -1259,12 +1561,32 @@ export default function AiPage() {
       inFlightStreamsRef.current.set(sid, errorMsgs);
       if (routeSessionIdRef.current === sid) setMessages(errorMsgs);
     } finally {
+      setIsLoading(false);
       inFlightStreamsRef.current.delete(sid);
       setStreamingSessionIds((prev) => {
         const next = new Set(prev);
         next.delete(sid);
         return next;
       });
+      skipSessionLoadRef.current = null;
+      try {
+        const res = await fetch(`${API_BASE}/api/ai/sessions/${sid}/messages`);
+        if (res.ok) {
+          const dbMsgs: DBMessage[] = await res.json();
+          if (dbMsgs.length > 0 && routeSessionIdRef.current === sid) {
+            setMessages(dbMsgs.map((m) => ({
+              id: m.id,
+              role: m.role === "assistant" ? "ai" : "user",
+              content: m.content,
+              images: m.images,
+              tools: m.tool_calls,
+              createdAt: m.created_at,
+            })));
+          }
+        }
+      } catch {
+        /* fallback to local messages */
+      }
     }
   }
 
@@ -1287,9 +1609,21 @@ export default function AiPage() {
         { method: "DELETE" },
       );
       if (!response.ok) return;
+      const result: DeleteExchangeResponse = await response.json();
+      if (result.session_deleted) {
+        setSessions((current) => current.filter((session) => session.id !== routeSessionId));
+        setMessages([]);
+        router.replace("/ai");
+        return;
+      }
       const next = messages.filter((_, index) => index !== messageIndex && index !== messageIndex + 1);
       setMessages(next);
-      void fetchSessions();
+      const title = result.title;
+      if (title) {
+        setSessions((current) => current.map((session) =>
+          session.id === routeSessionId ? { ...session, title } : session
+        ));
+      }
       return;
     }
 
@@ -1312,18 +1646,30 @@ export default function AiPage() {
     await handleSend("Generate a weekly briefing", sid);
   }
 
+  async function handleLandingSend(message: string, sessionId: string) {
+    const sendPromise = handleSend(message, sessionId);
+    window.history.pushState(null, "", `/ai/${encodeURIComponent(sessionId)}`);
+    await sendPromise;
+  }
+
   async function handleChipClick(chip: SuggestedPrompt) {
     if (isLoading) return;
-    let sid = routeSessionId;
-    if (!sid) {
-      const s = await createRealSession();
-      if (!s) return;
-      sid = s.id;
-    }
-    if (chip.action === "briefing") {
-      generateBriefing(sid);
-    } else {
-      handleSend(chip.prompt, sid);
+    try {
+      let sid = routeSessionId;
+      if (!sid) {
+        const s = await createRealSession();
+        if (!s) throw new Error("Unable to create an AI Coach session.");
+        sid = s.id;
+      }
+      if (chip.action === "briefing") {
+        if (routeSessionId) await generateBriefing(sid);
+        else await handleLandingSend("Generate a weekly briefing", sid);
+      } else {
+        if (routeSessionId) await handleSend(chip.prompt, sid);
+        else await handleLandingSend(chip.prompt, sid);
+      }
+    } catch (error) {
+      console.error("Failed to send AI Coach prompt", error);
     }
   }
 
@@ -1376,6 +1722,14 @@ export default function AiPage() {
 
     return (
       <div className="ai-link-empty-prompt">
+        <div className="ai-landing-pulse-backdrop" aria-hidden="true">
+          <div className="ai-pulse-orb ai-pulse-orb-1" />
+          <div className="ai-pulse-orb ai-pulse-orb-2" />
+          <svg className="ai-pulse-ecg-wave" viewBox="0 0 1200 120" preserveAspectRatio="none">
+            <path d="M0,60 L400,60 L410,60 L420,40 L430,80 L440,20 L450,100 L460,50 L470,70 L480,60 L1200,60" />
+          </svg>
+        </div>
+
         <div className="ai-link-empty-intro">
           <h1><GreetingIcon />{getGreeting()}{nickname ? `, ${nickname}` : ""}</h1>
         </div>
@@ -1383,16 +1737,21 @@ export default function AiPage() {
         <div className="ai-link-empty-composer">
           <label className="sr-only" htmlFor={inputId}>Ask AI Coach</label>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            style={{ display: "none" }}
-            onChange={handleImageFileSelect}
-          />
-
           <div className="cmd-bar-wrap">
+            {searchMode !== "none" && (
+              <div className={`web-search-active-chip${searchMode === "deep" ? " is-deep-research" : ""}`}>
+                {searchMode === "deep" ? <MicroscopeIcon /> : <GlobeIcon />}
+                <span>{searchMode === "deep" ? "Deep research" : "Web search"}</span>
+                <button
+                  type="button"
+                  onClick={() => setSearchMode("none")}
+                  title={`Turn off ${searchMode === "deep" ? "deep research" : "web search"}`}
+                  aria-label={`Turn off ${searchMode === "deep" ? "deep research" : "web search"}`}
+                >
+                  <XIcon />
+                </button>
+              </div>
+            )}
             {pendingImages.length > 0 && (
               <div className="staged-images-bar">
                 {pendingImages.map((img, idx) => (
@@ -1419,13 +1778,20 @@ export default function AiPage() {
             <button
               type="button"
               className="cmd-bar-attach-btn"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => setActiveAttachmentMenu((prev) => prev === "landing" ? null : "landing")}
               disabled={isLoading}
-              aria-label="Attach image"
-              title="Attach image or paste from clipboard"
+              aria-label="Add attachment or action"
+              title="Add photos or toggle web search"
             >
               <PlusIcon />
             </button>
+            <AttachmentPopover
+              isOpen={activeAttachmentMenu === "landing"}
+              onClose={() => setActiveAttachmentMenu(null)}
+              onAddPhotos={() => fileInputRef.current?.click()}
+              searchMode={searchMode}
+              onSelectSearchMode={setSearchMode}
+            />
             <textarea
               id={inputId}
               className="cmd-bar"
@@ -1442,9 +1808,9 @@ export default function AiPage() {
                   const msg = input.trim();
                   if (!sessionId) {
                     const s = await createRealSession();
-                    if (s) handleSend(msg, s.id);
+                    if (s) await handleLandingSend(msg, s.id);
                   } else {
-                    handleSend(msg, sessionId);
+                    await handleSend(msg, sessionId);
                   }
                 }
               }}
@@ -1473,9 +1839,9 @@ export default function AiPage() {
                   const msg = input.trim();
                   if (!sessionId) {
                     const s = await createRealSession();
-                    if (s) handleSend(msg, s.id);
+                    if (s) await handleLandingSend(msg, s.id);
                   } else {
-                    handleSend(msg, sessionId);
+                    await handleSend(msg, sessionId);
                   }
                 }}
                 disabled={isLoading || (!input.trim() && pendingImages.length === 0)}
@@ -1531,6 +1897,7 @@ export default function AiPage() {
                 {pillGroups.map((group) => (
                   <li key={group.key}>
                     <button
+                      type="button"
                       className={`prompt-pill${expandedPillGroup === group.key ? " is-active" : ""}`}
                       onClick={() => setExpandedPillGroup(expandedPillGroup === group.key ? null : group.key)}
                       disabled={isLoading}
@@ -1549,6 +1916,7 @@ export default function AiPage() {
                     {active.items.map((item) => (
                       <li key={item.label}>
                         <button
+                          type="button"
                           className="prompt-pill prompt-pill--sub"
                           onClick={() => handleChipClick(item)}
                           disabled={isLoading}
@@ -1638,7 +2006,7 @@ export default function AiPage() {
         onDragEnd={handleSessionDragEnd}
         onClick={() => {
           setSelectedModel(s.model_name);
-          window.history.pushState(null, "", `/ai/${encodeURIComponent(s.id)}`);
+          router.push(`/ai/${encodeURIComponent(s.id)}`);
         }}
         onMouseEnter={() => setHoveredSessionId(s.id)}
         onMouseLeave={() => setHoveredSessionId(null)}
@@ -1757,32 +2125,29 @@ export default function AiPage() {
         onDrop={(event) => void handleSessionDrop(event, p.id)}
       >
         <details
-          open={!collapsedProjects.has(p.id)}
+          open={expandedProjects.has(p.id)}
           onToggle={(event) => {
             const isOpen = event.currentTarget.open;
-            setCollapsedProjects((prev) => {
+            setExpandedProjects((prev) => {
               const next = new Set(prev);
-              if (isOpen) next.delete(p.id);
-              else next.add(p.id);
+              if (isOpen) next.add(p.id);
+              else next.delete(p.id);
               return next;
             });
           }}
         >
-          <summary className={`ai-session-group-summary${renamingProjectId === p.id ? " is-renaming" : ""}`}>
-            <FolderIcon />
-            {renamingProjectId === p.id ? (
-              renderInlineInput({
-                value: renamingProjectName,
-                onChange: setRenamingProjectName,
-                onSave: () => handleRenameProject(p.id, renamingProjectName),
-                onCancel: () => setRenamingProjectId(null),
-              })
-            ) : (
-              <>
-                <span className="ai-session-group-name">{p.name}</span>
-                <span className="ai-session-group-count">{grouped.length}</span>
-              </>
-            )}
+          <summary
+            className="ai-session-group-summary"
+            style={p.highlight_color ? {
+              backgroundColor: `${p.highlight_color}1f`,
+              color: p.highlight_color,
+            } : undefined}
+          >
+            {p.icon
+              ? <SportIcon sport={p.icon} size={13} color={p.highlight_color ?? undefined} />
+              : <FolderIcon />}
+            <span className="ai-session-group-name">{p.name}</span>
+            <span className="ai-session-group-count">{grouped.length}</span>
           </summary>
           <div className="ai-session-group-body">
             {grouped.length === 0 ? (
@@ -1792,17 +2157,16 @@ export default function AiPage() {
             )}
           </div>
         </details>
-        {renamingProjectId !== p.id && (
-          <details
-            className="ai-session-menu ai-session-group-menu"
-            name="ai-session-menu"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.currentTarget.removeAttribute("open");
-                event.currentTarget.querySelector("summary")?.focus();
-              }
-            }}
-          >
+        <details
+          className="ai-session-menu ai-session-group-menu"
+          name="ai-session-menu"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.currentTarget.removeAttribute("open");
+              event.currentTarget.querySelector("summary")?.focus();
+            }
+          }}
+        >
             <summary className="ai-session-menu-trigger" aria-label={`Actions for project ${p.name}`}>
               <span aria-hidden="true">⋮</span>
             </summary>
@@ -1821,12 +2185,11 @@ export default function AiPage() {
                 type="button"
                 role="menuitem"
                 onClick={(event) => {
-                  setRenamingProjectId(p.id);
-                  setRenamingProjectName(p.name);
+                  openProjectEditor(p);
                   event.currentTarget.closest("details")?.removeAttribute("open");
                 }}
               >
-                Rename
+                Edit
               </button>
               <button
                 type="button"
@@ -1840,8 +2203,7 @@ export default function AiPage() {
                 Delete
               </button>
             </div>
-          </details>
-        )}
+        </details>
       </div>
     );
   }
@@ -1853,6 +2215,14 @@ export default function AiPage() {
 
   return (
     <div className="ai-link-layout print-block">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        style={{ display: "none" }}
+        onChange={handleImageFileSelect}
+      />
       <Sidebar />
       <main className="ai-link-main print-block">
         <header className="page-header print-hide">
@@ -1973,7 +2343,7 @@ export default function AiPage() {
                   </button>
                 </div>
               </div>
-            ) : !routeSessionId ? (
+            ) : !routeSessionId && messages.length === 0 ? (
               <div className="ai-link-empty print-hide">
                 {renderEmptyPrompt()}
               </div>
@@ -1985,7 +2355,7 @@ export default function AiPage() {
             ) : isEmpty ? (
               /* Session created but no messages yet */
               <div className="ai-link-empty print-hide">
-                {renderEmptyPrompt(routeSessionId)}
+                {renderEmptyPrompt(routeSessionId ?? undefined)}
               </div>
 
               ) : (
@@ -2044,7 +2414,9 @@ export default function AiPage() {
                           );
                         }
                         const { thinking, answer, isThinkingActive: hasOpenThinking } = parseThinkingAndAnswer(msg.content);
-                        const isCurrentSessionStreaming = routeSessionId ? streamingSessionIds.has(routeSessionId) : false;
+                        const isCurrentSessionStreaming =
+                          (routeSessionId ? streamingSessionIds.has(routeSessionId) : false) ||
+                          (isLoading && idx === messages.length - 1);
                         const isAwaitingAnswer = isCurrentSessionStreaming && idx === messages.length - 1 && !answer;
                         const displayAnswer = removeLegacyEvidenceUsed(answer);
                         const tools = msg.tools ? uniqueToolCalls(msg.tools) : [];
@@ -2058,7 +2430,13 @@ export default function AiPage() {
                                 <WaveThinkingText text="thinking" />
                               ) : displayAnswer ? (
                                 <div className="markdown-body">
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayAnswer.replaceAll(" -- ", " — ")}</ReactMarkdown>
+                                  <ReactMarkdown 
+                                    remarkPlugins={[remarkGfm, remarkMath]} 
+                                    rehypePlugins={[rehypeKatex]}
+                                    components={{ a: InlineCitationLink }}
+                                  >
+                                    {displayAnswer.replaceAll(" -- ", " — ")}
+                                  </ReactMarkdown>
                                 </div>
                               ) : null}
                               {tools.length > 0 && (
@@ -2067,15 +2445,57 @@ export default function AiPage() {
                                     <SourcesIcon />
                                   </span>
                                   {tools.map((tool, toolIndex) => {
+                                    const sources = tool.display_result?.sources;
                                     const argumentsText = formatToolTooltip(tool);
+                                    const toolKey = `${msg.id}-${tool.name}-${toolIndex}`;
+                                    const isPinned = activeToolTooltip === toolKey;
                                     return (
                                       <span
                                         aria-label={argumentsText ? `${toolLabel(tool.name)}: ${argumentsText}` : toolLabel(tool.name)}
-                                        className="ai-tool-chip"
-                                        key={`${tool.name}-${toolIndex}`}
+                                        className={`ai-tool-chip${isPinned ? " is-pinned" : ""}`}
+                                        key={toolKey}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setActiveToolTooltip((prev) => (prev === toolKey ? null : toolKey));
+                                        }}
                                       >
                                         {toolLabel(tool.name)}
-                                        {argumentsText && <span className="ai-tool-tooltip" role="tooltip">{argumentsText}</span>}
+                                        <span className="ai-tool-tooltip" role="tooltip">
+                                          {tool.name === "web_search" && sources && sources.length > 0 ? (
+                                            <div className="ai-tool-tooltip-sources">
+                                              <div className="ai-tool-tooltip-query">
+                                                query: &quot;{String(tool.arguments.query ?? "")}&quot;
+                                              </div>
+                                              <div className="ai-tool-tooltip-links">
+                                                {sources.map((s, sIdx) => {
+                                                  const cleanTitle = stripHtmlTags(s.title);
+                                                  const cleanSnippet = stripHtmlTags(s.snippet ?? "");
+                                                  const domain = getDomainFromUrl(s.url);
+                                                  return (
+                                                    <a
+                                                      key={sIdx}
+                                                      href={s.url}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="ai-tool-source-link"
+                                                      onClick={(event) => event.stopPropagation()}
+                                                    >
+                                                      <div className="ai-tool-source-header">
+                                                        <FaviconImage url={s.url} />
+                                                        <span className="ai-tool-source-domain">{domain || s.url}</span>
+                                                        <ExternalLinkIcon />
+                                                      </div>
+                                                      <span className="ai-tool-source-title">{cleanTitle}</span>
+                                                      {cleanSnippet && <span className="ai-tool-source-snippet">{cleanSnippet}</span>}
+                                                    </a>
+                                                  );
+                                                })}
+                                              </div>
+                                            </div>
+                                          ) : (
+                                            argumentsText
+                                          )}
+                                        </span>
                                       </span>
                                     );
                                   })}
@@ -2120,6 +2540,20 @@ export default function AiPage() {
                   <div className="chat-input-bar ai-link-composer print-hide">
                     <div className="chat-input-bar-inner">
                       <div className="cmd-bar-wrap" style={{ maxWidth: "100%" }}>
+                        {searchMode !== "none" && (
+                          <div className={`web-search-active-chip${searchMode === "deep" ? " is-deep-research" : ""}`}>
+                            {searchMode === "deep" ? <MicroscopeIcon /> : <GlobeIcon />}
+                            <span>{searchMode === "deep" ? "Deep research" : "Web search"}</span>
+                            <button
+                              type="button"
+                              onClick={() => setSearchMode("none")}
+                              title={`Turn off ${searchMode === "deep" ? "deep research" : "web search"}`}
+                              aria-label={`Turn off ${searchMode === "deep" ? "deep research" : "web search"}`}
+                            >
+                              <XIcon />
+                            </button>
+                          </div>
+                        )}
                         {pendingImages.length > 0 && (
                           <div className="staged-images-bar">
                             {pendingImages.map((img, idx) => (
@@ -2146,13 +2580,20 @@ export default function AiPage() {
                         <button
                           type="button"
                           className="cmd-bar-attach-btn"
-                          onClick={() => fileInputRef.current?.click()}
+                          onClick={() => setActiveAttachmentMenu((prev) => prev === "chat" ? null : "chat")}
                           disabled={isLoading}
-                          aria-label="Attach image"
-                          title="Attach image or paste from clipboard"
+                          aria-label="Add attachment or action"
+                          title="Add photos or toggle web search"
                         >
                           <PlusIcon />
                         </button>
+                        <AttachmentPopover
+                          isOpen={activeAttachmentMenu === "chat"}
+                          onClose={() => setActiveAttachmentMenu(null)}
+                          onAddPhotos={() => fileInputRef.current?.click()}
+                          searchMode={searchMode}
+                          onSelectSearchMode={setSearchMode}
+                        />
                         <textarea
                           id="chat-input"
                           className="cmd-bar"
@@ -2209,6 +2650,85 @@ export default function AiPage() {
             </div>
           </div>
         </div>
+
+        {editingProject && (
+          <dialog
+            ref={projectEditDialogRef}
+            className="ai-project-edit-dialog"
+            onCancel={() => setEditingProject(null)}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) setEditingProject(null);
+            }}
+          >
+            <form
+              className="ai-project-edit-content"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleEditProject();
+              }}
+            >
+              <span className="ai-project-edit-label">Project settings</span>
+              <h2>Edit project</h2>
+              <label className="ai-project-edit-field">
+                <span>Project name</span>
+                <input
+                  autoFocus
+                  value={editingProjectName}
+                  maxLength={100}
+                  onChange={(event) => setEditingProjectName(event.target.value)}
+                  disabled={projectEditSaving}
+                />
+              </label>
+              <fieldset className="ai-project-edit-fieldset">
+                <legend>Activity icon</legend>
+                <div className="ai-project-icon-grid">
+                  {PROJECT_ICON_OPTIONS.map((icon) => (
+                    <button
+                      key={icon}
+                      type="button"
+                      className={`ai-project-icon-option${editingProjectIcon === icon ? " is-selected" : ""}`}
+                      aria-label={`Use ${icon.replaceAll("_", " ")} icon`}
+                      title={icon.replaceAll("_", " ")}
+                      aria-pressed={editingProjectIcon === icon}
+                      onClick={() => setEditingProjectIcon(editingProjectIcon === icon ? null : icon)}
+                      disabled={projectEditSaving}
+                    >
+                      <SportIcon sport={icon} size={24} />
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+              <fieldset className="ai-project-edit-fieldset">
+                <legend>Highlight color</legend>
+                <div className="ai-project-color-grid">
+                  {PROJECT_COLOR_OPTIONS.map((color) => (
+                    <button
+                      key={color.value}
+                      type="button"
+                      className={`ai-project-color-option${editingProjectColor === color.value ? " is-selected" : ""}`}
+                      aria-label={`Use ${color.label} highlight`}
+                      title={`${color.label} highlight`}
+                      aria-pressed={editingProjectColor === color.value}
+                      onClick={() => setEditingProjectColor(editingProjectColor === color.value ? null : color.value)}
+                      disabled={projectEditSaving}
+                    >
+                      <span style={{ backgroundColor: color.value }} />
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+              {projectEditError && <p className="ai-project-edit-error" role="alert">{projectEditError}</p>}
+              <div className="ai-delete-dialog-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setEditingProject(null)} disabled={projectEditSaving}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn ai-project-edit-save" disabled={projectEditSaving || !editingProjectName.trim()}>
+                  {projectEditSaving ? "Saving..." : "Save changes"}
+                </button>
+              </div>
+            </form>
+          </dialog>
+        )}
 
         <dialog
           ref={deleteDialogRef}

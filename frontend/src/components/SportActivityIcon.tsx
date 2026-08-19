@@ -20,6 +20,13 @@ export const SPORT_ICON_URLS: Record<string, string> = {
   multisport: "https://img.icons8.com/?size=100&id=aZCcxa9TqPy7&format=png&color=000000",
   yoga: "https://img.icons8.com/liquid-glass/96/yoga.png",
   badminton: "https://img.icons8.com/?size=100&id=t7ONehkDkZMA&format=png&color=000000",
+  soda_water: "https://img.icons8.com/?size=100&id=Os3yF0ZBwtqM&format=png&color=000000",
+  bread: "https://img.icons8.com/?size=100&id=QbLqQw5rbu3Z&format=png&color=000000",
+  pizza: "https://img.icons8.com/?size=100&id=KMXdsGZuiMYG&format=png&color=000000",
+  healthy_eating: "https://img.icons8.com/?size=100&id=ecrtdij6MFsP&format=png&color=000000",
+  books: "https://img.icons8.com/?size=100&id=KDo5KO8VxGM6&format=png&color=000000",
+  heart_pulse: "https://img.icons8.com/?size=100&id=YNKCJvNnz0rc&format=png&color=000000",
+  pill: "https://img.icons8.com/?size=100&id=mkiIotTcz5AR&format=png&color=000000",
   other: "https://img.icons8.com/liquid-glass/96/activity.png",
 };
 
@@ -40,6 +47,13 @@ const SPORT_VISUALS: Record<string, SportVisual> = {
   yoga: { label: "Yoga", background: "rgba(240, 150, 200, 0.14)", color: "#e06cba" },
   badminton: { label: "Badminton", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
   multisport: { label: "Multisport", background: "rgba(147, 100, 240, 0.14)", color: "#9364f0" },
+  soda_water: { label: "Soda Water", background: "rgba(45, 155, 240, 0.14)", color: "var(--color-accent-exertion)" },
+  bread: { label: "Bread", background: "rgba(240, 180, 72, 0.14)", color: "#f0b448" },
+  pizza: { label: "Pizza", background: "rgba(240, 100, 60, 0.14)", color: "#f0643c" },
+  healthy_eating: { label: "Healthy Eating", background: "rgba(33, 230, 165, 0.14)", color: "var(--color-accent-primary)" },
+  books: { label: "Books", background: "rgba(147, 100, 240, 0.14)", color: "#9364f0" },
+  heart_pulse: { label: "Heart Pulse", background: "rgba(255, 77, 98, 0.14)", color: "var(--color-status-critical)" },
+  pill: { label: "Pill", background: "rgba(240, 150, 200, 0.14)", color: "#e06cba" },
   other: { label: "Activity", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
 };
 
@@ -50,6 +64,9 @@ export function resolveSportKey(sport?: string, title?: string, subsport?: strin
   const s = (sport || "").toLowerCase();
   const t = (title || "").toLowerCase();
   const sub = (subsport || "").toString();
+
+  // Direct map hit
+  if (s && SPORT_ICON_URLS[s]) return s;
 
   // Keyword / Subsport detections
   if (t.includes("treadmill") || t.includes("indoor run") || sub === "101") return "treadmill";

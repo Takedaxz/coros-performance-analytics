@@ -131,6 +131,20 @@ def _append_tool_results(
                 knowledge = result.get("knowledge") if name == "search_coaching_knowledge" else None
                 if isinstance(knowledge, list) and all(isinstance(excerpt, str) for excerpt in knowledge):
                     record["display_result"] = {"knowledge": knowledge}
+                elif name == "web_search":
+                    sources = result.get("sources")
+                    if isinstance(sources, list):
+                        record["display_result"] = {
+                            "sources": [
+                                {
+                                    "title": str(item.get("title", "")),
+                                    "url": str(item.get("url", "")),
+                                    "snippet": str(item.get("snippet", "")),
+                                }
+                                for item in sources
+                                if isinstance(item, dict) and "title" in item and "url" in item
+                            ]
+                        }
                 status = "error" if "error" in result else "success"
             except Exception:
                 logger.exception("AI Coach tool failed", extra={"tool_name": name})

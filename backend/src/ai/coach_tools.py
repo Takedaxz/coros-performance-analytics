@@ -45,8 +45,8 @@ _SPORT_ALIASES: dict[str, SportType] = {
 class ToolCallRecord(TypedDict):
     name: str
     arguments: dict[str, Any]
-    display_arguments: NotRequired[dict[str, str | list[str]]]
-    display_result: NotRequired[dict[str, list[str]]]
+    display_arguments: NotRequired[dict[str, Any]]
+    display_result: NotRequired[dict[str, Any]]
 
 
 def coach_tool_functions(

@@ -525,6 +525,8 @@ class ChatProject(Base):
     )
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    icon: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    highlight_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_chat_projects_user_name"),)

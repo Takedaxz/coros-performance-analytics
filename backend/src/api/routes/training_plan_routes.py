@@ -348,12 +348,27 @@ def _schedule_description(entity: ScheduleObject, program: ScheduleObject | None
     else:
         distance = None
         load = None
+
     if not isinstance(distance, (int, float)) and program:
         distance = program.get("planDistance", program.get("distance"))
     if not isinstance(load, (int, float)) and program:
         load = program.get("planTrainingLoad", program.get("trainingLoad"))
+
+    if not isinstance(distance, (int, float)) and program and isinstance(program.get("exercises"), list):
+        total_dist_m = 0.0
+        for ex in program["exercises"]:
+            if isinstance(ex, dict) and ex.get("targetType") == 5:
+                tv = ex.get("targetValue")
+                if isinstance(tv, (int, float)) and tv > 0:
+                    tv_m = float(tv) / 100.0
+                    sets = ex.get("sets") if isinstance(ex.get("sets"), int) else 1
+                    total_dist_m += tv_m * sets
+        if total_dist_m > 0:
+            distance = total_dist_m
+
     if isinstance(distance, (int, float)) and distance > 0:
-        distance_km = f"{distance / 100_000:.2f}".rstrip("0").rstrip(".")
+        dist_m = distance / 100.0
+        distance_km = f"{dist_m / 1000.0:.2f}".rstrip("0").rstrip(".")
         parts.append(f"{distance_km} km")
     if isinstance(load, (int, float)) and load > 0:
         parts.append(f"Load {load:g}")
@@ -603,9 +618,14 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
                 status_code=422, detail="Strength and HYROX training steps need an exercise name."
             )
         target_type, display_unit = _TARGET_CONFIG[step.target]
-        if step.target in {"distance", "elevation_gain"}:
+        if step.target == "distance":
+            display_unit = 2 if draft.sport in {"swim", "hyrox", "strength"} or step.value < 1000 else 1
             target_value = round(step.value * 100)
-            distance = target_value if step.target == "distance" else 0
+            distance = target_value
+            duration = 0
+        elif step.target == "elevation_gain":
+            target_value = round(step.value)
+            distance = 0
             duration = 0
         elif step.target == "open":
             target_value = 0
@@ -919,7 +939,8 @@ def _draft_from_program(
             target_value = exercise.get("targetValue")
             value = float(target_value) if isinstance(target_value, (int, float)) else 600
             if target in {"distance", "elevation_gain"}:
-                value /= 100
+                if isinstance(target_value, (int, float)):
+                    value /= 100.0
             intensity_type = exercise.get("intensityType")
             intensity_type_value = intensity_type if isinstance(intensity_type, int) else 0
             is_percent = exercise.get("isIntensityPercent") is True
@@ -1148,9 +1169,7 @@ def _calculate_program_summary(program: dict[str, object]) -> tuple[int, int, fl
             val = float(target_val * sets)
             if target_type == 2:  # time target in seconds
                 total_time += int(val)
-            elif target_type == 5:  # COROS distance target in centimeters
-                total_distance += val / 100.0
-            elif target_type == 1:  # legacy distance target in meters (or cm if >= 100000)
+            elif target_type in {1, 5}:  # COROS distance target in meters
                 dist = val / 100.0 if val >= 100000 else val
                 total_distance += dist
 

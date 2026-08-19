@@ -55,7 +55,8 @@ class Settings(BaseSettings):
     openai_compat_base_url: str = "https://gen.ai.kku.ac.th/okmd/api/v1"
     openai_compat_model: str = "gemini-3.5-flash-lite"
 
-    # --- Brave Search ---
+    # --- Web Search Providers ---
+    tavily_api_key: str = ""
     brave_search_api_key: str = ""
 
     @property

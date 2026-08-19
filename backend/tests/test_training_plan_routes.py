@@ -31,7 +31,7 @@ def test_parse_coros_schedule_normalizes_calendar_workouts() -> None:
                 },
                 {"happenDay": "20260811", "idInPlan": 8, "status": 3},
             ],
-            "programs": [{"idInPlan": 7, "name": "Fallback name", "sportType": 1, "exercises": [{"sortNo": 1, "exerciseType": 1, "targetType": 5, "targetValue": 20_000}]}],
+            "programs": [{"idInPlan": 7, "name": "Fallback name", "sportType": 1, "exercises": [{"sortNo": 1, "exerciseType": 1, "targetType": 5, "targetValue": 20000}]}],
         }
     )
 
@@ -49,6 +49,26 @@ def test_parse_coros_schedule_normalizes_calendar_workouts() -> None:
         )
     ]
     assert [(step.kind, step.target, step.value) for step in events[0].workout_steps] == [("warmup", "distance", 200)]
+
+
+def test_parse_coros_schedule_handles_distance_in_meters() -> None:
+    events = _parse_coros_schedule(
+        {
+            "entities": [
+                {
+                    "happenDay": "20260818",
+                    "idInPlan": 12,
+                    "planId": "plan-2",
+                    "planProgramId": 12,
+                    "sportData": {"name": "Easy Run", "distance": 900_000, "trainingLoad": 1},
+                },
+            ],
+            "programs": [],
+        }
+    )
+
+    assert len(events) == 1
+    assert events[0].description == "9 km · Load 1"
 
 
 @pytest.mark.asyncio
@@ -129,7 +149,7 @@ def test_structured_hyrox_workout_uses_coros_units() -> None:
     assert program["sportType"] == 9
     assert program["pbVersion"] == 9
     assert exercises[1]["targetType"] == 5
-    assert exercises[1]["targetValue"] == 5_000
+    assert exercises[1]["targetValue"] == 5000
     assert exercises[1]["intensityType"] == 1
     assert exercises[1]["name"] == "T1394"
     assert exercises[1]["subType"] == 2
@@ -538,3 +558,28 @@ async def test_delete_library_workout_uses_coros_program_delete(
     )
 
     assert client.request == ("/training/program/delete", ["42"])
+
+
+def test_build_coros_program_distance_units() -> None:
+    # 7000m run -> targetValue = 700,000 cm (7 km), targetDisplayUnit = 1 (km)
+    draft_run = CorosWorkoutDraft(
+        date="2026-08-12",
+        name="7km Run",
+        sport="run",
+        steps=[CorosWorkoutStep(kind="training", target="distance", value=7000)],
+    )
+    program_run = _build_coros_program(draft_run)
+    assert program_run["exercises"][0]["targetValue"] == 700_000
+    assert program_run["exercises"][0]["targetDisplayUnit"] == 1
+
+    # 50m HYROX Sled Push -> targetValue = 5000 cm (50m), targetDisplayUnit = 2 (m)
+    draft_hyrox = CorosWorkoutDraft(
+        date="2026-08-12",
+        name="HYROX Prep",
+        sport="hyrox",
+        steps=[CorosWorkoutStep(kind="training", name="Sled Push", target="distance", value=50)],
+    )
+    program_hyrox = _build_coros_program(draft_hyrox)
+    assert program_hyrox["exercises"][0]["targetValue"] == 5000
+    assert program_hyrox["exercises"][0]["targetDisplayUnit"] == 2
+

@@ -20,6 +20,8 @@ import StrengthBodyMap from "@/components/StrengthBodyMap";
 import { getSportVisual, SportIcon } from "@/components/SportActivityIcon";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { WaveThinkingText } from "@/components/WaveThinkingText";
 
 const Map = dynamic(() => import("@/components/Map"), { ssr: false });
@@ -1668,7 +1670,7 @@ export default function ActivityDetailPage() {
                       };
 
                       return (
-                        <Fragment key={leg.sport}>
+                        <Fragment key={`${leg.sport}-${index}`}>
                           <tr
                             className={`lap-summary-row is-clickable${isExpanded ? " is-expanded" : ""}`}
                             onClick={toggleLeg}
@@ -1718,7 +1720,7 @@ export default function ActivityDetailPage() {
                                   <table className="lap-split-table breakdown-nested-table">
                                     <thead><tr><th>Lap</th><th>Distance</th><th>Duration</th><th>Avg HR</th><th>Pace / Speed</th><th>Power / Cadence</th></tr></thead>
                                     <tbody>{leg.laps.map((lap, lapIndex) => (
-                                      <tr key={lap.lap_index}>
+                                      <tr key={`${lap.lap_index}-${lapIndex}`}>
                                         <td data-label="Lap"><span className="lap-split-index">{lapIndex + 1}</span></td>
                                         <td data-label="Distance">{lap.distance_m ? leg.sport === "swim" ? `${Math.round(lap.distance_m)} m` : `${(lap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
                                         <td data-label="Duration">{formatSplitDuration(lap.elapsed_s)}</td>
@@ -1805,7 +1807,7 @@ export default function ActivityDetailPage() {
                       if (isRestPhase) {
                         return (
                           <PhaseRow
-                            key={lap.lap_index}
+                            key={`${lap.lap_index}-${groupIndex}`}
                             badge={isSwim ? undefined : `R${lapNumber}`}
                             title="Rest"
                             description="Recovery between intervals"
@@ -1829,7 +1831,7 @@ export default function ActivityDetailPage() {
                       const rowLabel = isHyrox || isSwim ? lapLabel : stepLabel ?? "Lap";
 
                       return (
-                        <Fragment key={lap.lap_index}>
+                        <Fragment key={`${lap.lap_index}-${groupIndex}`}>
                           <tr
                             className={`lap-summary-row${isRest ? " is-rest" : ""}${isExpanded ? " is-expanded" : ""}${canExpand ? " is-clickable" : ""}`}
                             onClick={canExpand ? toggleLap : undefined}
@@ -1892,8 +1894,8 @@ export default function ActivityDetailPage() {
                                     </div>
                                     <table className="lap-split-table breakdown-nested-table mono">
                                       <thead><tr><th>Lap</th><th>Distance</th><th>Duration</th><th>Pace</th><th>Avg HR</th><th>Power</th></tr></thead>
-                                      <tbody>{sourceLaps.map((sourceLap) => (
-                                        <tr key={sourceLap.lap_index}>
+                                      <tbody>{sourceLaps.map((sourceLap, sourceLapIndex) => (
+                                        <tr key={`${sourceLap.lap_index}-${sourceLapIndex}`}>
                                           <td data-label="Lap"><span className="lap-split-index">{sourceLap.lap_index}</span></td>
                                           <td data-label="Distance">{sourceLap.distance_m ? `${(sourceLap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
                                           <td data-label="Duration">{formatSplitDuration(sourceLap.elapsed_s)}</td>
@@ -2033,7 +2035,7 @@ export default function ActivityDetailPage() {
             {postmortem && (
               <div className="ai-analysis-response">
                 <div className="markdown-body">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{postmortem}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{postmortem}</ReactMarkdown>
                 </div>
               </div>
             )}

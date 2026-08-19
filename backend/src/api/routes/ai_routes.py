@@ -68,6 +68,22 @@ def _unique_tool_calls(tool_calls: list[ToolCallRecord]) -> list[ToolCallRecord]
     return unique
 
 
+def _format_question_with_search_flags(
+    question: str, force_web_search: bool, is_deep_research: bool
+) -> str:
+    if is_deep_research:
+        return (
+            "[USER REQUESTED DEEP RESEARCH MODE: Perform a comprehensive, multi-step iterative research investigation using the `web_search` tool. Search for scientific studies, official rulebooks, or technical guides, compare facts, and synthesize an exhaustive, highly detailed deep research report with cited sources.]\n\n"
+            + question
+        )
+    if force_web_search:
+        return (
+            "[USER REQUESTED REAL-TIME WEB SEARCH: Use the `web_search` tool to look up current, up-to-date web information for this query before responding]\n\n"
+            + question
+        )
+    return question
+
+
 async def _display_tool_calls(
     db: AsyncSession, user_id: str, tool_calls: list[ToolCallRecord]
 ) -> list[ToolCallRecord]:
@@ -141,6 +157,8 @@ class AskRequest(BaseModel):
     images: list[str] = []
     user_message_id: UUID | None = None
     assistant_message_id: UUID | None = None
+    force_web_search: bool = False
+    is_deep_research: bool = False
 
 
 class AskResponse(BaseModel):
@@ -172,9 +190,12 @@ async def ask_ai(
     # 2. Ask AI coach
     history_dicts = [{"role": msg.role, "content": msg.content} for msg in req.history]
     tool_calls: list[ToolCallRecord] = []
+    question_text = _format_question_with_search_flags(
+        req.question, req.force_web_search, req.is_deep_research
+    )
     answer = await asyncio.to_thread(
         ask_coach,
-        req.question,
+        question_text,
         context,
         history_dicts,
         model=None,
@@ -584,10 +605,41 @@ class SessionUpdateRequest(BaseModel):
 class ProjectItem(BaseModel):
     id: str
     name: str
+    icon: str | None = None
+    highlight_color: str | None = None
 
 
 class ProjectNameRequest(BaseModel):
     name: str
+
+
+class ProjectUpdateRequest(BaseModel):
+    name: str
+    icon: str | None = None
+    highlight_color: str | None = None
+
+
+PROJECT_ICON_KEYS = frozenset({
+    "run", "treadmill", "trail_run", "ride", "swim", "hike", "walk",
+    "strength", "hyrox", "climbing", "skiing", "hybrid", "cardio",
+    "multisport", "yoga", "badminton", "soda_water", "bread", "pizza",
+    "healthy_eating", "books", "heart_pulse", "pill", "other",
+})
+PROJECT_HIGHLIGHT_COLORS = frozenset({
+    "#21E6A5", "#2D9BF0", "#F0D348", "#FF4D62", "#9364F0", "#F08C3C",
+    "#E06CBA", "#A5AFB4",
+})
+
+
+def _validate_project_customization(req: ProjectUpdateRequest) -> tuple[str, str | None, str | None]:
+    name = req.name.strip()[:100]
+    if not name:
+        raise HTTPException(status_code=400, detail="Project name cannot be empty.")
+    if req.icon is not None and req.icon not in PROJECT_ICON_KEYS:
+        raise HTTPException(status_code=400, detail="Unsupported project icon.")
+    if req.highlight_color is not None and req.highlight_color not in PROJECT_HIGHLIGHT_COLORS:
+        raise HTTPException(status_code=400, detail="Unsupported project highlight color.")
+    return name, req.icon, req.highlight_color
 
 
 class ModelItem(BaseModel):
@@ -679,7 +731,10 @@ async def list_projects(db: AsyncSession = Depends(get_db_session)) -> list[Proj
         .where(DBChatProject.user_id == get_owner_id())
         .order_by(func.lower(DBChatProject.name))
     )
-    return [ProjectItem(id=p.id, name=p.name) for p in res.scalars().all()]
+    return [
+        ProjectItem(id=p.id, name=p.name, icon=p.icon, highlight_color=p.highlight_color)
+        for p in res.scalars().all()
+    ]
 
 
 @router.post("/projects", response_model=ProjectItem, status_code=201)
@@ -695,19 +750,22 @@ async def create_project(
     project = await db.get(DBChatProject, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found.")
-    return ProjectItem(id=project.id, name=project.name)
+    return ProjectItem(
+        id=project.id,
+        name=project.name,
+        icon=project.icon,
+        highlight_color=project.highlight_color,
+    )
 
 
 @router.put("/projects/{project_id}", response_model=ProjectItem)
-async def rename_project(
+async def update_project(
     project_id: str,
-    req: ProjectNameRequest,
+    req: ProjectUpdateRequest,
     db: AsyncSession = Depends(get_db_session),
 ) -> ProjectItem:
     """Rename a chat project."""
-    name = req.name.strip()[:100]
-    if not name:
-        raise HTTPException(status_code=400, detail="Project name cannot be empty.")
+    name, icon, highlight_color = _validate_project_customization(req)
 
     res = await db.execute(
         select(DBChatProject).where(
@@ -729,8 +787,15 @@ async def rename_project(
         raise HTTPException(status_code=409, detail="A project with that name already exists.")
 
     project.name = name
+    project.icon = icon
+    project.highlight_color = highlight_color
     await db.commit()
-    return ProjectItem(id=project.id, name=project.name)
+    return ProjectItem(
+        id=project.id,
+        name=project.name,
+        icon=project.icon,
+        highlight_color=project.highlight_color,
+    )
 
 
 @router.delete("/projects/{project_id}", status_code=204)
@@ -965,8 +1030,11 @@ async def session_ask_stream(
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
+        question_text = _format_question_with_search_flags(
+            req.question, req.force_web_search, req.is_deep_research
+        )
         sync_stream = ask_coach_stream(
-            req.question,
+            question_text,
             context,
             history_dicts,
             model=session.model_name or _active_model(),
@@ -1036,19 +1104,28 @@ async def session_ask_stream(
     )
 
 
-@router.delete("/sessions/{session_id}/exchanges/{user_message_id}", status_code=204)
+class DeleteExchangeResponse(BaseModel):
+    session_deleted: bool
+    title: str | None
+
+
+@router.delete(
+    "/sessions/{session_id}/exchanges/{user_message_id}",
+    response_model=DeleteExchangeResponse,
+)
 async def delete_exchange(
     session_id: str,
     user_message_id: str,
     db: AsyncSession = Depends(get_db_session),
-) -> None:
+) -> DeleteExchangeResponse:
     """Delete one user message and its immediately following assistant response."""
     session_res = await db.execute(
         select(DBChatSession).where(
             DBChatSession.id == session_id, DBChatSession.user_id == get_owner_id()
         )
     )
-    if not session_res.scalar_one_or_none():
+    session = session_res.scalar_one_or_none()
+    if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
     message_res = await db.execute(
@@ -1068,10 +1145,31 @@ async def delete_exchange(
     if user_index is None:
         raise HTTPException(status_code=404, detail="Message not found.")
 
-    await db.delete(messages[user_index])
+    delete_indexes = {user_index}
     if user_index + 1 < len(messages) and messages[user_index + 1].role == "assistant":
-        await db.delete(messages[user_index + 1])
+        delete_indexes.add(user_index + 1)
+    remaining_messages = [
+        message for index, message in enumerate(messages) if index not in delete_indexes
+    ]
+
+    if not remaining_messages:
+        await db.delete(session)
+        await db.commit()
+        return DeleteExchangeResponse(session_deleted=True, title=None)
+
+    for index in sorted(delete_indexes):
+        await db.delete(messages[index])
+    first_user_index = next(
+        (index for index, message in enumerate(messages) if message.role == "user"), None
+    )
+    if user_index == first_user_index:
+        first_user_message = next(
+            (message for message in remaining_messages if message.role == "user"), None
+        )
+        if first_user_message:
+            session.title = _capitalize_title(first_user_message.content[:60])
     await db.commit()
+    return DeleteExchangeResponse(session_deleted=False, title=session.title)
 
 
 @router.delete("/sessions/{session_id}", status_code=204)

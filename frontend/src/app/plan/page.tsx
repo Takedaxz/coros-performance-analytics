@@ -128,7 +128,7 @@ type IntensityZone = { id: number; label: string; low: number; high: number };
 const HEART_RATE_ZONES: Record<WorkoutIntensityBasis, IntensityZone[]> = {
   max_hr: [{ id: 6, label: "Recovery", low: 0, high: 50 }, { id: 1, label: "Warm Up", low: 51, high: 60 }, { id: 2, label: "Fat Burn", low: 61, high: 70 }, { id: 3, label: "Aerobic Endurance", low: 71, high: 80 }, { id: 4, label: "Threshold", low: 81, high: 90 }, { id: 5, label: "Anaerobic", low: 91, high: 100 }],
   reserve: [{ id: 6, label: "Recovery", low: 0, high: 59 }, { id: 1, label: "Warm Up", low: 60, high: 74 }, { id: 2, label: "Fat Burn", low: 75, high: 84 }, { id: 3, label: "Aerobic Endurance", low: 85, high: 88 }, { id: 4, label: "Threshold", low: 89, high: 95 }, { id: 5, label: "Anaerobic", low: 96, high: 100 }],
-  lthr: [{ id: 6, label: "Recovery", low: 0, high: 80 }, { id: 1, label: "Warm Up", low: 81, high: 90 }, { id: 2, label: "Fat Burn", low: 91, high: 95 }, { id: 3, label: "Aerobic Endurance", low: 96, high: 102 }, { id: 4, label: "Threshold", low: 103, high: 106 }, { id: 5, label: "Anaerobic", low: 107, high: 120 }],
+  lthr: [{ id: 6, label: "Recovery", low: 0, high: 80 }, { id: 1, label: "Aerobic Endurance", low: 81, high: 90 }, { id: 2, label: "Aerobic Power", low: 91, high: 95 }, { id: 3, label: "Threshold", low: 96, high: 102 }, { id: 4, label: "Anaerobic Endurance", low: 103, high: 106 }, { id: 5, label: "Anaerobic Power", low: 107, high: 120 }],
 };
 const PACE_ZONES: IntensityZone[] = [{ id: 7, label: "Recovery", low: 0, high: 77 }, { id: 1, label: "Aerobic Endurance", low: 78, high: 87 }, { id: 2, label: "Aerobic Power", low: 88, high: 94 }, { id: 3, label: "Threshold", low: 95, high: 108 }, { id: 5, label: "Anaerobic Endurance", low: 109, high: 118 }, { id: 6, label: "Anaerobic Power", low: 119, high: 200 }];
 const FTP_ZONES: IntensityZone[] = [{ id: 1, label: "Recovery", low: 0, high: 55 }, { id: 2, label: "Aerobic Endurance", low: 56, high: 75 }, { id: 3, label: "Aerobic Power", low: 76, high: 90 }, { id: 4, label: "Threshold", low: 91, high: 105 }, { id: 5, label: "Anaerobic Endurance", low: 106, high: 120 }, { id: 6, label: "Anaerobic Power", low: 121, high: 150 }, { id: 7, label: "Sprint", low: 151, high: 300 }];
@@ -196,6 +196,9 @@ function targetValueLabel(target: WorkoutTarget): string {
 }
 
 function formatKilometers(meters: number): string {
+  if (meters > 0 && meters < 1000) {
+    return `${meters.toLocaleString(undefined, { maximumFractionDigits: 1 })} m`;
+  }
   return `${(meters / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} km`;
 }
 
@@ -221,6 +224,21 @@ function structureValue(step: WorkoutStepForm): string {
   if (step.target === "elevation_gain") return `${step.value.toLocaleString()} m`;
   if (step.target === "reps" || step.target === "routes") return `${step.value} ${step.target}`;
   return step.target === "open" ? "Open" : String(step.value);
+}
+
+function formatEventNote(event: TrainingEvent): string {
+  if (!event.description) return "";
+  if (event.workout_steps?.length) {
+    const totalMeters = event.workout_steps.reduce(
+      (sum, step) => sum + (step.target === "distance" ? step.value * (step.repeat_count ?? 1) : 0),
+      0
+    );
+    if (totalMeters > 0) {
+      const correctKm = `${(totalMeters / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} km`;
+      return event.description.replace(/^[\d.]+\s*km/, correctKm);
+    }
+  }
+  return event.description;
 }
 
 function WorkoutStructure({ steps }: { steps: WorkoutStepForm[] }) {
@@ -658,8 +676,8 @@ export default function TrainingPlanPage() {
       <header className="plan-workout-step-title"><WorkoutDragHandle /><span className="plan-workout-step-index">{String(index + 1).padStart(2, "0")}</span><button className="plan-workout-step-toggle" type="button" aria-expanded={isActive} onClick={() => setActiveWorkoutStep(isActive ? null : index)}><small>Step {index + 1}</small><strong>{displayStepName(step)}</strong><em>{targetLabel(step.target)}{step.target !== "open" ? ` · ${structureValue(step)}` : ""}</em></button><div className="plan-workout-step-header-actions"><button type="button" aria-label="Duplicate step" title="Duplicate step" onClick={() => duplicateStep(index)}><WorkoutIcon name="copy" size={15} /></button><button type="button" aria-label="Delete step" title="Delete step" disabled={workoutDraft.steps.length === 1} onClick={() => setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.filter((_, position) => position !== index) })}><WorkoutIcon name="trash" size={15} /></button></div></header>
       {isActive && <div className="plan-workout-step-fields">
         <label><span>Type</span><SingleSelect ariaLabel="Step type" value={step.kind} onChange={(value) => { const kind = value as WorkoutStepForm["kind"]; updateStep(index, { kind, target: targetsFor(workoutDraft.sport, kind)[0] }); }} options={[{ value: "warmup", label: "Warm-up" }, { value: "training", label: "Training" }, { value: "rest", label: "Rest" }, { value: "cooldown", label: "Cool-down" }]} /></label>
-        <label><span>Finish target</span><SingleSelect ariaLabel="Finish target" value={step.target} onChange={(value) => updateStep(index, { target: value as WorkoutTarget })} options={targets.map((target) => ({ value: target, label: targetLabel(target) }))} /></label>
-        {step.target !== "open" && <label><span>{targetValueLabel(step.target)}</span>{step.target === "time" ? <DurationInput key={step.value} seconds={step.value} onChange={(value) => updateStep(index, { value })} /> : step.target === "distance" ? <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0} step={0.1} value={step.value / 1000} onChange={(value) => updateStep(index, { value: Math.round((Number(value) || 0) * 1000) })} /> : <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0} value={step.value} onChange={(value) => updateStep(index, { value: Number(value) || 0 })} />}</label>}
+        <label><span>Finish target</span><SingleSelect ariaLabel="Finish target" value={step.target} onChange={(value) => { const nextTarget = value as WorkoutTarget; const nextValue = nextTarget === "distance" ? (step.target === "distance" ? step.value : 1000) : nextTarget === "time" ? (step.target === "time" ? step.value : 600) : step.value; updateStep(index, { target: nextTarget, value: nextValue }); }} options={targets.map((target) => ({ value: target, label: targetLabel(target) }))} /></label>
+        {step.target !== "open" && <label><span>{targetValueLabel(step.target)}</span>{step.target === "time" ? <DurationInput key={step.value} seconds={step.value} onChange={(value) => updateStep(index, { value })} /> : step.target === "distance" ? <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0.001} step={0.1} value={Number((step.value / 1000).toFixed(3))} onChange={(value) => updateStep(index, { value: Math.round((Number(value) || 0) * 1000) })} /> : <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0} value={step.value} onChange={(value) => updateStep(index, { value: Number(value) || 0 })} />}</label>}
         <label><span>Intensity</span><SingleSelect ariaLabel="Intensity" value={step.intensity} onChange={(value) => { const intensity = value as WorkoutIntensity; updateStep(index, { intensity, intensity_basis: "max_hr", intensity_zone: null, ...initialIntensityValues(intensity) }); }} options={INTENSITY_OPTIONS.filter((option) => intensitiesFor(workoutDraft.sport, step.kind).includes(option.value))} /></label>
         {step.intensity === "heart_rate_percent" ? <label><span>Heart-rate basis</span><SingleSelect ariaLabel="Heart-rate basis" value={step.intensity_basis} onChange={(value) => updateStep(index, { intensity_basis: value as WorkoutIntensityBasis, intensity_zone: null, ...initialIntensityValues(step.intensity) })} options={[{ value: "max_hr", label: "% Max Heart Rate" }, { value: "reserve", label: "% Heart Rate Reserve" }, { value: "lthr", label: "% Threshold HR" }]} /></label> : null}
         {step.intensity === "stroke" ? <label><span>Stroke</span><SingleSelect ariaLabel="Stroke" value={String(step.intensity_low ?? 1)} onChange={(value) => updateStep(index, { intensity_low: Number(value), intensity_high: null })} options={STROKE_OPTIONS} /></label> : null}
@@ -842,7 +860,7 @@ export default function TrainingPlanPage() {
                         <iframe title={`Map for ${event.location}`} src={mapEmbedUrl(event.location)} loading="lazy" referrerPolicy="no-referrer" />
                       </div>
                     )}
-                    {event.description && <div className="plan-workout-note"><span>Workout notes</span><p>{event.description}</p></div>}
+                    {event.description && <div className="plan-workout-note"><span>Workout notes</span><p>{formatEventNote(event)}</p></div>}
                     {event.workout_steps?.length ? <WorkoutStructure steps={event.workout_steps} /> : null}
                     {source === "coros" && (
                       <div className="plan-workout-actions">
