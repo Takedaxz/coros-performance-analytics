@@ -64,21 +64,67 @@ _SPORT_CONFIG: dict[WorkoutSport, tuple[int, int, str]] = {
     "xc_ski": (8, 9, "sid_run_training"),
     "hyrox": (9, 9, "sid_strength_training"),
 }
-_HYROX_EXERCISE_CONFIG: dict[str, tuple[str, int, str]] = {
-    "training": ("T1398", 0, ""),
-    "runtraining": ("T1398", 0, ""),
-    "skierg": ("T1393", 2, "sid_strength_skierg"),
-    "sledpush": ("T1394", 2, "sid_strength_sledpush"),
-    "sledpull": ("T1395", 2, "sid_strength_sledpull"),
-    "burpee": ("T1396", 2, "sid_strength_burpee"),
-    "burpeebroadjumps": ("T1396", 2, "sid_strength_burpee"),
-    "indoorrower": ("T1207", 2, "sid_strength_indoor_rower"),
-    "rower": ("T1207", 2, "sid_strength_indoor_rower"),
-    "farmerswalk": ("T1310", 2, "sid_strength_farmers_walk"),
-    "farmerscarry": ("T1310", 2, "sid_strength_farmers_walk"),
-    "dumbbelllunges": ("T1064", 2, "sid_strength_dumbbell_lunges"),
-    "sandbaglunges": ("T1064", 2, "sid_strength_dumbbell_lunges"),
-    "wallballs": ("T1397", 2, "sid_strength_wallballs"),
+_HYROX_EXERCISE_CONFIG: dict[str, tuple[str, int, str, str, int]] = {
+    "training": ("T1398", 0, "", "2", 0),
+    "runtraining": ("T1398", 0, "", "2", 0),
+    "skierg": ("T1393", 2, "sid_strength_skierg", "476760420131192832", 1),
+    "sledpush": ("T1394", 2, "sid_strength_sledpush", "476761244228042852", 2),
+    "sledpull": ("T1395", 2, "sid_strength_sledpull", "476761463271374848", 3),
+    "burpee": ("T1396", 2, "sid_strength_burpee", "476762713375293440", 4),
+    "burpeebroadjumps": ("T1396", 2, "sid_strength_burpee", "476762713375293440", 4),
+    "indoorrower": ("T1207", 2, "sid_strength_indoor_rower", "430536120548376576", 5),
+    "rower": ("T1207", 2, "sid_strength_indoor_rower", "430536120548376576", 5),
+    "farmerswalk": ("T1310", 2, "sid_strength_farmers_walk", "469656430677508096", 6),
+    "farmerscarry": ("T1310", 2, "sid_strength_farmers_walk", "469656430677508096", 6),
+    "dumbbelllunges": ("T1064", 2, "sid_strength_dumbbell_lunges", "425832124457861121", 7),
+    "sandbaglunges": ("T1064", 2, "sid_strength_dumbbell_lunges", "425832124457861121", 7),
+    "wallballs": ("T1397", 2, "sid_strength_wallballs", "476762944229785600", 8),
+}
+_HYROX_EXERCISE_METADATA: dict[str, dict[str, object]] = {
+    "skierg": {
+        "equipment": [16], "muscle": [12], "muscleRelevance": [4, 6, 14, 1],
+        "animationId": 375, "gradeSystem": 0,
+    },
+    "sledpush": {
+        "equipment": [16], "muscle": [7], "muscleRelevance": [14, 8, 15, 13],
+        "animationId": 377, "gradeSystem": 0,
+    },
+    "sledpull": {
+        "equipment": [16], "muscle": [12], "muscleRelevance": [3, 11, 14, 8],
+        "animationId": 374, "gradeSystem": 0,
+    },
+    "burpee": {
+        "equipment": [1], "muscle": [7], "muscleRelevance": [4, 1, 2, 6, 8, 14],
+        "animationId": 1, "gradeSystem": 0,
+    },
+    "burpeebroadjumps": {
+        "equipment": [1], "muscle": [7], "muscleRelevance": [4, 1, 2, 6, 8, 14],
+        "animationId": 1, "gradeSystem": 0,
+    },
+    "indoorrower": {
+        "equipment": [13], "muscle": [7], "muscleRelevance": [3, 4, 7, 12],
+        "animationId": 245, "gradeSystem": 0,
+    },
+    "farmerswalk": {
+        "equipment": [11, 2], "muscle": [5, 13, 6], "muscleRelevance": [5, 6, 13, 12, 11, 1],
+        "animationId": 365, "gradeSystem": 0,
+    },
+    "farmerscarry": {
+        "equipment": [11, 2], "muscle": [5, 13, 6], "muscleRelevance": [5, 6, 13, 12, 11, 1],
+        "animationId": 365, "gradeSystem": 0,
+    },
+    "dumbbelllunges": {
+        "equipment": [2], "muscle": [7, 14], "muscleRelevance": [7, 14],
+        "animationId": 345, "gradeSystem": 0,
+    },
+    "sandbaglunges": {
+        "equipment": [2], "muscle": [7, 14], "muscleRelevance": [7, 14],
+        "animationId": 345, "gradeSystem": 0,
+    },
+    "wallballs": {
+        "equipment": [10], "muscle": [7], "muscleRelevance": [14, 1, 4, 6],
+        "animationId": 376, "gradeSystem": 0,
+    },
 }
 _HYROX_TARGET_CONFIG: dict[str, WorkoutTarget] = {
     "training": "distance",
@@ -150,6 +196,11 @@ class MoveCorosWorkout(BaseModel):
 
 
 class DeleteCorosWorkout(BaseModel):
+    confirmed: Literal[True]
+
+
+class ScheduleCorosLibraryWorkout(BaseModel):
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     confirmed: Literal[True]
 
 
@@ -562,7 +613,7 @@ def _intensity_fields(step: CorosWorkoutStep, sport: WorkoutSport) -> ScheduleOb
     }
 
 
-def _hyrox_exercise_fields(step: CorosWorkoutStep) -> tuple[str, int, str] | None:
+def _hyrox_exercise_fields(step: CorosWorkoutStep) -> tuple[str, int, str, str, int] | None:
     """Return COROS's station metadata for a known HYROX training step."""
     if step.kind != "training":
         return None
@@ -642,10 +693,30 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
                 status_code=422,
                 detail=f"HYROX {step.name.strip()} must use a {expected_hyrox_target} target.",
             )
-        exercise_name, exercise_subtype, exercise_overview = hyrox_fields or (
+        (
+            exercise_name,
+            exercise_subtype,
+            exercise_overview,
+            origin_id,
+            exercise_kind,
+        ) = hyrox_fields or (
             step.name.strip() or _friendly_step_name(step.kind),
             0,
             "sid_strength_training" if draft.sport in {"strength", "hyrox"} else overview,
+            "0",
+            0,
+        )
+        normalized_name = re.sub(r"[^a-z0-9]+", "", step.name.lower())
+        hyrox_metadata = _HYROX_EXERCISE_METADATA.get(normalized_name, {}) if hyrox_fields else {}
+        hyrox_definition_fields: ScheduleObject = (
+            {
+                "isDefaultAdd": 0,
+                "packageTime": 0,
+                "onsightGradeOffset": 0,
+                **hyrox_metadata,
+            }
+            if hyrox_fields
+            else {}
         )
         return (
             {
@@ -676,8 +747,10 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
                 "restValue": 0,
                 "groupId": group_id,
                 "isGroup": False,
-                "originId": "0",
+                "originId": origin_id,
                 "overview": exercise_overview,
+                **({"exerciseKind": exercise_kind} if hyrox_fields else {}),
+                **hyrox_definition_fields,
             },
             distance,
             duration,
@@ -742,6 +815,19 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
         total_time += duration * step.repeats
     if any(exercise.get("intensityType") == 8 for exercise in exercises):
         pb_version = max(pb_version, 3)
+    hybrid_fields: ScheduleObject = (
+        {
+            "hybridTotalSets": sum(
+                1
+                for exercise in exercises
+                if isinstance(exercise.get("exerciseKind"), int)
+                and exercise["exerciseKind"] > 0
+            ),
+            "isTargetTypeConsistent": 0,
+        }
+        if draft.sport == "hyrox"
+        else {}
+    )
     return {
         "id": "0",
         "idInPlan": "0",
@@ -760,8 +846,12 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
         "estimatedDistance": total_distance,
         "distanceDisplayUnit": 2 if draft.sport == "swim" else 1,
         "estimatedType": 6 if total_distance else 0,
-        "targetType": 5 if total_distance else 2,
-        "targetValue": total_distance if total_distance else total_time,
+        "targetType": 0 if draft.sport == "hyrox" else (5 if total_distance else 2),
+        "targetValue": (
+            0
+            if draft.sport == "hyrox"
+            else (total_distance if total_distance else total_time)
+        ),
         "simple": False,
         "access": 1,
         "essence": 0,
@@ -772,6 +862,7 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
         "exerciseNum": len(exercises),
         "totalSets": len(exercises),
         "exercises": exercises,
+        **hybrid_fields,
         **(
             {"poolLengthId": 0, "poolLength": 2500, "poolLengthUnit": 2}
             if draft.sport == "swim"
@@ -1053,6 +1144,149 @@ async def _schedule_new_workout(
     )
 
 
+async def _schedule_library_hyrox(
+    client: CorosApiClient, program_id: str, date: str
+) -> TrainingEvent:
+    target_day = _coros_day(date)
+    library_program = await client.get_training_hub(
+        "/training/program/detail", {"id": program_id, "supportRestExercise": 1}
+    )
+    if not isinstance(library_program, dict) or library_program.get("sportType") != 9:
+        raise HTTPException(
+            status_code=422,
+            detail="Native library scheduling is currently available for HYROX workouts only.",
+        )
+    source_id = library_program.get("sourceId")
+    if source_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="This HYROX library workout has no native COROS source program.",
+        )
+
+    target_date = datetime.datetime.strptime(target_day, "%Y%m%d").date()
+    search_start = target_date - datetime.timedelta(days=365)
+    search_end = target_date + datetime.timedelta(days=365)
+    source_schedule = await client.fetch_training_schedule(
+        search_start.strftime("%Y%m%d"), search_end.strftime("%Y%m%d")
+    )
+    native_occurrences: list[datetime.date] = []
+    for program in source_schedule.get("programs", []):
+        if not isinstance(program, dict) or str(program.get("sourceId")) != str(source_id):
+            continue
+        if not any(
+            isinstance(exercise, dict) and exercise.get("exerciseKind") is not None
+            for exercise in program.get("exercises", [])
+        ):
+            continue
+        program_id_in_plan = str(program.get("idInPlan", ""))
+        for entity in source_schedule.get("entities", []):
+            if not isinstance(entity, dict) or str(entity.get("planProgramId")) != program_id_in_plan:
+                continue
+            source_day = str(entity.get("happenDay"))
+            if re.fullmatch(r"\d{8}", source_day):
+                native_occurrences.append(
+                    datetime.datetime.strptime(source_day, "%Y%m%d").date()
+                )
+    matching_occurrences = [
+        occurrence
+        for occurrence in native_occurrences
+        if occurrence.weekday() == target_date.weekday()
+    ]
+    if not matching_occurrences:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No scheduled native COROS occurrence was found for this library workout "
+                "on the selected weekday."
+            ),
+        )
+    source_date = min(matching_occurrences, key=lambda occurrence: abs((occurrence - target_date).days))
+    source_day = source_date.strftime("%Y%m%d")
+    source_week = source_date - datetime.timedelta(days=source_date.weekday())
+    target_week = target_date - datetime.timedelta(days=target_date.weekday())
+    before = await client.fetch_training_schedule(
+        target_week.strftime("%Y%m%d"),
+        (target_week + datetime.timedelta(days=6)).strftime("%Y%m%d"),
+    )
+    before_ids = {
+        str(entity.get("idInPlan"))
+        for entity in before.get("entities", [])
+        if isinstance(entity, dict)
+    }
+    await client.post_training_hub(
+        "/training/schedule/copyWeek",
+        {},
+        {
+            "sourceFirstDayOfWeek": source_week.strftime("%Y%m%d"),
+            "targetFirstDayOfWeek": target_week.strftime("%Y%m%d"),
+        },
+    )
+    after = await client.fetch_training_schedule(
+        target_week.strftime("%Y%m%d"),
+        (target_week + datetime.timedelta(days=6)).strftime("%Y%m%d"),
+    )
+    new_programs = {
+        str(program.get("idInPlan")): program
+        for program in after.get("programs", [])
+        if isinstance(program, dict)
+        and str(program.get("idInPlan")) not in before_ids
+    }
+    native_program = next(
+        (
+            program
+            for program in new_programs.values()
+            if str(program.get("sourceId")) == str(source_id)
+            and any(
+                isinstance(exercise, dict) and exercise.get("exerciseKind") is not None
+                for exercise in program.get("exercises", [])
+            )
+        ),
+        None,
+    )
+    if native_program is None:
+        raise HTTPException(
+            status_code=502, detail="COROS copied the week without native HYROX data."
+        )
+
+    copied_id = str(native_program.get("idInPlan"))
+    copied_entities = [
+        entity
+        for entity in after.get("entities", [])
+        if isinstance(entity, dict)
+        and str(entity.get("idInPlan")) not in before_ids
+        and str(entity.get("idInPlan")) != copied_id
+    ]
+    if copied_entities:
+        await client.post_training_hub(
+            "/training/schedule/update",
+            {
+                "versionObjects": [
+                    {
+                        "id": entity.get("idInPlan"),
+                        "planProgramId": entity.get("planProgramId", entity.get("idInPlan")),
+                        "planId": entity.get("planId", ""),
+                        "status": 3,
+                    }
+                    for entity in copied_entities
+                ],
+                "pbVersion": after.get("pbVersion", 2),
+            },
+        )
+    events = _parse_coros_schedule(after)
+    expected_date = target_week + datetime.timedelta(days=source_date.weekday())
+    expected_day = expected_date.strftime("%Y%m%d")
+    for event in events:
+        if event.uid.endswith(f":{copied_id}:{expected_day}"):
+            return event
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            "COROS preserved the native HYROX workout, but the selected date must use "
+            f"the source workout weekday ({expected_date.strftime('%A')})."
+        ),
+    )
+
+
 @router.post("/coros/workouts", response_model=TrainingEvent)
 async def create_coros_workout(
     request: ConfirmedCorosWorkout,
@@ -1253,6 +1487,19 @@ async def get_coros_library_workout(
         return _draft_from_program(
             f"library:{program_id}", _coros_day(date), cast("ScheduleObject", data)
         )
+    except CorosApiClientError as exc:
+        raise HTTPException(status_code=502, detail=f"COROS Calendar unavailable: {exc}") from exc
+
+
+@router.post("/coros/library/{program_id}/schedule", response_model=TrainingEvent)
+async def schedule_coros_library_workout(
+    program_id: str,
+    request: ScheduleCorosLibraryWorkout,
+    db: AsyncSession = Depends(get_db_session),
+) -> TrainingEvent:
+    """Schedule a native HYROX library workout without rebuilding its COROS identity."""
+    try:
+        return await _schedule_library_hyrox(await _coros_client(db), program_id, request.date)
     except CorosApiClientError as exc:
         raise HTTPException(status_code=502, detail=f"COROS Calendar unavailable: {exc}") from exc
 

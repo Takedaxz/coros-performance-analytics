@@ -476,6 +476,17 @@ export default function TrainingPlanPage() {
     setWorkoutError("");
     setIsSavingWorkout(true);
     try {
+      if (selectedLibraryWorkout?.sport === "hyrox") {
+        const response = await fetch(`${apiBase}/api/training-plan/coros/library/${encodeURIComponent(programId)}/schedule`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date: workoutDraft.date, confirmed: true }),
+        });
+        if (!response.ok) throw new Error((await response.json() as { detail?: string }).detail || `HTTP ${response.status}`);
+        setWorkoutDraft(null);
+        setCalendarVersion((value) => value + 1);
+        return;
+      }
       const response = await fetch(`${apiBase}/api/training-plan/coros/library/${encodeURIComponent(programId)}?date=${workoutDraft.date}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data: WorkoutEditorData = await response.json();
@@ -939,9 +950,9 @@ export default function TrainingPlanPage() {
                     )}
                     <footer className="plan-workout-editor-footer">
                       <p className="plan-workout-library-selection" aria-live="polite">
-                        {selectedLibraryWorkout ? <><strong>{selectedLibraryWorkout.name}</strong><small>Ready to customize for {workoutDateLabel}.</small></> : "Select a workout to continue."}
+                        {selectedLibraryWorkout ? <><strong>{selectedLibraryWorkout.name}</strong><small>{selectedLibraryWorkout.sport === "hyrox" ? `Ready to schedule natively on ${workoutDateLabel}.` : `Ready to customize for ${workoutDateLabel}.`}</small></> : "Select a workout to continue."}
                       </p>
-                      <button className="btn btn-primary" type="button" disabled={!selectedLibraryWorkoutId || isSavingWorkout} onClick={() => selectedLibraryWorkoutId && void openLibraryWorkout(selectedLibraryWorkoutId)}>{isSavingWorkout ? "Opening…" : "Customize workout"}</button>
+                      <button className="btn btn-primary" type="button" disabled={!selectedLibraryWorkoutId || isSavingWorkout} onClick={() => selectedLibraryWorkoutId && void openLibraryWorkout(selectedLibraryWorkoutId)}>{isSavingWorkout ? (selectedLibraryWorkout?.sport === "hyrox" ? "Scheduling…" : "Opening…") : (selectedLibraryWorkout?.sport === "hyrox" ? "Schedule workout" : "Customize workout")}</button>
                     </footer>
                   </section>
                 )}

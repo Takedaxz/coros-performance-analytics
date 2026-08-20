@@ -909,19 +909,53 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+let cachedSessions: Session[] | null = null;
+let cachedProjects: Project[] | null = null;
+let cachedExpandedProjects: Set<string> | null = null;
+
 export default function AiPage() {
   const router = useRouter();
   const pathname = usePathname();
   const routeSessionId = pathname.startsWith("/ai/")
     ? decodeURIComponent(pathname.slice(4).split("/", 1)[0])
     : null;
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionsState, setSessionsState] = useState<Session[]>(() => cachedSessions ?? []);
+  const [projectsState, setProjectsState] = useState<Project[]>(() => cachedProjects ?? []);
+  const [expandedProjectsState, setExpandedProjectsState] = useState<Set<string>>(() => cachedExpandedProjects ?? new Set());
+  const sessions = sessionsState;
+  const projects = projectsState;
+  const expandedProjects = expandedProjectsState;
+
+  const setSessions = useCallback((action: React.SetStateAction<Session[]>) => {
+    setSessionsState((prev) => {
+      const next = typeof action === "function" ? action(prev) : action;
+      cachedSessions = next;
+      return next;
+    });
+  }, []);
+
+  const setProjects = useCallback((action: React.SetStateAction<Project[]>) => {
+    setProjectsState((prev) => {
+      const next = typeof action === "function" ? action(prev) : action;
+      cachedProjects = next;
+      return next;
+    });
+  }, []);
+
+  const setExpandedProjects = useCallback((action: React.SetStateAction<Set<string>>) => {
+    setExpandedProjectsState((prev) => {
+      const next = typeof action === "function" ? action(prev) : action;
+      cachedExpandedProjects = next;
+      return next;
+    });
+  }, []);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(routeSessionId !== null);
   const [goals, setGoals] = useState<any[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsLoading, setSessionsLoading] = useState(() => cachedSessions === null);
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -931,8 +965,6 @@ export default function AiPage() {
     messageId: string;
     preview: string;
   } | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
   const [sessionDropTarget, setSessionDropTarget] = useState<string | "chats" | null>(null);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
@@ -1096,30 +1128,32 @@ export default function AiPage() {
             ? { ...session, title: local.title, updated_at: local.updated_at }
             : session;
         }));
-        const routeSession = routeSessionId
-          ? data.find((session) => session.id === routeSessionId)
-          : null;
-        if (routeSession) {
-          setSelectedModel(routeSession.model_name);
-          if (routeSession.project_id) {
-            const pid = routeSession.project_id;
-            setExpandedProjects((prev) => prev.has(pid) ? prev : new Set(prev).add(pid));
-          }
-        }
       }
     } finally {
       setSessionsLoading(false);
     }
-  }, [routeSessionId]);
+  }, [setSessions]);
 
   useEffect(() => { fetchSessions(); }, [fetchSessions]);
+
+  useEffect(() => {
+    if (!routeSessionId || sessionsState.length === 0) return;
+    const routeSession = sessionsState.find((session) => session.id === routeSessionId);
+    if (routeSession) {
+      setSelectedModel(routeSession.model_name);
+      if (routeSession.project_id) {
+        const pid = routeSession.project_id;
+        setExpandedProjects((prev) => (prev.has(pid) ? prev : new Set(prev).add(pid)));
+      }
+    }
+  }, [routeSessionId, sessionsState]);
 
   const fetchProjects = useCallback(() => {
     fetch(`${API_BASE}/api/ai/projects`)
       .then((res) => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)))
       .then((data: Project[]) => setProjects(data))
       .catch((err) => console.error("Failed to load projects", err));
-  }, []);
+  }, [setProjects]);
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
 

@@ -13,6 +13,7 @@ from src.api.routes.training_plan_routes import (
     _calculate_program_summary,
     _draft_from_program,
     _parse_coros_schedule,
+    _schedule_library_hyrox,
     _schedule_new_workout,
     fetch_coros_calendar,
 )
@@ -188,6 +189,64 @@ def test_structured_hyrox_workout_maps_all_eight_stations() -> None:
         ("T1064", 2),
         ("T1397", 2),
     ]
+
+
+def test_structured_hyrox_workout_preserves_coros_station_identity() -> None:
+    program = _build_coros_program(
+        CorosWorkoutDraft(
+            date="2026-08-12",
+            name="HYROX stations",
+            sport="hyrox",
+            steps=[
+                CorosWorkoutStep(
+                    name=name,
+                    target="reps" if name == "Wall Balls" else "distance",
+                    value=100,
+                )
+                for name in (
+                    "Ski Erg", "Sled Push", "Sled Pull", "Burpee Broad Jumps",
+                    "Indoor Rower", "Farmer's Carry", "Sandbag Lunges", "Wall Balls",
+                )
+            ],
+        )
+    )
+
+    exercises = program["exercises"]
+    assert isinstance(exercises, list)
+    assert [(exercise["originId"], exercise["exerciseKind"]) for exercise in exercises] == [
+        ("476760420131192832", 1),
+        ("476761244228042852", 2),
+        ("476761463271374848", 3),
+        ("476762713375293440", 4),
+        ("430536120548376576", 5),
+        ("469656430677508096", 6),
+        ("425832124457861121", 7),
+        ("476762944229785600", 8),
+    ]
+    assert [exercise["equipment"] for exercise in exercises] == [
+        [16], [16], [16], [1], [13], [11, 2], [2], [10],
+    ]
+    assert [exercise["animationId"] for exercise in exercises] == [375, 377, 374, 1, 245, 365, 345, 376]
+    assert all(exercise["isDefaultAdd"] == 0 for exercise in exercises)
+
+
+def test_structured_hyrox_workout_uses_coros_hybrid_program_target() -> None:
+    program = _build_coros_program(
+        CorosWorkoutDraft(
+            date="2026-08-12",
+            name="HYROX hybrid",
+            sport="hyrox",
+            steps=[
+                CorosWorkoutStep(name="Ski Erg", target="distance", value=1_000),
+                CorosWorkoutStep(name="Wall Balls", target="reps", value=100),
+            ],
+        )
+    )
+
+    assert program["targetType"] == 0
+    assert program["targetValue"] == 0
+    assert program["hybridTotalSets"] == 2
+    assert program["isTargetTypeConsistent"] == 0
 
 
 def test_structured_hyrox_workout_rejects_station_reps() -> None:
@@ -455,6 +514,30 @@ def test_library_summary_matches_selected_day_repeat_structure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_native_library_hyrox_requires_matching_weekday() -> None:
+    class FakeClient:
+        async def get_training_hub(self, _path: str, _params: object) -> object:
+            return {"id": "library", "sportType": 9, "sourceId": "native"}
+
+        async def fetch_training_schedule(self, _start: str, _end: str) -> dict[str, object]:
+            return {
+                "programs": [
+                    {
+                        "idInPlan": "101",
+                        "sourceId": "native",
+                        "exercises": [{"exerciseKind": 1}],
+                    }
+                ],
+                "entities": [
+                    {"idInPlan": "101", "planProgramId": "101", "happenDay": "20260810"}
+                ],
+            }
+
+    with pytest.raises(HTTPException, match="selected weekday"):
+        await _schedule_library_hyrox(FakeClient(), "library", "2026-08-11")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
 async def test_library_summary_uses_detail_over_partial_query_item(monkeypatch) -> None:
     class FakeClient:
         async def post_training_hub(self, _path: str, _payload: object) -> object:
@@ -582,4 +665,3 @@ def test_build_coros_program_distance_units() -> None:
     program_hyrox = _build_coros_program(draft_hyrox)
     assert program_hyrox["exercises"][0]["targetValue"] == 5000
     assert program_hyrox["exercises"][0]["targetDisplayUnit"] == 2
-

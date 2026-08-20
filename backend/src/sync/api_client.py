@@ -272,7 +272,12 @@ class CorosApiClient:
                 return cast("dict[str, object]", data) if isinstance(data, dict) else {}
         raise CorosApiClientError("Failed to fetch training calendar")
 
-    async def post_training_hub(self, path: str, payload: object) -> object:
+    async def post_training_hub(
+        self,
+        path: str,
+        payload: object,
+        params: dict[str, str | int] | None = None,
+    ) -> object:
         """Send a confirmed write or calculation request to the Training Hub."""
         if not path.startswith("/training/"):
             raise CorosApiClientError("Unsupported Training Hub path")
@@ -280,7 +285,10 @@ class CorosApiClient:
         async with httpx.AsyncClient(timeout=30) as client:
             for attempt in range(2):
                 response = await client.post(
-                    url, json=payload, headers=self._get_training_hub_headers()
+                    url,
+                    params=params,
+                    json=payload,
+                    headers=self._get_training_hub_headers(),
                 )
                 body: object = response.json() if response.status_code == 200 else None
                 if not attempt and _training_hub_token_invalid(response.status_code, body):

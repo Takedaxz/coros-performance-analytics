@@ -159,18 +159,11 @@ Structure your response cleanly using standard GitHub-Flavored Markdown headers,
 
 ### Workout Overview & Execution
 - Briefly evaluate overall distance, pace, average heart rate, and training load.
-- Comment on workout execution relative to the athlete's 7-day training volume.
+- Comment on workout execution.
 
 ### Pacing & Per-Kilometer Split Breakdown
 - Provide a concise evaluation of pacing strategy, split consistency, and heart rate drift across the kilometer splits.
 - Highlight key split transitions (warmup, main effort block, cooldown).
-
-### Pre-Workout Readiness & Recovery State
-- Reference the athlete's Readiness Score, HRV Z-score, and sleep baseline coming into this session.
-- State directly whether the workout timing matched their physiological recovery status.
-
-### 24–48 Hour Recovery & Action Items
-- Provide clear, direct, actionable recovery guidance (hydration, sleep focus, active recovery vs rest day).
 
 Keep the tone authoritative, encouraging yet direct, data-driven, and formatted cleanly with markdown headers, bold key figures, and bullet points.
 """

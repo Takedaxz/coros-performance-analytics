@@ -72,6 +72,47 @@ async def test_training_hub_refreshes_api_level_invalid_token(
     assert http_client.tokens == ["stale", "fresh"]
 
 
+@pytest.mark.asyncio
+async def test_training_hub_post_forwards_query_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {"result": "0000", "data": {"id": "copied"}}
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class HttpClient:
+        params: object = None
+
+        async def __aenter__(self) -> "HttpClient":
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def post(self, _url: str, **kwargs: object) -> Response:
+            self.params = kwargs.get("params")
+            return Response()
+
+    http_client = HttpClient()
+    monkeypatch.setattr("src.sync.api_client.httpx.AsyncClient", lambda **_kwargs: http_client)
+    client = CorosApiClient("athlete@example.com", "secret")
+    client.access_token = "token"
+
+    result = await client.post_training_hub(
+        "/training/program/copy",
+        {"name": "Hyrox"},
+        {"id": "source-program", "region": 1},
+    )
+
+    assert result == {"id": "copied"}
+    assert http_client.params == {"id": "source-program", "region": 1}
+
+
 def test_sync_timestamp_is_serialized_as_utc() -> None:
     assert _utc_iso(datetime(2026, 7, 31, 3, 43, 6)) == "2026-07-31T03:43:06+00:00"
     assert _utc_iso(datetime(2026, 7, 31, 10, 43, 6, tzinfo=UTC)) == (
