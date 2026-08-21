@@ -39,6 +39,7 @@ const STAGE_COLORS: Record<string, string> = {
   Deep: "#21E6A5",
   REM: "#2D9BF0",
   Light: "#8DABC2",
+  Awake: "#CBD5E1",
   Nap: "#8B7CC0",
 };
 
@@ -236,18 +237,20 @@ export default function SleepPage() {
     deep: number;
     rem: number;
     light: number;
+    awake: number;
     nap: number;
   }>>((daysByDate, session) => {
     const date = session.sleep_start.slice(5, 10);
-    const day = daysByDate[date] || { date, deep: 0, rem: 0, light: 0, nap: 0 };
+    const day = daysByDate[date] || { date, deep: 0, rem: 0, light: 0, awake: 0, nap: 0 };
     if (session.is_nap) day.nap += session.duration_s / 3600;
     else {
       day.deep += (session.stage_deep_s || 0) / 3600;
       day.rem += (session.stage_rem_s || 0) / 3600;
       day.light += (session.stage_light_s || 0) / 3600;
+      day.awake += (session.stage_awake_s || 0) / 3600;
     }
     return { ...daysByDate, [date]: day };
-  }, {})).map((day) => ({ ...day, total: day.deep + day.rem + day.light + day.nap }))
+  }, {})).map((day) => ({ ...day, total: day.deep + day.rem + day.light + day.awake + day.nap }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const mainSleep = sleep.filter((session) => !session.is_nap);
@@ -386,11 +389,12 @@ export default function SleepPage() {
                   <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<SleepStageTooltip />} />
                   <Bar dataKey="deep" name="Deep" stackId="s" fill="#21E6A5" />
                   <Bar dataKey="rem" name="REM" stackId="s" fill="#2D9BF0" />
-                    <Bar dataKey="light" name="Light" stackId="s" fill="#8DABC2">
-                      {sleepData.map((day) => (
-                        <Cell key={day.date} radius={day.nap > 0 ? 0 : ([4, 4, 0, 0] as unknown as number)} />
-                      ))}
-                    </Bar>
+                  <Bar dataKey="light" name="Light" stackId="s" fill="#8DABC2" />
+                  <Bar dataKey="awake" name="Awake" stackId="s" fill="#CBD5E1">
+                    {sleepData.map((day) => (
+                      <Cell key={day.date} radius={day.nap > 0 ? 0 : ([4, 4, 0, 0] as unknown as number)} />
+                    ))}
+                  </Bar>
                   <Bar dataKey="nap" name="Nap" stackId="s" fill="#8B7CC0" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>

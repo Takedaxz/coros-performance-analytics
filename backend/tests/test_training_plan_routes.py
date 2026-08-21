@@ -12,11 +12,38 @@ from src.api.routes.training_plan_routes import (
     _build_coros_program,
     _calculate_program_summary,
     _draft_from_program,
+    _exercise_video_catalog,
     _parse_coros_schedule,
     _schedule_library_hyrox,
     _schedule_new_workout,
     fetch_coros_calendar,
 )
+
+
+def test_exercise_video_catalog_keeps_only_official_coros_videos() -> None:
+    videos = _exercise_video_catalog(
+        {"data": {"exercises": [
+            {
+                "id": "375",
+                "name": "T1393",
+                "overview": "sid_strength_skierg",
+                "videoUrlArrStr": "https://s3.coros.com/source/exercise_gif/375/ski.mp4",
+            },
+            {
+                "id": "377",
+                "displayName": "Sled Push",
+                "videoInfos": (
+                    '[{"videoUrl":"https://s3.coros.com/source/exercise_gif/377/sled.mp4"}]'
+                ),
+            },
+            {"id": "0", "displayName": "Ignore", "videoUrl": "https://example.com/video.mp4"},
+        ]}}
+    )
+
+    assert videos == {
+        "skierg": "https://s3.coros.com/source/exercise_gif/375/ski.mp4",
+        "sledpush": "https://s3.coros.com/source/exercise_gif/377/sled.mp4",
+    }
 
 
 def test_parse_coros_schedule_normalizes_calendar_workouts() -> None:
@@ -514,26 +541,61 @@ def test_library_summary_matches_selected_day_repeat_structure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_native_library_hyrox_requires_matching_weekday() -> None:
+async def test_native_library_hyrox_schedules_only_the_selected_workout() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self.scheduled: dict[str, object] | None = None
+
+        async def get_training_hub(self, _path: str, _params: object) -> object:
+            return {
+                "id": "library",
+                "sportType": 9,
+                "pbVersion": 9,
+                "name": "Hyrox",
+                "exercises": [{"exerciseKind": 1}],
+            }
+
+        async def post_training_hub(self, path: str, payload: object) -> object:
+            self.calls.append(path)
+            if path == "/training/program/calculate":
+                return {"planDuration": 600}
+            self.scheduled = payload  # type: ignore[assignment]
+            return None
+
+        async def fetch_training_schedule(self, _start: str, _end: str) -> dict[str, object]:
+            if self.scheduled is None:
+                return {"maxIdInPlan": 7}
+            return {
+                "entities": [{"happenDay": "20260811", "idInPlan": 8, "planId": "plan-1"}],
+                "programs": self.scheduled["programs"],  # type: ignore[index]
+            }
+
+    client = FakeClient()
+    event = await _schedule_library_hyrox(client, "library", "2026-08-11")  # type: ignore[arg-type]
+
+    assert client.calls == ["/training/program/calculate", "/training/schedule/update"]
+    assert client.scheduled is not None
+    scheduled_program = client.scheduled["programs"][0]  # type: ignore[index]
+    assert scheduled_program["id"] == "library"
+    assert scheduled_program["idInPlan"] == 8
+    assert scheduled_program["exercises"] == [{"exerciseKind": 1}]
+    assert event.uid == "coros:plan-1:8:20260811"
+
+
+@pytest.mark.asyncio
+async def test_native_library_hyrox_rejects_non_hyrox_library() -> None:
     class FakeClient:
         async def get_training_hub(self, _path: str, _params: object) -> object:
-            return {"id": "library", "sportType": 9, "sourceId": "native"}
+            return {"id": "library", "sportType": 1}
 
         async def fetch_training_schedule(self, _start: str, _end: str) -> dict[str, object]:
             return {
-                "programs": [
-                    {
-                        "idInPlan": "101",
-                        "sourceId": "native",
-                        "exercises": [{"exerciseKind": 1}],
-                    }
-                ],
-                "entities": [
-                    {"idInPlan": "101", "planProgramId": "101", "happenDay": "20260810"}
-                ],
+                "programs": [],
+                "entities": [],
             }
 
-    with pytest.raises(HTTPException, match="selected weekday"):
+    with pytest.raises(HTTPException, match="HYROX workouts only"):
         await _schedule_library_hyrox(FakeClient(), "library", "2026-08-11")  # type: ignore[arg-type]
 
 
@@ -570,6 +632,43 @@ async def test_library_summary_uses_detail_over_partial_query_item(monkeypatch) 
 
     assert workout.total_distance == 15000
     assert workout.total_time == 300
+
+
+@pytest.mark.asyncio
+async def test_library_editor_uses_program_query_when_detail_is_unavailable(monkeypatch) -> None:
+    class FakeClient:
+        async def post_training_hub(self, _path: str, _payload: object) -> object:
+            return [
+                {
+                    "id": "hyrox",
+                    "name": "Hyrox Full Race",
+                    "sportType": 9,
+                    "exercises": [
+                        {
+                            "exerciseType": 2,
+                            "exerciseKind": 1,
+                            "exerciseName": "Ski Erg",
+                            "targetType": 5,
+                            "targetValue": 100_000,
+                        }
+                    ],
+                }
+            ]
+
+        async def get_training_hub(self, _path: str, _params: object) -> object:
+            raise AssertionError("program detail should not be requested")
+
+    async def fake_coros_client(_db: object) -> FakeClient:
+        return FakeClient()
+
+    monkeypatch.setattr(training_plan_routes, "_coros_client", fake_coros_client)
+
+    workout = await training_plan_routes.get_coros_library_workout(
+        "hyrox", "2026-08-21", None  # type: ignore[arg-type]
+    )
+
+    assert workout.sport == "hyrox"
+    assert workout.steps[0].name == "Ski Erg"
 
 
 @pytest.mark.asyncio

@@ -1562,16 +1562,16 @@ a:hover {
   background: var(--color-bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--color-overlay-subtle);
+  box-shadow: none;
   color: var(--color-text-primary);
   cursor: pointer;
   display: flex;
-  font-size: 10px;
-  font-weight: var(--weight-semibold);
-  gap: 6px;
+  font-size: 13px;
+  font-weight: var(--weight-medium);
+  gap: 8px;
   list-style: none;
-  min-height: 30px;
-  padding: 0 10px;
+  min-height: 40px;
+  padding: 0 12px;
   user-select: none;
 }
 
@@ -1580,8 +1580,14 @@ a:hover {
 }
 
 .weekly-metric-selector summary:focus-visible {
-  outline: 2px solid var(--color-accent-primary);
-  outline-offset: 2px;
+  border-color: var(--color-accent-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent-primary) 18%, transparent);
+  outline: none;
+}
+
+.weekly-metric-selector[open] summary {
+  background: var(--color-surface-secondary);
+  border-color: color-mix(in srgb, var(--color-accent-primary) 48%, var(--border-color));
 }
 
 .weekly-selector-signals {
@@ -1598,14 +1604,14 @@ a:hover {
 .weekly-metric-menu {
   background: var(--color-popover);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
   display: grid;
-  gap: 4px;
-  padding: var(--space-2);
+  gap: 2px;
+  padding: 4px;
   position: absolute;
   right: 0;
-  top: calc(100% + 8px);
+  top: calc(100% + 4px);
   width: 225px;
 }
 
@@ -1615,16 +1621,29 @@ a:hover {
 
 .weekly-metric-menu .dropdown-option {
   align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--color-text-primary);
   display: flex;
-  font-size: 12px;
-  font-weight: var(--weight-semibold);
+  font-size: 13px;
+  font-weight: var(--weight-medium);
   gap: 10px;
   min-height: 40px;
-  padding: 8px 10px;
+  padding: 0 12px;
   text-align: left;
   width: 100%;
+}
+
+.weekly-metric-menu .dropdown-option[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--color-accent-primary) 10%, transparent);
+  border-color: transparent;
+}
+
+.weekly-metric-menu .dropdown-option:hover:not([aria-disabled="true"]) {
+  background: var(--color-surface-interactive);
+  border-color: transparent;
+  transform: none;
 }
 
 .weekly-metric-check {
@@ -4604,6 +4623,7 @@ table.data-table .lap-split-table tr:hover td {
   border: 1px solid color-mix(in srgb, var(--step-color) 30%, var(--border-color));
   border-radius: var(--radius-lg);
   padding: var(--space-3);
+  position: relative;
   transition: border-color 150ms ease, background-color 150ms ease, opacity 150ms ease, transform 150ms ease;
 }
 
@@ -4719,6 +4739,27 @@ table.data-table .lap-split-table tr:hover td {
   font-size: 15px;
 }
 
+.plan-workout-exercise-video {
+  background: var(--color-popover);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  left: 38px;
+  padding: 8px;
+  position: absolute;
+  top: calc(100% - 4px);
+  width: min(280px, calc(100vw - 48px));
+  z-index: 2;
+}
+
+.plan-workout-exercise-video video {
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: calc(var(--radius-md) - 3px);
+  width: 100%;
+}
+
 .plan-workout-step-fields {
   display: grid;
   gap: var(--space-2);
@@ -4745,9 +4786,8 @@ table.data-table .lap-split-table tr:hover td {
   border-radius: var(--radius-sm);
   font-size: 13px;
   justify-content: space-between;
-  min-height: 42px;
+  min-height: 40px;
   min-width: 0;
-  overflow: hidden;
   padding: 9px 12px;
   width: 100%;
 }
@@ -5192,6 +5232,7 @@ table.data-table .lap-split-table tr:hover td {
   outline-offset: 2px;
 }
 
+/* ── Single Select — iOS contextual menu style ── */
 .single-select {
   position: relative;
   z-index: 5;
@@ -5205,18 +5246,29 @@ table.data-table .lap-split-table tr:hover td {
   align-items: center;
   background: var(--color-bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-full);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--color-overlay-subtle);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
   color: var(--color-text-primary);
   cursor: pointer;
   display: flex;
-  font-size: 11px;
-  font-weight: var(--weight-bold);
+  font-size: 13px;
+  font-weight: var(--weight-medium);
   gap: var(--space-2);
   list-style: none;
+  min-height: 40px;
   min-width: 0;
-  padding: 8px 12px;
+  padding: 0 12px;
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
   user-select: none;
+}
+
+.single-select-trigger:hover {
+  border-color: var(--border-color-hover);
+}
+
+.single-select[open] .single-select-trigger {
+  background: var(--color-surface-secondary);
+  border-color: color-mix(in srgb, var(--color-accent-primary) 48%, var(--border-color));
 }
 
 .single-select-trigger-label {
@@ -5229,6 +5281,12 @@ table.data-table .lap-split-table tr:hover td {
 
 .single-select-trigger::-webkit-details-marker {
   display: none;
+}
+
+.single-select-trigger:focus-visible {
+  border-color: var(--color-accent-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent-primary) 18%, transparent);
+  outline: none;
 }
 
 .single-select-trigger svg {
@@ -5244,42 +5302,88 @@ table.data-table .lap-split-table tr:hover td {
 .single-select-menu {
   background: var(--color-popover);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
-  display: grid;
-  gap: 4px;
+  display: flex;
+  flex-direction: column;
   max-width: min(280px, 90vw);
-  min-width: max(100%, 132px);
-  padding: 8px;
+  min-width: max(100%, 160px);
+  padding: 4px;
+  overflow: hidden;
   position: absolute;
   right: 0;
-  top: calc(100% + 8px);
+  top: calc(100% + 4px);
   width: max-content;
   z-index: 10;
 }
 
 .single-select-option {
   align-items: center;
-  border-radius: 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
   cursor: pointer;
   display: flex;
-  font-size: 12px;
-  font-weight: var(--weight-semibold);
-  gap: 8px;
-  justify-content: space-between;
-  line-height: 1.35;
-  min-height: 36px;
-  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: var(--weight-medium);
+  gap: 0;
+  justify-content: flex-start;
+  letter-spacing: -0.01em;
+  min-height: 40px;
+  padding: 0 12px;
   text-align: left;
-  white-space: normal;
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+  transform: none;
   width: 100%;
-  word-break: break-word;
 }
 
-.single-select-option[aria-pressed="true"] svg {
-  color: var(--color-accent-primary);
+.single-select-option:hover:not([aria-selected="true"]),
+.single-select-option:focus-visible {
+  background: var(--color-surface-interactive);
+  border: none;
+  outline: none;
+  transform: none;
 }
+
+.single-select-option:active {
+  transform: translateY(1px);
+}
+
+.single-select-option-check {
+  align-items: center;
+  color: var(--color-accent-primary);
+  display: flex;
+  flex-shrink: 0;
+  height: 20px;
+  justify-content: center;
+  margin-left: 8px;
+  width: 20px;
+}
+
+.single-select-option-label {
+  flex: 1;
+  line-height: 1.35;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.single-select-option[aria-selected="true"] {
+  background: color-mix(in srgb, var(--color-accent-primary) 12%, transparent);
+}
+
+.single-select-option[aria-selected="true"] .single-select-option-label {
+  color: var(--color-accent-primary);
+  font-weight: 500;
+}
+
+@media (pointer: coarse) {
+  .single-select-trigger,
+  .single-select-option {
+    min-height: 44px;
+  }
+}
+
 
 .activity-header-controls {
   align-items: center;
@@ -5325,12 +5429,12 @@ table.data-table .lap-split-table tr:hover td {
 .training-volume-controls .custom-datepicker-trigger {
   background: var(--color-bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-full);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--color-overlay-subtle);
-  font-size: 11px;
-  font-weight: var(--weight-bold);
-  gap: 10px;
-  height: 36px;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: var(--weight-medium);
+  gap: 8px;
+  height: 40px;
   padding: 0 12px;
 }
 
@@ -5339,17 +5443,18 @@ table.data-table .lap-split-table tr:hover td {
 }
 
 .training-volume-controls .custom-datepicker-trigger.is-open {
-  border-color: var(--border-color-hover);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--color-overlay-subtle);
+  background: var(--color-surface-secondary);
+  border-color: color-mix(in srgb, var(--color-accent-primary) 48%, var(--border-color));
+  box-shadow: none;
 }
 
 .training-volume-controls .custom-datepicker-icon svg {
-  height: 12px;
-  width: 12px;
+  height: 15px;
+  width: 15px;
 }
 
 .training-volume-controls .custom-datepicker-popover {
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
 }
 
 .training-volume-controls label:last-child .custom-datepicker-popover {
@@ -6795,51 +6900,55 @@ details[open] > .ai-session-group-summary {
   pointer-events: none;
   position: absolute;
   inset: -140px -100px;
-  overflow: hidden;
+  overflow: visible;
   z-index: 0;
 }
 
 .ai-pulse-orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(70px);
-  opacity: 0.15;
+  filter: blur(50px);
+  opacity: 0.16;
   pointer-events: none;
   animation: pulseGlowAmbient 8s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
 }
 
 .ai-pulse-orb-1 {
-  top: 5%;
-  left: 25%;
+  top: 10%;
+  left: 20%;
   width: 380px;
   height: 380px;
-  background: radial-gradient(circle, #10b981 0%, rgba(16, 185, 129, 0) 70%);
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.85) 0%, rgba(16, 185, 129, 0.2) 45%, rgba(16, 185, 129, 0) 70%);
   animation-delay: 0s;
 }
 
 .ai-pulse-orb-2 {
   top: 20%;
-  right: 20%;
-  width: 320px;
-  height: 320px;
-  background: radial-gradient(circle, #34d399 0%, rgba(52, 211, 153, 0) 70%);
+  right: 18%;
+  width: 340px;
+  height: 340px;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.85) 0%, rgba(52, 211, 153, 0.2) 45%, rgba(52, 211, 153, 0) 70%);
   animation-delay: -4s;
 }
 
 .ai-pulse-ecg-wave {
   position: absolute;
-  bottom: -35px;
+  bottom: 15px;
   left: 50%;
   transform: translateX(-50%);
   width: 100%;
   max-width: 900px;
-  height: 90px;
-  opacity: 0.12;
+  height: 120px;
+  opacity: 0.18;
   stroke: #10b981;
   stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   stroke-dasharray: 1000;
   stroke-dashoffset: 1000;
   fill: none;
+  z-index: 1;
+  pointer-events: none;
   animation: ecgDashPulse 7s linear infinite;
 }
 
@@ -7336,59 +7445,52 @@ details[open] > .ai-session-group-summary {
   width: 300px;
   max-width: calc(100vw - 32px);
   background: var(--color-surface-elevated, #131A1E);
-  border: 1px solid var(--border-color-hover, rgba(255, 255, 255, 0.15));
-  border-radius: var(--radius-lg, 16px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-  padding: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 4px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  animation: attachmentPopoverFadeIn 150ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes attachmentPopoverFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  gap: 0;
 }
 
 .ai-attachment-option {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-height: 52px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: transparent;
   border: none;
-  border-radius: var(--radius-md, 10px);
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
   cursor: pointer;
   text-align: left;
-  transition: background 0.15s ease;
+  transition: background var(--transition-fast), transform var(--transition-fast);
 }
 
 .ai-attachment-option:hover {
   background: var(--color-surface-secondary, rgba(255, 255, 255, 0.08));
 }
 
+.ai-attachment-option:active {
+  transform: translateY(1px);
+}
+
 .ai-attachment-option.is-active {
-  background: color-mix(in srgb, var(--color-accent-primary) 12%, transparent);
+  background: transparent;
 }
 
 .ai-attachment-icon {
-  flex: 0 0 28px;
-  height: 28px;
-  width: 28px;
+  flex: 0 0 24px;
+  height: 24px;
+  width: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--color-text-primary);
 }
 
@@ -7401,8 +7503,8 @@ details[open] > .ai-session-group-summary {
 }
 
 .ai-attachment-title {
-  font-size: var(--text-xs, 12px);
-  font-weight: var(--weight-normal, 500);
+  font-size: 13px;
+  font-weight: var(--weight-medium);
   color: var(--color-text-primary);
   display: flex;
   align-items: center;
@@ -7410,7 +7512,7 @@ details[open] > .ai-session-group-summary {
 }
 
 .ai-attachment-subtitle {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--color-text-muted, #8a99a8);
 }
 
@@ -7451,7 +7553,7 @@ details[open] > .ai-session-group-summary {
   justify-content: center;
   padding: 0;
   margin-left: 2px;
-  opacity: 0.7;
+  opacity: 0.5;
 }
 
 .web-search-active-chip button:hover {
@@ -7666,10 +7768,10 @@ details[open] > .ai-session-group-summary {
   width: 270px;
   max-height: min(340px, calc(100vh - 120px));
   background: var(--color-popover);
-  border: 1px solid var(--color-overlay-strong);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.45), 0 2px 8px -2px rgba(0, 0, 0, 0.3);
-  padding: 6px 0;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 4px 0;
   z-index: 100;
   overflow: hidden;
   display: flex;
@@ -7680,7 +7782,7 @@ details[open] > .ai-session-group-summary {
   overflow-y: auto;
   overscroll-behavior: contain;
   max-height: 100%;
-  padding: 0 6px;
+  padding: 0 4px;
   display: flex;
   flex-direction: column;
   scrollbar-width: thin;
@@ -7689,62 +7791,11 @@ details[open] > .ai-session-group-summary {
 
 .gemini-model-popover.direction-up,
 .gemini-model-popover:not(.direction-down) {
-  bottom: calc(100% + 10px);
-  transform-origin: bottom right;
-  animation: gemini-popover-in-up 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  bottom: calc(100% + 4px);
 }
 
 .gemini-model-popover.direction-down {
-  top: calc(100% + 10px);
-  transform-origin: top right;
-  animation: gemini-popover-in-down 160ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.gemini-model-popover-scroll::-webkit-scrollbar {
-  width: 8px;
-}
-
-.gemini-model-popover-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.gemini-model-popover-scroll::-webkit-scrollbar-thumb {
-  background: var(--color-overlay-medium);
-  border: 2px solid transparent;
-  border-top: 10px solid transparent;
-  border-bottom: 10px solid transparent;
-  background-clip: padding-box;
-  border-radius: 9999px;
-}
-
-.gemini-model-popover-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
-  border: 2px solid transparent;
-  border-top: 10px solid transparent;
-  border-bottom: 10px solid transparent;
-  background-clip: padding-box;
-}
-
-@keyframes gemini-popover-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes gemini-popover-in-down {
-  from {
-    opacity: 0;
-    transform: translateY(-8px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  top: calc(100% + 4px);
 }
 
 .gemini-popover-header {
@@ -7785,39 +7836,44 @@ details[open] > .ai-session-group-summary {
 .gemini-model-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: 10px;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
   border: none;
   background: transparent;
   color: var(--color-text-primary);
   text-align: left;
   cursor: pointer;
   width: 100%;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), transform var(--transition-fast);
 }
 
 .gemini-model-item:hover {
-  background: var(--color-overlay-subtle);
+  background: var(--color-surface-interactive);
 }
 
 .gemini-model-item.is-selected {
-  background: var(--color-overlay-soft);
+  background: color-mix(in srgb, var(--color-accent-primary) 10%, transparent);
 }
 
 .gemini-model-item.is-selected .gemini-model-name {
-  color: var(--color-text-primary);
+  color: var(--color-accent-primary);
+}
+
+.gemini-model-item:active {
+  transform: translateY(1px);
 }
 
 .gemini-model-tier {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border-radius: 8px;
-  background: var(--color-overlay-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
 }
 
 .gemini-model-tier-icon {
@@ -7866,7 +7922,7 @@ details[open] > .ai-session-group-summary {
 
 .gemini-model-name {
   font-size: 12px;
-  font-weight: 400;
+  font-weight: var(--weight-medium);
   line-height: 1.3;
   transition: color var(--transition-fast);
 }
@@ -8223,8 +8279,13 @@ details[open] > .ai-session-group-summary {
   max-width: min(440px, calc(100vw - 48px));
   max-height: min(340px, 50vh);
   overflow-y: auto;
+  scrollbar-width: none;
   box-shadow: 0 12px 36px -4px rgba(0, 0, 0, 0.5);
   z-index: 50;
+}
+
+.ai-tool-tooltip::-webkit-scrollbar {
+  display: none;
 }
 
 .ai-tool-tooltip::after {
@@ -8951,19 +9012,19 @@ details[open] > .ai-session-group-summary {
 }
 
 .ai-attachment-badge.is-deep {
-  background: rgba(168, 85, 247, 0.2);
-  color: #c084fc;
+  background: color-mix(in srgb, var(--color-accent-primary) 12%, transparent);
+  color: var(--color-accent-primary);
 }
 
 .web-search-active-chip.is-deep-research {
-  background: rgba(168, 85, 247, 0.14);
-  border-color: rgba(168, 85, 247, 0.4);
-  color: #c084fc;
+  background: color-mix(in srgb, var(--color-accent-primary) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent-primary) 28%, transparent);
+  color: var(--color-accent-primary);
 }
 
 .web-search-active-chip.is-deep-research button {
   color: currentColor;
-  opacity: 0.7;
+  opacity: 0.5;
 }
 
 .web-search-active-chip.is-deep-research button:hover {
@@ -9574,7 +9635,7 @@ details[open] > .ai-session-group-summary {
   align-items: center;
   background: var(--color-bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
   cursor: pointer;
   display: flex;
@@ -9594,7 +9655,7 @@ details[open] > .ai-session-group-summary {
 
 .custom-datepicker-trigger.is-open {
   border-color: var(--color-accent-primary);
-  box-shadow: 0 0 0 3px rgba(33, 230, 165, 0.15);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent-primary) 18%, transparent);
 }
 
 .custom-datepicker-trigger:disabled {
@@ -9619,43 +9680,19 @@ details[open] > .ai-session-group-summary {
 .custom-datepicker-popover {
   background: var(--color-popover);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
-  box-shadow: var(--shadow-lg), 0 16px 40px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
   left: 0;
   min-width: 280px;
-  padding: 14px 16px 12px;
+  padding: 12px;
   position: absolute;
   top: calc(100% + 6px);
   z-index: 99999;
-  animation: datepickerFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .custom-datepicker-popover.drop-up {
   top: auto;
   bottom: calc(100% + 6px);
-  animation: datepickerFadeInUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes datepickerFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes datepickerFadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 
 .custom-datepicker-header {
@@ -9778,7 +9815,7 @@ details[open] > .ai-session-group-summary {
   color: var(--color-text-inverse) !important;
   font-weight: var(--weight-bold);
   border-color: var(--color-accent-primary) !important;
-  box-shadow: 0 2px 8px rgba(33, 230, 165, 0.3);
+  box-shadow: none;
 }
 
 .custom-datepicker-day-cell.is-in-week {

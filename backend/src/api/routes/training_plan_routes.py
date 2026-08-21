@@ -2,8 +2,10 @@
 
 import asyncio
 import datetime
+import json
 import re
 from typing import Literal, cast
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,6 +23,7 @@ settings = get_settings()
 _ICAL_URL = "https://p135-caldav.icloud.com/published/2/MTAzNTc1NTUzNDMxMDM1N4gPI9Eruy25g9v9R_Ci0txlHRMQJW0ifWYN4qF0Rbss"
 EventType = Literal["run", "ride", "strength", "swim", "yoga", "pilates", "race", "other"]
 ScheduleObject = dict[str, object]
+_COROS_EXERCISE_VIDEO_PREFIX = "/source/exercise_gif/"
 
 
 CalendarSource = Literal["ical", "coros"]
@@ -216,6 +219,64 @@ class CorosLibraryWorkout(BaseModel):
     total_time: int | None = None
     total_distance: float | None = None
     step_kinds: list[str] = Field(default_factory=list)
+
+
+def _exercise_catalog_rows(value: object) -> list[ScheduleObject]:
+    if isinstance(value, list):
+        return [row for item in value for row in _exercise_catalog_rows(item)]
+    if not isinstance(value, dict):
+        return []
+    row = cast("ScheduleObject", value)
+    is_exercise = any(key in row for key in ("id", "originId", "exerciseId")) and any(
+        key in row for key in ("name", "nameText", "displayName", "exerciseName")
+    )
+    return ([row] if is_exercise else []) + [
+        child
+        for key in ("list", "rows", "data", "exercises", "records")
+        for child in _exercise_catalog_rows(row.get(key))
+    ]
+
+
+def _exercise_video_url(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    parsed = urlparse(value.strip())
+    if parsed.scheme != "https" or parsed.netloc != "s3.coros.com":
+        return None
+    return value.strip() if parsed.path.startswith(_COROS_EXERCISE_VIDEO_PREFIX) else None
+
+
+def _exercise_video_catalog(value: object) -> dict[str, str]:
+    """Return the first official COROS demonstration video keyed by exercise name."""
+    videos: dict[str, str] = {}
+    for row in _exercise_catalog_rows(value):
+        name = next(
+            (
+                re.sub(r"^sid_[a-z]+_", "", item.strip()).replace("_", " ")
+                for key in ("overview", "displayName", "exerciseName", "nameText", "name")
+                if isinstance((item := row.get(key)), str) and item.strip()
+            ),
+            None,
+        )
+        if name is None:
+            continue
+        candidates: list[object] = [row.get("videoUrl")]
+        if isinstance(row.get("videoUrlArrStr"), str):
+            candidates.extend(row["videoUrlArrStr"].split(","))
+        raw_infos = row.get("videoInfos")
+        if isinstance(raw_infos, str):
+            try:
+                raw_infos = json.loads(raw_infos)
+            except json.JSONDecodeError:
+                raw_infos = []
+        if isinstance(raw_infos, list):
+            candidates.extend(
+                info.get("videoUrl") for info in raw_infos if isinstance(info, dict)
+            )
+        video_url = next((url for item in candidates if (url := _exercise_video_url(item))), None)
+        if video_url:
+            videos.setdefault(re.sub(r"[^a-z0-9]+", "", name.lower()), video_url)
+    return videos
 
 
 class CorosWorkoutPreview(BaseModel):
@@ -1156,134 +1217,39 @@ async def _schedule_library_hyrox(
             status_code=422,
             detail="Native library scheduling is currently available for HYROX workouts only.",
         )
-    source_id = library_program.get("sourceId")
-    if source_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="This HYROX library workout has no native COROS source program.",
-        )
-
-    target_date = datetime.datetime.strptime(target_day, "%Y%m%d").date()
-    search_start = target_date - datetime.timedelta(days=365)
-    search_end = target_date + datetime.timedelta(days=365)
-    source_schedule = await client.fetch_training_schedule(
-        search_start.strftime("%Y%m%d"), search_end.strftime("%Y%m%d")
+    program = _apply_calculation(
+        cast("ScheduleObject", library_program),
+        await client.post_training_hub("/training/program/calculate", library_program),
     )
-    native_occurrences: list[datetime.date] = []
-    for program in source_schedule.get("programs", []):
-        if not isinstance(program, dict) or str(program.get("sourceId")) != str(source_id):
-            continue
-        if not any(
-            isinstance(exercise, dict) and exercise.get("exerciseKind") is not None
-            for exercise in program.get("exercises", [])
-        ):
-            continue
-        program_id_in_plan = str(program.get("idInPlan", ""))
-        for entity in source_schedule.get("entities", []):
-            if not isinstance(entity, dict) or str(entity.get("planProgramId")) != program_id_in_plan:
-                continue
-            source_day = str(entity.get("happenDay"))
-            if re.fullmatch(r"\d{8}", source_day):
-                native_occurrences.append(
-                    datetime.datetime.strptime(source_day, "%Y%m%d").date()
-                )
-    matching_occurrences = [
-        occurrence
-        for occurrence in native_occurrences
-        if occurrence.weekday() == target_date.weekday()
-    ]
-    if not matching_occurrences:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "No scheduled native COROS occurrence was found for this library workout "
-                "on the selected weekday."
-            ),
-        )
-    source_date = min(matching_occurrences, key=lambda occurrence: abs((occurrence - target_date).days))
-    source_day = source_date.strftime("%Y%m%d")
-    source_week = source_date - datetime.timedelta(days=source_date.weekday())
-    target_week = target_date - datetime.timedelta(days=target_date.weekday())
-    before = await client.fetch_training_schedule(
-        target_week.strftime("%Y%m%d"),
-        (target_week + datetime.timedelta(days=6)).strftime("%Y%m%d"),
-    )
-    before_ids = {
-        str(entity.get("idInPlan"))
-        for entity in before.get("entities", [])
-        if isinstance(entity, dict)
+    schedule = await client.fetch_training_schedule(target_day, target_day)
+    max_id = schedule.get("maxIdInPlan")
+    id_in_plan = int(max_id) + 1 if isinstance(max_id, (int, float, str)) else 1
+    program["idInPlan"] = id_in_plan
+    entity: ScheduleObject = {
+        "happenDay": target_day,
+        "idInPlan": id_in_plan,
+        "sortNoInSchedule": 1,
     }
+    if isinstance(program.get("exerciseBarChart"), list):
+        entity["exerciseBarChart"] = program["exerciseBarChart"]
     await client.post_training_hub(
-        "/training/schedule/copyWeek",
-        {},
+        "/training/schedule/update",
         {
-            "sourceFirstDayOfWeek": source_week.strftime("%Y%m%d"),
-            "targetFirstDayOfWeek": target_week.strftime("%Y%m%d"),
+            "entities": [entity],
+            "programs": [program],
+            "versionObjects": [{"id": id_in_plan, "status": 1}],
+            "pbVersion": program.get("pbVersion", 2),
         },
     )
-    after = await client.fetch_training_schedule(
-        target_week.strftime("%Y%m%d"),
-        (target_week + datetime.timedelta(days=6)).strftime("%Y%m%d"),
+    verified = _parse_coros_schedule(
+        await client.fetch_training_schedule(target_day, target_day)
     )
-    new_programs = {
-        str(program.get("idInPlan")): program
-        for program in after.get("programs", [])
-        if isinstance(program, dict)
-        and str(program.get("idInPlan")) not in before_ids
-    }
-    native_program = next(
-        (
-            program
-            for program in new_programs.values()
-            if str(program.get("sourceId")) == str(source_id)
-            and any(
-                isinstance(exercise, dict) and exercise.get("exerciseKind") is not None
-                for exercise in program.get("exercises", [])
-            )
-        ),
-        None,
-    )
-    if native_program is None:
-        raise HTTPException(
-            status_code=502, detail="COROS copied the week without native HYROX data."
-        )
-
-    copied_id = str(native_program.get("idInPlan"))
-    copied_entities = [
-        entity
-        for entity in after.get("entities", [])
-        if isinstance(entity, dict)
-        and str(entity.get("idInPlan")) not in before_ids
-        and str(entity.get("idInPlan")) != copied_id
-    ]
-    if copied_entities:
-        await client.post_training_hub(
-            "/training/schedule/update",
-            {
-                "versionObjects": [
-                    {
-                        "id": entity.get("idInPlan"),
-                        "planProgramId": entity.get("planProgramId", entity.get("idInPlan")),
-                        "planId": entity.get("planId", ""),
-                        "status": 3,
-                    }
-                    for entity in copied_entities
-                ],
-                "pbVersion": after.get("pbVersion", 2),
-            },
-        )
-    events = _parse_coros_schedule(after)
-    expected_date = target_week + datetime.timedelta(days=source_date.weekday())
-    expected_day = expected_date.strftime("%Y%m%d")
-    for event in events:
-        if event.uid.endswith(f":{copied_id}:{expected_day}"):
+    for event in verified:
+        if event.uid.endswith(f":{id_in_plan}:{target_day}"):
             return event
     raise HTTPException(
-        status_code=422,
-        detail=(
-            "COROS preserved the native HYROX workout, but the selected date must use "
-            f"the source workout weekday ({expected_date.strftime('%A')})."
-        ),
+        status_code=502,
+        detail="COROS accepted the library workout but did not return it on reread.",
     )
 
 
@@ -1478,10 +1444,21 @@ async def get_coros_library_workout(
     """Load one saved workout definition into the editor for scheduling."""
     _coros_day(date)
     try:
-        data = await (await _coros_client(db)).get_training_hub(
-            "/training/program/detail",
-            {"id": program_id, "supportRestExercise": 1},
-        )
+        client = await _coros_client(db)
+        programs = await client.post_training_hub("/training/program/query", {})
+        data = next(
+            (
+                item
+                for item in programs
+                if isinstance(item, dict) and str(item.get("id")) == program_id
+            ),
+            None,
+        ) if isinstance(programs, list) else None
+        if data is None:
+            data = await client.get_training_hub(
+                "/training/program/detail",
+                {"id": program_id, "supportRestExercise": 1},
+            )
         if not isinstance(data, dict):
             raise HTTPException(status_code=404, detail="COROS saved workout not found.")
         return _draft_from_program(
@@ -1491,13 +1468,29 @@ async def get_coros_library_workout(
         raise HTTPException(status_code=502, detail=f"COROS Calendar unavailable: {exc}") from exc
 
 
+@router.get("/coros/exercise-videos")
+async def coros_exercise_videos(
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, str]:
+    """Return official COROS strength exercise demonstration videos."""
+    try:
+        catalog = await (await _coros_client(db)).get_training_hub(
+            "/training/exercise/query", {"sportType": 4, "keyword": ""}
+        )
+        return _exercise_video_catalog(catalog)
+    except CorosApiClientError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"COROS exercise catalog unavailable: {exc}"
+        ) from exc
+
+
 @router.post("/coros/library/{program_id}/schedule", response_model=TrainingEvent)
 async def schedule_coros_library_workout(
     program_id: str,
     request: ScheduleCorosLibraryWorkout,
     db: AsyncSession = Depends(get_db_session),
 ) -> TrainingEvent:
-    """Schedule a native HYROX library workout without rebuilding its COROS identity."""
+    """Schedule a HYROX library workout with its native station definitions."""
     try:
         return await _schedule_library_hyrox(await _coros_client(db), program_id, request.date)
     except CorosApiClientError as exc:

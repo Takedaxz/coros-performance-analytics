@@ -34,6 +34,14 @@ const MUSCLES_BY_AREA: Record<BodyArea, string[]> = {
   legs: ["quadriceps", "hamstring", "calves", "adductors", "tibialis"],
 };
 
+function getIntensityColor(load: number, maximumLoad: number): string {
+  if (maximumLoad <= 0 || load <= 0) return "var(--color-overlay-soft)";
+  const ratio = load / maximumLoad;
+  if (ratio >= 0.85) return `rgba(255, 77, 98, 0.9)`;
+  if (ratio >= 0.55) return `rgba(255, 140, 60, 0.85)`;
+  return `rgba(255, 196, 60, 0.8)`;
+}
+
 function BodyFigure({
   parts,
   side,
@@ -53,8 +61,7 @@ function BodyFigure({
   const fillFor = (slug: string | undefined): string => {
     const area = areaForMuscle(slug);
     if (!area || !loads[area]) return "var(--color-overlay-soft)";
-    const intensity = loads[area] / maximumLoad;
-    return `rgba(255, 77, 98, ${0.22 + intensity * 0.68})`;
+    return getIntensityColor(loads[area], maximumLoad);
   };
 
   return (
@@ -109,10 +116,7 @@ export default function StrengthBodyMap({ exercises }: StrengthBodyMapProps) {
     .sort((a, b) => loads[b] - loads[a]);
 
   const intensityColor = (area: BodyArea): string => {
-    const ratio = loads[area] / maximumLoad;
-    if (ratio >= 0.85) return `rgba(255, 77, 98, 0.9)`;
-    if (ratio >= 0.55) return `rgba(255, 140, 60, 0.85)`;
-    return `rgba(255, 196, 60, 0.8)`;
+    return getIntensityColor(loads[area], maximumLoad);
   };
 
   return (

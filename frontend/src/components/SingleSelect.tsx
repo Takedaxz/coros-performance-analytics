@@ -32,24 +32,27 @@ export default function SingleSelect({
           <path d="m3 4.5 3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </summary>
-      <div className="single-select-menu">
+      <div className="single-select-menu" role="listbox">
         {options.map((option) => (
           <button
             key={option.value}
             type="button"
-            className="dropdown-option single-select-option"
-            aria-pressed={value === option.value}
+            role="option"
+            className="single-select-option"
+            aria-selected={value === option.value}
             onClick={(event) => {
               onChange(option.value);
               event.currentTarget.closest("details")?.removeAttribute("open");
             }}
           >
-            {option.label}
-            {value === option.value && (
-              <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M2.5 6.2 4.8 8.5 9.5 3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            )}
+            <span className="single-select-option-label">{option.label}</span>
+            <span className="single-select-option-check" aria-hidden="true">
+              {value === option.value && (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M2.5 7.2 5.3 10 11.5 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </span>
           </button>
         ))}
       </div>

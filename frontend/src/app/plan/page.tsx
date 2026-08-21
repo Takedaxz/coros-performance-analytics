@@ -75,6 +75,7 @@ const WORKOUT_ICON_PATHS = {
   save: "M6 3h12v18l-6-4-6 4z",
   plus: "M12 5v14M5 12h14",
   copy: "M8 8h11v11H8zM5 16H4V5h11v1",
+  video: "M4 6h11v12H4zM15 10l5-3v10l-5-3z",
   trash: "M4 7h16M10 11v6m4-6v6M9 7l1-3h4l1 3m-9 0 1 13h10l1-13",
 } as const;
 
@@ -270,6 +271,10 @@ function displayStepName(step: WorkoutStepForm): string {
   return step.name.trim() || friendlyStepName(step.kind);
 }
 
+function exerciseVideo(name: string, videos: Record<string, string>): string | null {
+  return videos[name.toLowerCase().replace(/[^a-z0-9]+/g, "")] ?? null;
+}
+
 function normalizeLoadedDraft(draft: WorkoutEditorData): WorkoutDraftForm {
   return {
     ...draft,
@@ -322,6 +327,7 @@ function mapSearchUrl(location: string): string {
 
 export default function TrainingPlanPage() {
   const today = useMemo(() => new Date(), []);
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
   const [anchor, setAnchor] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState(() => localDateKey(new Date()));
   const [source, setSource] = useState<CalendarSource>("coros");
@@ -345,9 +351,12 @@ export default function TrainingPlanPage() {
   const [workoutLoadError, setWorkoutLoadError] = useState("");
   const [structuredSaveToLibrary, setStructuredSaveToLibrary] = useState(false);
   const [activeWorkoutStep, setActiveWorkoutStep] = useState<number | null>(0);
+  const [activeExerciseVideoStep, setActiveExerciseVideoStep] = useState<number | null>(null);
   const [draggedWorkoutItem, setDraggedWorkoutItem] = useState<WorkoutDragItem | null>(null);
   const [dropTargetWorkoutItem, setDropTargetWorkoutItem] = useState<WorkoutDragItem | null>(null);
   const [workoutDraftCache, setWorkoutDraftCache] = useState<Partial<Record<"structured", WorkoutDraftForm>>>({});
+  const [exerciseVideos, setExerciseVideos] = useState<Record<string, string>>({});
+  const [exerciseVideosLoaded, setExerciseVideosLoaded] = useState(false);
   const [workoutError, setWorkoutError] = useState("");
   const editRequestRef = useRef<AbortController | null>(null);
 
@@ -386,6 +395,17 @@ export default function TrainingPlanPage() {
     return () => window.clearTimeout(timeout);
   }, [calendarMoveNotice]);
 
+  useEffect(() => {
+    if (workoutDraft?.sport !== "hyrox" || exerciseVideosLoaded) return;
+    const controller = new AbortController();
+    void fetch(`${apiBase}/api/training-plan/coros/exercise-videos`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() as Promise<Record<string, string>> : {})
+      .then((videos) => setExerciseVideos(videos))
+      .catch(() => undefined)
+      .finally(() => setExerciseVideosLoaded(true));
+    return () => controller.abort();
+  }, [apiBase, exerciseVideosLoaded, workoutDraft?.sport]);
+
   const eventsByDate = useMemo(() => {
     const grouped: Record<string, TrainingEvent[]> = {};
     for (const event of events) {
@@ -403,7 +423,6 @@ export default function TrainingPlanPage() {
     setAnchor(new Date(today.getFullYear(), today.getMonth(), 1));
     setSelectedDate(todayKey);
   };
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
   const openNewWorkout = (date?: string) => {
     const targetDate = date ?? selectedDate;
     setSelectedDate(targetDate);
@@ -418,6 +437,7 @@ export default function TrainingPlanPage() {
     setSelectedLibraryWorkoutId(null);
     setStructuredSaveToLibrary(false);
     setActiveWorkoutStep(0);
+    setActiveExerciseVideoStep(null);
     if (libraryWorkouts.length === 0 && !isLoadingLibrary) void loadLibraryWorkouts();
   };
   const openEditWorkout = async (uid: string) => {
@@ -431,6 +451,7 @@ export default function TrainingPlanPage() {
     setWorkoutEditorMode("structured");
     setWorkoutDraft(newStructuredWorkoutDraft(event?.start.slice(0, 10) ?? selectedDate));
     setActiveWorkoutStep(null);
+    setActiveExerciseVideoStep(null);
     setIsLoadingWorkoutEditor(true);
     try {
       const response = await fetch(`${apiBase}/api/training-plan/coros/workouts/${encodeURIComponent(uid)}`, { signal: controller.signal });
@@ -457,6 +478,7 @@ export default function TrainingPlanPage() {
     setIsLoadingWorkoutEditor(false);
     setWorkoutLoadError("");
     setWorkoutDraft(null);
+    setActiveExerciseVideoStep(null);
   };
   const loadLibraryWorkouts = async () => {
     setWorkoutError("");
@@ -476,17 +498,6 @@ export default function TrainingPlanPage() {
     setWorkoutError("");
     setIsSavingWorkout(true);
     try {
-      if (selectedLibraryWorkout?.sport === "hyrox") {
-        const response = await fetch(`${apiBase}/api/training-plan/coros/library/${encodeURIComponent(programId)}/schedule`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date: workoutDraft.date, confirmed: true }),
-        });
-        if (!response.ok) throw new Error((await response.json() as { detail?: string }).detail || `HTTP ${response.status}`);
-        setWorkoutDraft(null);
-        setCalendarVersion((value) => value + 1);
-        return;
-      }
       const response = await fetch(`${apiBase}/api/training-plan/coros/library/${encodeURIComponent(programId)}?date=${workoutDraft.date}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data: WorkoutEditorData = await response.json();
@@ -679,12 +690,15 @@ export default function TrainingPlanPage() {
   const stepEditor = (step: WorkoutStepForm, index: number, nested = false) => {
     if (!workoutDraft) return null;
     const targets = targetsFor(workoutDraft.sport, step.kind);
+    const video = exerciseVideo(step.name, exerciseVideos);
+    const isVideoOpen = activeExerciseVideoStep === index;
     const isActive = activeWorkoutStep === index;
     const dragItem: WorkoutDragItem = { scope: nested ? "repeat" : "block", index };
     const isDragging = draggedWorkoutItem?.scope === dragItem.scope && draggedWorkoutItem.index === index;
     const isDropTarget = dropTargetWorkoutItem?.scope === dragItem.scope && dropTargetWorkoutItem.index === index;
     return <article className={`plan-workout-step${isActive ? " is-active" : " is-collapsed"}${isDragging ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`} data-step-kind={step.kind} key={`${index}-${step.name}`} draggable onDragStart={(event) => beginWorkoutDrag(event, dragItem)} onDragEnd={endWorkoutDrag} onDragOver={(event) => allowWorkoutDrop(event, dragItem)} onDrop={(event) => finishWorkoutDrop(event, dragItem)}>
-      <header className="plan-workout-step-title"><WorkoutDragHandle /><span className="plan-workout-step-index">{String(index + 1).padStart(2, "0")}</span><button className="plan-workout-step-toggle" type="button" aria-expanded={isActive} onClick={() => setActiveWorkoutStep(isActive ? null : index)}><small>Step {index + 1}</small><strong>{displayStepName(step)}</strong><em>{targetLabel(step.target)}{step.target !== "open" ? ` · ${structureValue(step)}` : ""}</em></button><div className="plan-workout-step-header-actions"><button type="button" aria-label="Duplicate step" title="Duplicate step" onClick={() => duplicateStep(index)}><WorkoutIcon name="copy" size={15} /></button><button type="button" aria-label="Delete step" title="Delete step" disabled={workoutDraft.steps.length === 1} onClick={() => setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.filter((_, position) => position !== index) })}><WorkoutIcon name="trash" size={15} /></button></div></header>
+      <header className="plan-workout-step-title"><WorkoutDragHandle /><span className="plan-workout-step-index">{String(index + 1).padStart(2, "0")}</span><button className="plan-workout-step-toggle" type="button" aria-expanded={isActive} onClick={() => setActiveWorkoutStep(isActive ? null : index)}><small>Step {index + 1}</small><strong>{displayStepName(step)}</strong><em>{targetLabel(step.target)}{step.target !== "open" ? ` · ${structureValue(step)}` : ""}</em></button><div className="plan-workout-step-header-actions">{video && <button type="button" aria-label={`${isVideoOpen ? "Hide" : "Show"} ${displayStepName(step)} technique video`} title={`${isVideoOpen ? "Hide" : "Show"} technique video`} aria-pressed={isVideoOpen} onClick={() => setActiveExerciseVideoStep(isVideoOpen ? null : index)}><WorkoutIcon name="video" size={15} /></button>}<button type="button" aria-label="Duplicate step" title="Duplicate step" onClick={() => duplicateStep(index)}><WorkoutIcon name="copy" size={15} /></button><button type="button" aria-label="Delete step" title="Delete step" disabled={workoutDraft.steps.length === 1} onClick={() => setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.filter((_, position) => position !== index) })}><WorkoutIcon name="trash" size={15} /></button></div></header>
+      {video && isVideoOpen && <aside className="plan-workout-exercise-video" aria-label={`${displayStepName(step)} technique preview`}><video src={video} controls loop muted playsInline preload="metadata" /></aside>}
       {isActive && <div className="plan-workout-step-fields">
         <label><span>Type</span><SingleSelect ariaLabel="Step type" value={step.kind} onChange={(value) => { const kind = value as WorkoutStepForm["kind"]; updateStep(index, { kind, target: targetsFor(workoutDraft.sport, kind)[0] }); }} options={[{ value: "warmup", label: "Warm-up" }, { value: "training", label: "Training" }, { value: "rest", label: "Rest" }, { value: "cooldown", label: "Cool-down" }]} /></label>
         <label><span>Finish target</span><SingleSelect ariaLabel="Finish target" value={step.target} onChange={(value) => { const nextTarget = value as WorkoutTarget; const nextValue = nextTarget === "distance" ? (step.target === "distance" ? step.value : 1000) : nextTarget === "time" ? (step.target === "time" ? step.value : 600) : step.value; updateStep(index, { target: nextTarget, value: nextValue }); }} options={targets.map((target) => ({ value: target, label: targetLabel(target) }))} /></label>
@@ -950,9 +964,9 @@ export default function TrainingPlanPage() {
                     )}
                     <footer className="plan-workout-editor-footer">
                       <p className="plan-workout-library-selection" aria-live="polite">
-                        {selectedLibraryWorkout ? <><strong>{selectedLibraryWorkout.name}</strong><small>{selectedLibraryWorkout.sport === "hyrox" ? `Ready to schedule natively on ${workoutDateLabel}.` : `Ready to customize for ${workoutDateLabel}.`}</small></> : "Select a workout to continue."}
+                        {selectedLibraryWorkout ? <><strong>{selectedLibraryWorkout.name}</strong><small>{`Ready to customize for ${workoutDateLabel}.`}</small></> : "Select a workout to continue."}
                       </p>
-                      <button className="btn btn-primary" type="button" disabled={!selectedLibraryWorkoutId || isSavingWorkout} onClick={() => selectedLibraryWorkoutId && void openLibraryWorkout(selectedLibraryWorkoutId)}>{isSavingWorkout ? (selectedLibraryWorkout?.sport === "hyrox" ? "Scheduling…" : "Opening…") : (selectedLibraryWorkout?.sport === "hyrox" ? "Schedule workout" : "Customize workout")}</button>
+                      <button className="btn btn-primary" type="button" disabled={!selectedLibraryWorkoutId || isSavingWorkout} onClick={() => selectedLibraryWorkoutId && void openLibraryWorkout(selectedLibraryWorkoutId)}>{isSavingWorkout ? "Opening…" : "Customize workout"}</button>
                     </footer>
                   </section>
                 )}

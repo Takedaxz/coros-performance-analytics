@@ -240,8 +240,9 @@ function SessionLoadingSkeleton() {
 
 function RetryIcon() {
   return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 2v6h-6" />
+      <path d="M21 13a9 9 0 1 1-3-7.7L21 8" />
     </svg>
   );
 }
@@ -258,43 +259,37 @@ function TrashIcon() {
 }
 
 function PlusIcon() {
+  return <Icons8Icon name="plus" size={14} />;
+}
+
+function ImageIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.5" />
+      <path d="m5 17 4.5-4.5 3 3L15 13l4 4" />
     </svg>
   );
 }
 
-function PaperclipIcon() {
+function WebSearchIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57a4 4 0 1 1 5.66 5.66l-8.59 8.58a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-    </svg>
-  );
-}
-
-function GlobeIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
-      <path d="M2 12h20" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M6.4 11h9.2M11 4.5c2 1.9 3 4.1 3 6.5s-1 4.6-3 6.5M11 4.5C9 6.4 8 8.6 8 11s1 4.6 3 6.5M16 16l4 4" />
     </svg>
   );
 }
 
 type SearchMode = "none" | "web" | "deep";
 
-function MicroscopeIcon() {
+function DeepResearchIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M6 18h8" />
-      <path d="M3 22h18" />
-      <path d="M14 22a7 7 0 1 0-14 0" />
-      <path d="M9 14h2" />
-      <path d="M9 12a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2" />
-      <path d="M12 2v2" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 4.5h9.5A2.5 2.5 0 0 1 17 7v12.5H7A2 2 0 0 1 5 17.5z" />
+      <path d="M8 8h6M8 11h5" />
+      <circle cx="16.5" cy="16.5" r="2.5" />
+      <path d="m18.4 18.4 2.1 2.1" />
     </svg>
   );
 }
@@ -347,7 +342,7 @@ function AttachmentPopover({
           onClose();
         }}
       >
-        <span className="ai-attachment-icon"><PaperclipIcon /></span>
+        <span className="ai-attachment-icon"><ImageIcon /></span>
         <div className="ai-attachment-info">
           <div className="ai-attachment-title">Add photos & files</div>
           <div className="ai-attachment-subtitle">Upload from computer</div>
@@ -363,11 +358,8 @@ function AttachmentPopover({
           onClose();
         }}
       >
-        <span
-          className="ai-attachment-icon"
-          style={searchMode === "web" ? { color: "var(--color-accent-primary)", background: "rgba(33, 230, 165, 0.16)" } : undefined}
-        >
-          <GlobeIcon />
+        <span className="ai-attachment-icon">
+          <WebSearchIcon />
         </span>
         <div className="ai-attachment-info">
           <div className="ai-attachment-title">
@@ -387,11 +379,8 @@ function AttachmentPopover({
           onClose();
         }}
       >
-        <span
-          className="ai-attachment-icon"
-          style={searchMode === "deep" ? { color: "#c084fc", background: "rgba(168, 85, 247, 0.16)" } : undefined}
-        >
-          <MicroscopeIcon />
+        <span className="ai-attachment-icon">
+          <DeepResearchIcon />
         </span>
         <div className="ai-attachment-info">
           <div className="ai-attachment-title">
@@ -405,20 +394,57 @@ function AttachmentPopover({
   );
 }
 
-function FolderIcon() {
+function Icons8Icon({
+  name,
+  size = 14,
+  className,
+  color,
+  opacity,
+}: {
+  name: string;
+  size?: number;
+  className?: string;
+  color?: string;
+  opacity?: number;
+}) {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z" />
-    </svg>
+    <span
+      className={className}
+      aria-hidden="true"
+      style={{
+        display: "inline-block",
+        width: size,
+        height: size,
+        backgroundColor: color || "var(--color-text-secondary)",
+        opacity: opacity ?? 0.75,
+        WebkitMaskImage: `url(/icons/${name}.png)`,
+        WebkitMaskSize: "contain",
+        WebkitMaskRepeat: "no-repeat",
+        WebkitMaskPosition: "center",
+        maskImage: `url(/icons/${name}.png)`,
+        maskSize: "contain",
+        maskRepeat: "no-repeat",
+        maskPosition: "center",
+        flexShrink: 0,
+        verticalAlign: "middle",
+      }}
+    />
   );
 }
 
-function ChatIcon() {
+function ChatIcon({ isActive }: { isActive?: boolean }) {
   return (
-    <svg className="ai-session-chat-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.8 8.8 0 0 1-4-.9L4 20l1.4-3.5A7.4 7.4 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z" />
-    </svg>
+    <Icons8Icon
+      name="messaging"
+      size={13}
+      className="ai-session-chat-icon"
+      color={isActive ? "var(--color-accent-primary)" : "var(--color-text-secondary)"}
+    />
   );
+}
+
+function FolderIcon() {
+  return <Icons8Icon name="folder" size={13} />;
 }
 
 function DownloadIcon() {
@@ -1760,7 +1786,7 @@ export default function AiPage() {
           <div className="ai-pulse-orb ai-pulse-orb-1" />
           <div className="ai-pulse-orb ai-pulse-orb-2" />
           <svg className="ai-pulse-ecg-wave" viewBox="0 0 1200 120" preserveAspectRatio="none">
-            <path d="M0,60 L400,60 L410,60 L420,40 L430,80 L440,20 L450,100 L460,50 L470,70 L480,60 L1200,60" />
+            <path d="M0,60 L400,60 L410,60 L420,42 L430,78 L440,24 L450,96 L460,48 L470,72 L480,60 L1200,60" />
           </svg>
         </div>
 
@@ -1774,7 +1800,7 @@ export default function AiPage() {
           <div className="cmd-bar-wrap">
             {searchMode !== "none" && (
               <div className={`web-search-active-chip${searchMode === "deep" ? " is-deep-research" : ""}`}>
-                {searchMode === "deep" ? <MicroscopeIcon /> : <GlobeIcon />}
+                {searchMode === "deep" ? <DeepResearchIcon /> : <WebSearchIcon />}
                 <span>{searchMode === "deep" ? "Deep research" : "Web search"}</span>
                 <button
                   type="button"
@@ -2059,7 +2085,7 @@ export default function AiPage() {
         }}
         className={isDragging ? "ai-session-row is-dragging" : "ai-session-row"}
       >
-        <ChatIcon />
+        <ChatIcon isActive={isActive} />
         <div style={{ flex: 1, minWidth: 0 }}>
           {isEditing ? (
             renderInlineInput({
@@ -2576,7 +2602,7 @@ export default function AiPage() {
                       <div className="cmd-bar-wrap" style={{ maxWidth: "100%" }}>
                         {searchMode !== "none" && (
                           <div className={`web-search-active-chip${searchMode === "deep" ? " is-deep-research" : ""}`}>
-                            {searchMode === "deep" ? <MicroscopeIcon /> : <GlobeIcon />}
+                            {searchMode === "deep" ? <DeepResearchIcon /> : <WebSearchIcon />}
                             <span>{searchMode === "deep" ? "Deep research" : "Web search"}</span>
                             <button
                               type="button"
