@@ -374,12 +374,15 @@ async def _build_laps_with_km_breakdown(
             start_rec = lap_recs[0]
             accum_hrs = []
             accum_powers = []
+            accum_cadences = []
 
             for i, r in enumerate(lap_recs):
                 if r.heart_rate_bpm:
                     accum_hrs.append(r.heart_rate_bpm)
                 if r.power_w:
                     accum_powers.append(r.power_w)
+                if r.cadence:
+                    accum_cadences.append(r.cadence)
 
                 dist_covered = (r.distance_m or 0) - (start_rec.distance_m or 0)
                 is_last = i == len(lap_recs) - 1
@@ -392,9 +395,24 @@ async def _build_laps_with_km_breakdown(
                         avg_pwr = (
                             round(sum(accum_powers) / len(accum_powers)) if accum_powers else None
                         )
+                        avg_cad = (
+                            round(sum(accum_cadences) / len(accum_cadences))
+                            if accum_cadences
+                            else None
+                        )
+
+                        elev_delta = None
+                        if r.altitude_m is not None and start_rec.altitude_m is not None:
+                            elev_delta = round(r.altitude_m - start_rec.altitude_m)
 
                         sub_pace = _format_pace(avg_speed)
                         sub_hr = f"Avg HR: {avg_hr} bpm" if avg_hr else ""
+                        sub_cad = f"Cadence: {avg_cad} spm" if avg_cad else ""
+                        sub_elev = (
+                            f"Elev: {'+' if elev_delta > 0 else ''}{elev_delta}m"
+                            if elev_delta is not None and elev_delta != 0
+                            else ""
+                        )
                         sub_pwr = f" ({avg_pwr} W)" if avg_pwr else ""
 
                         dist_desc = (
@@ -402,16 +420,54 @@ async def _build_laps_with_km_breakdown(
                             if is_last and dist_covered < 950
                             else "1.00 km"
                         )
+                        metrics_str = " | ".join(
+                            filter(None, [f"Pace {sub_pace}", sub_hr, sub_cad, sub_elev])
+                        )
                         lines.append(
-                            f"    • Km {overall_km_counter} ({dist_desc}): Pace {sub_pace} | {sub_hr}{sub_pwr}"
+                            f"    • Km {overall_km_counter} ({dist_desc}): {metrics_str}{sub_pwr}"
                         )
 
                         overall_km_counter += 1
                         start_rec = r
                         accum_hrs = []
                         accum_powers = []
+                        accum_cadences = []
 
     return lines
+
+
+def _build_activity_summary_string(activity: Activity, lap_lines: list[str]) -> str:
+    summary_parts = [
+        f"Title: {activity.title}",
+        f"Sport: {activity.sport.value if activity.sport else '--'}",
+        f"Date: {activity.start_time}",
+        f"Distance: {activity.distance_m / 1000 if activity.distance_m else 0:.2f} km",
+        f"Duration: {activity.elapsed_time_s / 60 if activity.elapsed_time_s else 0:.1f} mins",
+        f"Training Load: {activity.training_load_vendor or '--'}",
+        f"Avg HR: {activity.avg_hr_bpm or '--'} bpm",
+    ]
+    if activity.max_hr_bpm:
+        summary_parts.append(f"Max HR: {activity.max_hr_bpm} bpm")
+    if activity.max_power_w:
+        summary_parts.append(f"Max Power: {activity.max_power_w} W")
+    if activity.cardiac_drift_pct_app is not None:
+        summary_parts.append(f"Cardiac Drift: {activity.cardiac_drift_pct_app:.1f}%")
+    if activity.efficiency_factor_app is not None:
+        summary_parts.append(f"Efficiency Factor: {activity.efficiency_factor_app:.2f}")
+    if (
+        activity.training_effect_aerobic_vendor is not None
+        or activity.training_effect_anaerobic_vendor is not None
+    ):
+        summary_parts.append(
+            f"Training Effect: Aerobic {activity.training_effect_aerobic_vendor or 0:.1f} / Anaerobic {activity.training_effect_anaerobic_vendor or 0:.1f}"
+        )
+    if activity.activity_note:
+        summary_parts.append(f"Athlete Note: {activity.activity_note}")
+
+    res = "\n".join(summary_parts)
+    if lap_lines:
+        res += "\n\n" + "\n".join(lap_lines) + "\n"
+    return res
 
 
 @router.get("/postmortem/{activity_id}")
@@ -442,20 +498,8 @@ async def activity_postmortem(
 
     # 2. Build context
     context = await build_training_context(db, user_id=get_owner_id(), days=7)
-
     lap_lines = await _build_laps_with_km_breakdown(db, activity_id, laps)
-
-    activity_str = (
-        f"Title: {activity.title}\n"
-        f"Sport: {activity.sport.value if activity.sport else '--'}\n"
-        f"Date: {activity.start_time}\n"
-        f"Distance: {activity.distance_m / 1000 if activity.distance_m else 0:.2f} km\n"
-        f"Duration: {activity.elapsed_time_s / 60 if activity.elapsed_time_s else 0:.1f} mins\n"
-        f"Training Load: {activity.training_load_vendor}\n"
-        f"Avg HR: {activity.avg_hr_bpm}\n"
-    )
-    if lap_lines:
-        activity_str += "\n" + "\n".join(lap_lines) + "\n"
+    activity_str = _build_activity_summary_string(activity, lap_lines)
 
     # 3. Generate postmortem
     analysis = generate_postmortem(context, activity_str, model=model)
@@ -494,18 +538,7 @@ async def activity_postmortem_stream(
 
     context = await build_training_context(db, user_id=get_owner_id(), days=7)
     lap_lines = await _build_laps_with_km_breakdown(db, activity_id, laps)
-
-    activity_str = (
-        f"Title: {activity.title}\n"
-        f"Sport: {activity.sport.value if activity.sport else '--'}\n"
-        f"Date: {activity.start_time}\n"
-        f"Distance: {activity.distance_m / 1000 if activity.distance_m else 0:.2f} km\n"
-        f"Duration: {activity.elapsed_time_s / 60 if activity.elapsed_time_s else 0:.1f} mins\n"
-        f"Training Load: {activity.training_load_vendor}\n"
-        f"Avg HR: {activity.avg_hr_bpm}\n"
-    )
-    if lap_lines:
-        activity_str += "\n" + "\n".join(lap_lines) + "\n"
+    activity_str = _build_activity_summary_string(activity, lap_lines)
 
     async def event_generator() -> AsyncIterator[str]:
         queue: asyncio.Queue[str | None] = asyncio.Queue()
