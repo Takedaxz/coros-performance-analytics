@@ -41,6 +41,22 @@ def test_calendar_questions_require_the_training_plan_tool() -> None:
     assert "get_scheduled_workout_details" in COACH_SYSTEM_PROMPT
 
 
+def test_calendar_changes_use_coros_workouts_and_require_update_uid() -> None:
+    assert "It reads COROS Calendar,\n   not iCal." in COACH_SYSTEM_PROMPT
+    assert "ask for the pool length" in COACH_SYSTEM_PROMPT
+    assert "pool_length_m" in COACH_SYSTEM_PROMPT
+    loop = asyncio.new_event_loop()
+    try:
+        tools = {tool.name: tool for tool in coach_agent._tools("owner", loop)}
+    finally:
+        loop.close()
+
+    create_schema = tools["propose_create_calendar_workout"].args_schema.model_json_schema()
+    update_schema = tools["propose_update_calendar_workout"].args_schema.model_json_schema()
+    assert "steps" in str(create_schema)
+    assert update_schema["required"] == ["uid", "draft"]
+
+
 def test_past_race_questions_require_the_past_race_goals_tool() -> None:
     assert "get_past_race_goals" in COACH_SYSTEM_PROMPT
     assert "more than 30 days ago" in COACH_SYSTEM_PROMPT

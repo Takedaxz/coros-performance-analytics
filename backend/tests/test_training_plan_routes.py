@@ -184,6 +184,33 @@ def test_structured_hyrox_workout_uses_coros_units() -> None:
     assert exercises[1]["overview"] == "sid_strength_sledpush"
 
 
+def test_swim_program_uses_the_selected_pool_length() -> None:
+    program = _build_coros_program(
+        CorosWorkoutDraft(
+            date="2026-08-12",
+            name="20m Pool Swim",
+            sport="swim",
+            pool_length_m=20,
+            steps=[CorosWorkoutStep(kind="training", target="distance", value=400)],
+        )
+    )
+
+    assert program["poolLength"] == 2_000
+    assert program["poolLengthUnit"] == 2
+    loaded = _draft_from_program(
+        "coros:1:2:20260812",
+        "20260812",
+        {"name": "20m Pool Swim", "sportType": 3, "poolLength": 2_000, "exercises": []},
+    )
+    assert loaded.pool_length_m == 20
+    unset = _draft_from_program(
+        "coros:1:2:20260812",
+        "20260812",
+        {"name": "Pool Swim", "sportType": 3, "poolLength": 0, "exercises": []},
+    )
+    assert unset.pool_length_m is None
+
+
 def test_structured_hyrox_workout_maps_all_eight_stations() -> None:
     program = _build_coros_program(
         CorosWorkoutDraft(
@@ -350,6 +377,11 @@ def test_structured_workout_intensity_uses_coros_metric_units() -> None:
             sport="run",
             steps=[
                 CorosWorkoutStep(
+                    intensity="heart_rate",
+                    intensity_low=125,
+                    intensity_high=145,
+                ),
+                CorosWorkoutStep(
                     intensity="speed",
                     intensity_low=14.5,
                     intensity_high=12.5,
@@ -365,10 +397,14 @@ def test_structured_workout_intensity_uses_coros_metric_units() -> None:
 
     exercises = program["exercises"]
     assert isinstance(exercises, list)
-    assert (exercises[0]["intensityValue"], exercises[0]["intensityValueExtend"]) == (1250, 1450)
-    assert (exercises[0]["intensityDisplayUnit"], exercises[0]["intensityMultiplier"]) == (4, 100)
-    assert (exercises[1]["intensityValue"], exercises[1]["intensityValueExtend"]) == (270_000, 300_000)
-    assert (exercises[1]["intensityDisplayUnit"], exercises[1]["intensityMultiplier"]) == (1, 1000)
+    assert (exercises[0]["intensityValue"], exercises[0]["intensityValueExtend"]) == (125, 145)
+    assert (exercises[1]["intensityValue"], exercises[1]["intensityValueExtend"]) == (1250, 1450)
+    assert (exercises[1]["intensityDisplayUnit"], exercises[1]["intensityMultiplier"]) == (4, 100)
+    assert (
+        exercises[2]["intensityValue"],
+        exercises[2]["intensityValueExtend"],
+    ) == (270_000, 300_000)
+    assert (exercises[2]["intensityDisplayUnit"], exercises[2]["intensityMultiplier"]) == (1, 1000)
 
 
 def test_library_editor_converts_coros_weight_grams_to_kilograms() -> None:

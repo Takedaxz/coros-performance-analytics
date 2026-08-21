@@ -2,12 +2,15 @@
 
 import asyncio
 import datetime as dt
+import re
 from collections.abc import Callable
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from typing import Any, NotRequired
+from typing import Any, Literal, NotRequired
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy import select
 from typing_extensions import TypedDict
 
@@ -40,6 +43,8 @@ _SPORT_ALIASES: dict[str, SportType] = {
     "walking": SportType.WALK,
     "hiking": SportType.HIKE,
 }
+CalendarChangeAction = Literal["create", "update", "move", "delete"]
+_COROS_EVENT_UID = r"coros:[^:]+:[^:]+:\d{8}"
 
 
 class ToolCallRecord(TypedDict):
@@ -109,6 +114,27 @@ def coach_tool_functions(
         """Find current coaching research, event rules, or official guidance."""
         return run("web_search", query=query)
 
+    # Import after AI initialization to avoid the routes package's AI import cycle.
+    from src.api.routes.training_plan_routes import CorosWorkoutDraft
+
+    def propose_create_calendar_workout(draft: CorosWorkoutDraft) -> dict[str, Any]:
+        """Prepare a new COROS workout after checking the target date in COROS Calendar."""
+        return _calendar_change_proposal("create", draft=draft.model_dump())
+
+    def propose_update_calendar_workout(
+        uid: str, draft: CorosWorkoutDraft
+    ) -> dict[str, Any]:
+        """Prepare an edit to a COROS workout identified by a calendar UID."""
+        return _calendar_change_proposal("update", draft=draft.model_dump(), uid=uid)
+
+    def propose_move_calendar_workout(uid: str, date: str) -> dict[str, Any]:
+        """Prepare moving one COROS workout identified by a calendar UID."""
+        return _calendar_change_proposal("move", uid=uid, date=date)
+
+    def propose_delete_calendar_workout(uid: str) -> dict[str, Any]:
+        """Prepare deleting one COROS workout identified by a calendar UID."""
+        return _calendar_change_proposal("delete", uid=uid)
+
     return [
         get_health_trend,
         get_activities,
@@ -120,6 +146,10 @@ def coach_tool_functions(
         get_past_race_goals,
         search_coaching_knowledge,
         web_search,
+        propose_create_calendar_workout,
+        propose_update_calendar_workout,
+        propose_move_calendar_workout,
+        propose_delete_calendar_workout,
     ]
 
 
@@ -145,6 +175,70 @@ def _activity_uuid(value: object) -> str | None:
         return str(UUID(str(value)))
     except (TypeError, ValueError):
         return None
+
+
+def _calendar_change_proposal(
+    action: CalendarChangeAction,
+    draft: dict[str, Any] | None = None,
+    uid: str | None = None,
+    date: str | None = None,
+) -> dict[str, Any]:
+    """Validate a calendar write without performing it."""
+    if action in {"update", "move", "delete"} and (
+        not isinstance(uid, str) or re.fullmatch(_COROS_EVENT_UID, uid) is None
+    ):
+        return {"error": "uid must be a COROS calendar event returned by get_training_plan"}
+    if action in {"create", "update"}:
+        # Avoid importing the routes package during AI module initialization.
+        from src.api.routes.training_plan_routes import CorosWorkoutDraft, _build_coros_program
+
+        try:
+            workout = CorosWorkoutDraft.model_validate(draft)
+        except ValidationError as exc:
+            return {"error": f"invalid workout draft: {exc.errors()[0]['msg']}"}
+        if workout.sport == "swim" and workout.pool_length_m is None:
+            return {"error": "pool_length_m is required for a pool swim workout."}
+        repeat_error = _repeat_group_error(workout)
+        if repeat_error:
+            return {"error": repeat_error}
+        try:
+            _build_coros_program(workout)
+        except HTTPException as exc:
+            return {"error": f"invalid workout draft: {exc.detail}"}
+        return {
+            "pending_confirmation": True,
+            "action": action,
+            "summary": f"{action.title()} {workout.name} on {workout.date}",
+        }
+    if action == "move":
+        try:
+            target_date = _date(date or "")
+        except ValueError:
+            return {"error": "date must be a real YYYY-MM-DD value"}
+        return {
+            "pending_confirmation": True,
+            "action": action,
+            "summary": f"Move workout to {target_date.isoformat()}",
+        }
+    return {"pending_confirmation": True, "action": action, "summary": "Delete scheduled workout"}
+
+
+def _repeat_group_error(workout: Any) -> str | None:
+    repeated_steps = [
+        step for step in workout.steps if step.repeats > 1 and step.repeat_group is None
+    ]
+    if repeated_steps:
+        return "Repeated steps must use repeat_group/repeat_count with a rest step."
+
+    groups: dict[int, list[Any]] = {}
+    for step in workout.steps:
+        if step.repeat_group is not None:
+            groups.setdefault(step.repeat_group, []).append(step)
+    for steps in groups.values():
+        counts = {step.repeat_count for step in steps}
+        if len(steps) < 2 or not any(step.kind == "rest" for step in steps) or len(counts) != 1:
+            return "Each repeat group must contain a rest step and one shared repeat_count."
+    return None
 
 
 async def _execute_tool(name: str, user_id: str, arguments: dict[str, Any]) -> dict[str, Any]:

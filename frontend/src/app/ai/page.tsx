@@ -24,6 +24,10 @@ const TOOL_LABELS: Record<string, string> = {
   get_past_race_goals: "Past competitions",
   get_scheduled_workout_details: "Workout details",
   get_training_plan: "Training plan",
+  propose_create_calendar_workout: "Create calendar workout",
+  propose_update_calendar_workout: "Update calendar workout",
+  propose_move_calendar_workout: "Move calendar workout",
+  propose_delete_calendar_workout: "Delete calendar workout",
   search_coaching_knowledge: "Coaching library",
   search_live_coaching_sources: "Web sources",
   web_search: "Web sources",
@@ -54,6 +58,70 @@ type ToolCall = {
     sources?: WebSource[];
   };
 };
+
+type CalendarChangeAction = {
+  action: "create" | "update" | "move" | "delete";
+  draft?: Record<string, unknown>;
+  uid?: string;
+  date?: string;
+};
+
+type CalendarChangeResult = {
+  text: string;
+  success: boolean;
+};
+
+type CalendarChangeReview = {
+  change: CalendarChangeAction;
+  key: string;
+};
+
+function calendarChangeAction(tool: ToolCall): CalendarChangeAction | null {
+  const actionByTool = {
+    propose_create_calendar_workout: "create",
+    propose_update_calendar_workout: "update",
+    propose_move_calendar_workout: "move",
+    propose_delete_calendar_workout: "delete",
+  } as const;
+  const action = actionByTool[tool.name as keyof typeof actionByTool];
+  if (!action) return null;
+  const draft = tool.arguments.draft;
+  const uid = tool.arguments.uid;
+  const date = tool.arguments.date;
+  if ((action === "create" || action === "update") && (!draft || typeof draft !== "object" || Array.isArray(draft))) return null;
+  if ((action === "update" || action === "move" || action === "delete") && typeof uid !== "string") return null;
+  if (action === "move" && typeof date !== "string") return null;
+  return {
+    action,
+    draft: draft && typeof draft === "object" && !Array.isArray(draft) ? draft as Record<string, unknown> : undefined,
+    uid: typeof uid === "string" ? uid : undefined,
+    date: typeof date === "string" ? date : undefined,
+  };
+}
+
+function calendarChangeSummary(change: CalendarChangeAction): string {
+  if (!change.draft) return `${change.action} COROS workout`;
+  const name = typeof change.draft.name === "string" ? change.draft.name : "Workout";
+  const date = typeof change.draft.date === "string" ? change.draft.date : "No date";
+  const sport = typeof change.draft.sport === "string" ? change.draft.sport : "workout";
+  const poolLength = typeof change.draft.pool_length_m === "number" ? ` · ${change.draft.pool_length_m} m pool` : "";
+  return `${name} · ${date} · ${sport}${poolLength}`;
+}
+
+function calendarChangeSteps(change: CalendarChangeAction): Array<Record<string, unknown>> {
+  const steps = change.draft?.steps;
+  return Array.isArray(steps) ? steps.filter((step): step is Record<string, unknown> => Boolean(step) && typeof step === "object" && !Array.isArray(step)) : [];
+}
+
+function calendarStepIntensity(step: Record<string, unknown>): string | null {
+  const intensity = typeof step.intensity === "string" ? step.intensity : "none";
+  const low = typeof step.intensity_low === "number" ? step.intensity_low : null;
+  const high = typeof step.intensity_high === "number" ? step.intensity_high : null;
+  if (intensity === "none" || low === null) return null;
+  const label = intensity === "heart_rate_percent" ? "Threshold HR" : intensity.replaceAll("_", " ");
+  const range = high === null || high === low ? String(low) : `${low}\u2013${high}`;
+  return `${label} ${range}${intensity.endsWith("percent") ? "%" : intensity === "heart_rate" ? " bpm" : ""}`;
+}
 
 function getDomainFromUrl(urlStr: string): string {
   try {
@@ -135,6 +203,8 @@ function formatToolArguments(arguments_: Record<string, unknown>): string {
 }
 
 function formatToolTooltip(tool: ToolCall): string {
+  const calendarChange = calendarChangeAction(tool);
+  if (calendarChange) return calendarChangeSummary(calendarChange);
   const knowledge = tool.display_result?.knowledge;
   if (tool.name === "search_coaching_knowledge" && knowledge?.length) {
     return `Query: ${String(tool.arguments.query ?? "")}\n\n${knowledge.join("\n\n")}`;
@@ -1016,6 +1086,9 @@ export default function AiPage() {
   const [expandedPillGroup, setExpandedPillGroup] = useState<string | null>(null);
   const [draftProjectId, setDraftProjectId] = useState<string | null>(null);
   const [activeToolTooltip, setActiveToolTooltip] = useState<string | null>(null);
+  const [calendarChangeResults, setCalendarChangeResults] = useState<Record<string, CalendarChangeResult>>({});
+  const [calendarChangePending, setCalendarChangePending] = useState<string | null>(null);
+  const [calendarChangeReview, setCalendarChangeReview] = useState<CalendarChangeReview | null>(null);
   const inFlightStreamsRef = useRef<Map<string, Message[]>>(new Map());
   const [streamingSessionIds, setStreamingSessionIds] = useState<Set<string>>(new Set());
   const routeSessionIdRef = useRef<string | null>(routeSessionId);
@@ -1023,10 +1096,53 @@ export default function AiPage() {
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const projectEditDialogRef = useRef<HTMLDialogElement>(null);
+  const calendarChangeDialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     routeSessionIdRef.current = routeSessionId;
   }, [routeSessionId]);
+
+  async function confirmCalendarChange(change: CalendarChangeAction, key: string) {
+    const path = change.action === "create"
+      ? "/api/training-plan/coros/workouts"
+      : change.action === "update"
+        ? `/api/training-plan/coros/workouts/${encodeURIComponent(change.uid ?? "")}`
+        : change.action === "move"
+          ? `/api/training-plan/coros/workouts/${encodeURIComponent(change.uid ?? "")}/move`
+          : `/api/training-plan/coros/workouts/${encodeURIComponent(change.uid ?? "")}`;
+    const method = change.action === "create" ? "POST" : change.action === "update" ? "PUT" : change.action === "move" ? "POST" : "DELETE";
+    const body = change.action === "create" || change.action === "update"
+      ? { draft: change.draft, confirmed: true }
+      : change.action === "move"
+        ? { date: change.date, confirmed: true }
+        : { confirmed: true };
+
+    setCalendarChangePending(key);
+    try {
+      const response = await fetch(`${API_BASE}${path}`, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json().catch(() => ({})) as { detail?: string };
+      if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+      setCalendarChangeResults((current) => ({
+        ...current,
+        [key]: { success: true, text: "Added to COROS calendar" },
+      }));
+      setCalendarChangeReview(null);
+    } catch (cause) {
+      setCalendarChangeResults((current) => ({
+        ...current,
+        [key]: {
+          success: false,
+          text: cause instanceof Error ? cause.message : "Could not update COROS calendar.",
+        },
+      }));
+    } finally {
+      setCalendarChangePending(null);
+    }
+  }
 
   useEffect(() => {
     if (!activeToolTooltip) return;
@@ -1142,6 +1258,13 @@ export default function AiPage() {
     if (editingProject && !dialog.open) dialog.showModal();
     if (!editingProject && dialog.open) dialog.close();
   }, [editingProject]);
+
+  useEffect(() => {
+    const dialog = calendarChangeDialogRef.current;
+    if (!dialog) return;
+    if (calendarChangeReview && !dialog.open) dialog.showModal();
+    if (!calendarChangeReview && dialog.open) dialog.close();
+  }, [calendarChangeReview]);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -2509,53 +2632,71 @@ export default function AiPage() {
                                     const argumentsText = formatToolTooltip(tool);
                                     const toolKey = `${msg.id}-${tool.name}-${toolIndex}`;
                                     const isPinned = activeToolTooltip === toolKey;
+                                    const calendarChange = calendarChangeAction(tool);
+                                    const calendarChangeResult = calendarChangeResults[toolKey];
                                     return (
-                                      <span
-                                        aria-label={argumentsText ? `${toolLabel(tool.name)}: ${argumentsText}` : toolLabel(tool.name)}
-                                        className={`ai-tool-chip${isPinned ? " is-pinned" : ""}`}
-                                        key={toolKey}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setActiveToolTooltip((prev) => (prev === toolKey ? null : toolKey));
-                                        }}
-                                      >
-                                        {toolLabel(tool.name)}
-                                        <span className="ai-tool-tooltip" role="tooltip">
-                                          {tool.name === "web_search" && sources && sources.length > 0 ? (
-                                            <div className="ai-tool-tooltip-sources">
-                                              <div className="ai-tool-tooltip-query">
-                                                query: &quot;{String(tool.arguments.query ?? "")}&quot;
+                                      <span className="ai-calendar-change" key={toolKey}>
+                                        <span
+                                          aria-label={argumentsText ? `${toolLabel(tool.name)}: ${argumentsText}` : toolLabel(tool.name)}
+                                          className={`ai-tool-chip${isPinned ? " is-pinned" : ""}`}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveToolTooltip((prev) => (prev === toolKey ? null : toolKey));
+                                          }}
+                                        >
+                                          {toolLabel(tool.name)}
+                                          <span className="ai-tool-tooltip" role="tooltip">
+                                            {tool.name === "web_search" && sources && sources.length > 0 ? (
+                                              <div className="ai-tool-tooltip-sources">
+                                                <div className="ai-tool-tooltip-query">
+                                                  query: &quot;{String(tool.arguments.query ?? "")}&quot;
+                                                </div>
+                                                <div className="ai-tool-tooltip-links">
+                                                  {sources.map((s, sIdx) => {
+                                                    const cleanTitle = stripHtmlTags(s.title);
+                                                    const cleanSnippet = stripHtmlTags(s.snippet ?? "");
+                                                    const domain = getDomainFromUrl(s.url);
+                                                    return (
+                                                      <a
+                                                        key={sIdx}
+                                                        href={s.url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="ai-tool-source-link"
+                                                        onClick={(event) => event.stopPropagation()}
+                                                      >
+                                                        <div className="ai-tool-source-header">
+                                                          <FaviconImage url={s.url} />
+                                                          <span className="ai-tool-source-domain">{domain || s.url}</span>
+                                                          <ExternalLinkIcon />
+                                                        </div>
+                                                        <span className="ai-tool-source-title">{cleanTitle}</span>
+                                                        {cleanSnippet && <span className="ai-tool-source-snippet">{cleanSnippet}</span>}
+                                                      </a>
+                                                    );
+                                                  })}
+                                                </div>
                                               </div>
-                                              <div className="ai-tool-tooltip-links">
-                                                {sources.map((s, sIdx) => {
-                                                  const cleanTitle = stripHtmlTags(s.title);
-                                                  const cleanSnippet = stripHtmlTags(s.snippet ?? "");
-                                                  const domain = getDomainFromUrl(s.url);
-                                                  return (
-                                                    <a
-                                                      key={sIdx}
-                                                      href={s.url}
-                                                      target="_blank"
-                                                      rel="noopener noreferrer"
-                                                      className="ai-tool-source-link"
-                                                      onClick={(event) => event.stopPropagation()}
-                                                    >
-                                                      <div className="ai-tool-source-header">
-                                                        <FaviconImage url={s.url} />
-                                                        <span className="ai-tool-source-domain">{domain || s.url}</span>
-                                                        <ExternalLinkIcon />
-                                                      </div>
-                                                      <span className="ai-tool-source-title">{cleanTitle}</span>
-                                                      {cleanSnippet && <span className="ai-tool-source-snippet">{cleanSnippet}</span>}
-                                                    </a>
-                                                  );
-                                                })}
-                                              </div>
-                                            </div>
-                                          ) : (
-                                            argumentsText
-                                          )}
+                                            ) : (
+                                              argumentsText
+                                            )}
+                                          </span>
                                         </span>
+                                        {calendarChange && !calendarChangeResult?.success && (
+                                          <button
+                                            type="button"
+                                            className="calendar-change-confirm"
+                                            disabled={calendarChangePending === toolKey}
+                                            onClick={() => setCalendarChangeReview({ change: calendarChange, key: toolKey })}
+                                          >
+                                            Review
+                                          </button>
+                                        )}
+                                        {calendarChangeResult && (
+                                          <span className={`calendar-change-status${calendarChangeResult.success ? " is-success" : " is-error"}`}>
+                                            {calendarChangeResult.text}
+                                          </span>
+                                        )}
                                       </span>
                                     );
                                   })}
@@ -2862,6 +3003,76 @@ export default function AiPage() {
               </button>
             </div>
           </div>
+        </dialog>
+
+        <dialog
+          ref={calendarChangeDialogRef}
+          className="calendar-change-dialog"
+          aria-labelledby="calendar-change-title"
+          onCancel={() => setCalendarChangeReview(null)}
+          onClick={(event) => {
+            if (event.target === event.currentTarget && calendarChangePending === null) {
+              setCalendarChangeReview(null);
+            }
+          }}
+        >
+          {calendarChangeReview && (() => {
+            const { change, key } = calendarChangeReview;
+            const draft = change.draft;
+            const steps = calendarChangeSteps(change);
+            const result = calendarChangeResults[key];
+            const name = typeof draft?.name === "string" ? draft.name : "Workout";
+            const date = typeof draft?.date === "string" ? draft.date : change.date;
+            const sport = typeof draft?.sport === "string" ? draft.sport.replaceAll("_", " ") : "";
+            const poolLength = typeof draft?.pool_length_m === "number" ? draft.pool_length_m : null;
+            const description = typeof draft?.description === "string" ? draft.description : "";
+            return (
+              <div className="calendar-change-dialog-content">
+                <span className="calendar-change-dialog-label">COROS calendar</span>
+                <h2 id="calendar-change-title">{change.action[0].toUpperCase() + change.action.slice(1)} workout?</h2>
+                <dl className="calendar-change-summary">
+                  <div><dt>Workout</dt><dd>{name}</dd></div>
+                  {date && <div><dt>Date</dt><dd>{date}</dd></div>}
+                  {sport && <div><dt>Sport</dt><dd>{sport}</dd></div>}
+                  {poolLength !== null && <div><dt>Pool</dt><dd>{poolLength} m</dd></div>}
+                </dl>
+                {description && <p className="calendar-change-description">{description}</p>}
+                {steps.length > 0 && (
+                  <ol className="calendar-change-steps">
+                    {steps.map((step, index) => {
+                      const stepName = typeof step.name === "string" ? step.name : "Step";
+                      const value = typeof step.value === "number" ? step.value : null;
+                      const target = typeof step.target === "string" ? step.target : "";
+                      const repeats = typeof step.repeat_count === "number" ? step.repeat_count : step.repeats;
+                      const intensity = calendarStepIntensity(step);
+                      return (
+                        <li key={`${stepName}-${index}`}>
+                          <strong>{stepName}</strong>
+                          {value !== null && target && <span>{value} {target.replaceAll("_", " ")}</span>}
+                          {intensity && <span>{intensity}</span>}
+                          {typeof repeats === "number" && repeats > 1 && <span>Repeat {repeats}×</span>}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+                {result && !result.success && <p className="calendar-change-dialog-error" role="alert">{result.text}</p>}
+                <div className="ai-delete-dialog-actions">
+                  <button type="button" className="btn btn-secondary" onClick={() => setCalendarChangeReview(null)} disabled={calendarChangePending === key}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn calendar-change-dialog-confirm"
+                    onClick={() => void confirmCalendarChange(change, key)}
+                    disabled={calendarChangePending === key}
+                  >
+                    {calendarChangePending === key ? "Saving…" : "Confirm"}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </dialog>
 
         {activePreviewImage && (

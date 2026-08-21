@@ -8,6 +8,7 @@ import pytest
 from src.ai import coach_tools
 from src.ai.coach_tools import (
     _activity_detail,
+    _calendar_change_proposal,
     _execute_tool,
     _health_trend,
     _pace_s_km,
@@ -36,6 +37,81 @@ def test_activity_tool_rejects_unknown_sport() -> None:
 def test_activity_tool_computes_compact_pace() -> None:
     assert _pace_s_km(3.0) == 333
     assert _pace_s_km(None) is None
+
+
+def test_calendar_change_proposal_validates_a_draft_without_writing() -> None:
+    result = _calendar_change_proposal(
+        "create",
+        draft={
+            "date": "2026-08-25",
+            "name": "Easy Run",
+            "sport": "run",
+            "steps": [{"kind": "training", "target": "time", "value": 1800}],
+        },
+    )
+
+    assert result == {
+        "pending_confirmation": True,
+        "action": "create",
+        "summary": "Create Easy Run on 2026-08-25",
+    }
+    assert _calendar_change_proposal("delete", uid="not-a-coros-event") == {
+        "error": "uid must be a COROS calendar event returned by get_training_plan"
+    }
+
+
+def test_calendar_change_proposal_rejects_an_interval_without_rest_group() -> None:
+    result = _calendar_change_proposal(
+        "create",
+        draft={
+            "date": "2026-08-25",
+            "name": "Swim Intervals",
+            "sport": "swim",
+            "pool_length_m": 20,
+            "steps": [
+                {"kind": "training", "target": "distance", "value": 100, "repeats": 6}
+            ],
+        },
+    )
+
+    assert result == {
+        "error": "Repeated steps must use repeat_group/repeat_count with a rest step."
+    }
+
+
+def test_calendar_change_proposal_requires_pool_length_for_swimming() -> None:
+    result = _calendar_change_proposal(
+        "create",
+        draft={
+            "date": "2026-08-25",
+            "name": "Pool Swim",
+            "sport": "swim",
+            "steps": [{"kind": "training", "target": "distance", "value": 400}],
+        },
+    )
+
+    assert result == {"error": "pool_length_m is required for a pool swim workout."}
+
+
+def test_calendar_change_proposal_requires_intensity_values() -> None:
+    result = _calendar_change_proposal(
+        "create",
+        draft={
+            "date": "2026-08-25",
+            "name": "Easy Run",
+            "sport": "run",
+            "steps": [
+                {
+                    "kind": "training",
+                    "target": "distance",
+                    "value": 5_000,
+                    "intensity": "heart_rate",
+                }
+            ],
+        },
+    )
+
+    assert result == {"error": "invalid workout draft: heart_rate intensity needs a value."}
 
 
 @pytest.mark.asyncio
@@ -222,6 +298,12 @@ def test_scheduled_workout_details_tool_is_exposed() -> None:
     assert "get_past_race_goals" in names
     assert "search_coaching_knowledge" in names
     assert "web_search" in names
+    assert {
+        "propose_create_calendar_workout",
+        "propose_update_calendar_workout",
+        "propose_move_calendar_workout",
+        "propose_delete_calendar_workout",
+    } <= names
 
 
 @pytest.mark.asyncio

@@ -227,6 +227,17 @@ function structureValue(step: WorkoutStepForm): string {
   return step.target === "open" ? "Open" : String(step.value);
 }
 
+function intensityValue(step: WorkoutStepForm): string {
+  const label = INTENSITY_OPTIONS.find((item) => item.value === step.intensity)?.label ?? "Open intensity";
+  if (step.intensity === "none" || !step.intensity_low) return label;
+  if (step.intensity === "stroke") return STROKE_OPTIONS.find((item) => item.value === String(step.intensity_low))?.label ?? label;
+  const isSingleValue = step.intensity_high === null || step.intensity_high === step.intensity_low;
+  if (step.intensity === "pace" || step.intensity === "effort_pace") return `${label} ${formatDuration(step.intensity_low)}${isSingleValue ? "" : `\u2013${formatDuration(step.intensity_high!)}`} /km`;
+  const value = isSingleValue ? step.intensity_low : `${step.intensity_low}\u2013${step.intensity_high}`;
+  const unit = step.intensity === "heart_rate" ? " bpm" : step.intensity.endsWith("percent") ? "%" : step.intensity === "power" ? " W" : step.intensity === "cadence" ? " rpm" : step.intensity === "weight" ? " kg" : step.intensity === "speed" ? " km/h" : "";
+  return `${label} ${value}${unit}`;
+}
+
 function formatEventNote(event: TrainingEvent): string {
   if (!event.description) return "";
   if (event.workout_steps?.length) {
@@ -253,7 +264,7 @@ function WorkoutStructure({ steps }: { steps: WorkoutStepForm[] }) {
     const children = steps.filter((item) => item.repeat_group === step.repeat_group);
     return Array.from({ length: step.repeat_count ?? 1 }, () => children).flat();
   });
-  const card = (step: WorkoutStepForm, key: string, nested = false) => <div className={`plan-day-workout-step is-${step.kind}${nested ? " is-nested" : ""}`} key={key}><div><strong>{displayStepName(step)}</strong><small>{step.intensity === "none" ? "Open intensity" : INTENSITY_OPTIONS.find((item) => item.value === step.intensity)?.label}</small></div><b>{structureValue(step)}</b></div>;
+  const card = (step: WorkoutStepForm, key: string, nested = false) => <div className={`plan-day-workout-step is-${step.kind}${nested ? " is-nested" : ""}`} key={key}><div><strong>{displayStepName(step)}</strong><small>{intensityValue(step)}</small></div><b>{structureValue(step)}</b></div>;
   return <section className="plan-day-workout-structure"><header><strong>Workout structure</strong>{totalDistance > 0 && <span>{formatKilometers(totalDistance)} total</span>}</header><div className="plan-day-workout-bar" aria-hidden="true">{barSteps.map((step, index) => <i key={`${step.kind}-${index}`} data-kind={step.kind} style={{ flexGrow: Math.max(1, step.value) }} />)}</div><div className="plan-day-workout-legend"><span data-kind="warmup">Warm-up</span><span data-kind="training">Main</span><span data-kind="rest">Rest</span><span data-kind="cooldown">Cool-down</span></div><div className="plan-day-workout-steps">{steps.map((step, index) => {
     if (step.repeat_group === null || step.repeat_group === undefined) return card(step, `step-${index}`);
     if (groups.has(step.repeat_group)) return null;

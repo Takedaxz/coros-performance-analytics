@@ -183,6 +183,7 @@ class CorosWorkoutDraft(BaseModel):
     date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     name: str = Field(min_length=1, max_length=100)
     sport: WorkoutSport
+    pool_length_m: int | None = Field(default=None, ge=1, le=100)
     description: str = Field(default="", max_length=300)
     steps: list[CorosWorkoutStep] = Field(min_length=1, max_length=50)
 
@@ -661,7 +662,13 @@ def _intensity_fields(step: CorosWorkoutStep, sport: WorkoutSport) -> ScheduleOb
         "pace": (3, 1),
         "effort_pace": (8, 1),
     }[step.intensity]
-    multiplier = {"pace": 1000, "effort_pace": 1000, "speed": 100, "weight": 1000}.get(step.intensity, 0)
+    multiplier = {
+        "heart_rate": 1,
+        "pace": 1000,
+        "effort_pace": 1000,
+        "speed": 100,
+        "weight": 1000,
+    }.get(step.intensity, 0)
     return {
         "intensityType": intensity_type,
         "intensityValue": round(low * multiplier),
@@ -925,7 +932,11 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
         "exercises": exercises,
         **hybrid_fields,
         **(
-            {"poolLengthId": 0, "poolLength": 2500, "poolLengthUnit": 2}
+            {
+                "poolLengthId": 0,
+                "poolLength": (draft.pool_length_m or 25) * 100,
+                "poolLengthUnit": 2,
+            }
             if draft.sport == "swim"
             else {}
         ),
@@ -1154,11 +1165,17 @@ def _draft_from_program(
                     repeat_name=str(group.get("name", "Repeat")) if group else None,
                 )
             )
+    pool_length = program.get("poolLength")
     return CorosWorkoutEditorData(
         uid=uid,
         date=f"{happen_day[:4]}-{happen_day[4:6]}-{happen_day[6:]}",
         name=str(program.get("name", "Workout")),
         sport=sport,
+        pool_length_m=(
+            int(pool_length / 100)
+            if isinstance(pool_length, (int, float)) and pool_length > 0
+            else None
+        ),
         description=str(program.get("overview", "")),
         steps=steps or [CorosWorkoutStep()],
     )
