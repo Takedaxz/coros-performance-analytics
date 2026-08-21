@@ -113,6 +113,18 @@ function calendarChangeSteps(change: CalendarChangeAction): Array<Record<string,
   return Array.isArray(steps) ? steps.filter((step): step is Record<string, unknown> => Boolean(step) && typeof step === "object" && !Array.isArray(step)) : [];
 }
 
+function calendarStepTarget(step: Record<string, unknown>): string | null {
+  const value = typeof step.value === "number" ? step.value : null;
+  const target = typeof step.target === "string" ? step.target : "";
+  if (value === null || !target) return null;
+  if (target === "distance") return value >= 1000 ? `${value / 1000} km` : `${value} m`;
+  if (target === "time") {
+    const seconds = Math.max(0, Math.round(value));
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+  return `${value} ${target.replaceAll("_", " ")}`;
+}
+
 function calendarStepIntensity(step: Record<string, unknown>): string | null {
   const intensity = typeof step.intensity === "string" ? step.intensity : "none";
   const low = typeof step.intensity_low === "number" ? step.intensity_low : null;
@@ -1089,6 +1101,7 @@ export default function AiPage() {
   const [calendarChangeResults, setCalendarChangeResults] = useState<Record<string, CalendarChangeResult>>({});
   const [calendarChangePending, setCalendarChangePending] = useState<string | null>(null);
   const [calendarChangeReview, setCalendarChangeReview] = useState<CalendarChangeReview | null>(null);
+  const [calendarChangeToast, setCalendarChangeToast] = useState<string | null>(null);
   const inFlightStreamsRef = useRef<Map<string, Message[]>>(new Map());
   const [streamingSessionIds, setStreamingSessionIds] = useState<Set<string>>(new Set());
   const routeSessionIdRef = useRef<string | null>(routeSessionId);
@@ -1128,8 +1141,11 @@ export default function AiPage() {
       if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
       setCalendarChangeResults((current) => ({
         ...current,
-        [key]: { success: true, text: "Added to COROS calendar" },
+        [key]: { success: true, text: "Updated COROS calendar" },
       }));
+      setCalendarChangeToast(
+        change.action === "create" ? "Workout added to COROS calendar." : "COROS calendar updated."
+      );
       setCalendarChangeReview(null);
     } catch (cause) {
       setCalendarChangeResults((current) => ({
@@ -1143,6 +1159,12 @@ export default function AiPage() {
       setCalendarChangePending(null);
     }
   }
+
+  useEffect(() => {
+    if (!calendarChangeToast) return;
+    const timeout = window.setTimeout(() => setCalendarChangeToast(null), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [calendarChangeToast]);
 
   useEffect(() => {
     if (!activeToolTooltip) return;
@@ -2398,6 +2420,12 @@ export default function AiPage() {
 
   return (
     <div className="ai-link-layout print-block">
+      {calendarChangeToast && (
+        <div className="plan-calendar-move-toast is-success" role="status" aria-live="polite">
+          <span />
+          {calendarChangeToast}
+        </div>
+      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -2692,7 +2720,7 @@ export default function AiPage() {
                                             Review
                                           </button>
                                         )}
-                                        {calendarChangeResult && (
+                                        {calendarChangeResult && !calendarChangeResult.success && (
                                           <span className={`calendar-change-status${calendarChangeResult.success ? " is-success" : " is-error"}`}>
                                             {calendarChangeResult.text}
                                           </span>
@@ -3041,14 +3069,13 @@ export default function AiPage() {
                   <ol className="calendar-change-steps">
                     {steps.map((step, index) => {
                       const stepName = typeof step.name === "string" ? step.name : "Step";
-                      const value = typeof step.value === "number" ? step.value : null;
-                      const target = typeof step.target === "string" ? step.target : "";
+                      const target = calendarStepTarget(step);
                       const repeats = typeof step.repeat_count === "number" ? step.repeat_count : step.repeats;
                       const intensity = calendarStepIntensity(step);
                       return (
                         <li key={`${stepName}-${index}`}>
                           <strong>{stepName}</strong>
-                          {value !== null && target && <span>{value} {target.replaceAll("_", " ")}</span>}
+                          {target && <span>{target}</span>}
                           {intensity && <span>{intensity}</span>}
                           {typeof repeats === "number" && repeats > 1 && <span>Repeat {repeats}×</span>}
                         </li>
