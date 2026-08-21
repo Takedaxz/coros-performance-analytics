@@ -4793,11 +4793,11 @@ table.data-table .lap-split-table tr:hover td {
 }
 
 .plan-workout-step-fields .single-select-menu {
-  left: auto;
-  max-width: 100%;
-  min-width: 0;
-  right: 0;
-  width: 100%;
+  left: 0;
+  max-width: min(360px, calc(100vw - 48px));
+  min-width: max-content;
+  right: auto;
+  width: max-content;
 }
 
 .plan-workout-editor-footer {

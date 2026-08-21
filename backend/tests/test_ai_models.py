@@ -122,3 +122,24 @@ def test_coach_retries_gemini_quota_errors_with_flash_lite(monkeypatch) -> None:
 
     assert answer == "Flash Lite answer"
     assert requested_models == ["gemini-3.5-flash", "gemini-3.5-flash-lite"]
+
+
+def test_resolve_model_aliases() -> None:
+    assert resolve_model("3.5-flash0lite") == ("gemini", "gemini-3.5-flash-lite")
+    assert resolve_model("gemini:3.5-flash0lite") == ("gemini", "gemini-3.5-flash-lite")
+    assert resolve_model("3.5-flash-lite") == ("gemini", "gemini-3.5-flash-lite")
+
+
+def test_generate_postmortem_passes_resolved_model(monkeypatch) -> None:
+    passed_model: list[str] = []
+
+    def mock_gemini_postmortem(context: str, act_context: str, model: str | None = None) -> str:
+        passed_model.append(model or "")
+        return "Postmortem OK"
+
+    monkeypatch.setattr(gemini_client, "generate_postmortem", mock_gemini_postmortem)
+
+    res = ai.generate_postmortem("Context", "Activity", model="3.5-flash0lite")
+    assert res == "Postmortem OK"
+    assert passed_model == ["gemini-3.5-flash-lite"]
+

@@ -45,6 +45,8 @@ def test_calendar_changes_use_coros_workouts_and_require_update_uid() -> None:
     assert "It reads COROS Calendar,\n   not iCal." in COACH_SYSTEM_PROMPT
     assert "ask for the pool length" in COACH_SYSTEM_PROMPT
     assert "pool_length_m" in COACH_SYSTEM_PROMPT
+    assert "prefer percentage-based threshold targets" in COACH_SYSTEM_PROMPT
+    assert "Use exact bpm, pace, or time" in COACH_SYSTEM_PROMPT
     loop = asyncio.new_event_loop()
     try:
         tools = {tool.name: tool for tool in coach_agent._tools("owner", loop)}

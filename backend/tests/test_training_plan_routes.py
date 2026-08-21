@@ -459,6 +459,29 @@ def test_structured_workout_encodes_coros_percentage_intensity() -> None:
     assert program["pbVersion"] == 3
 
 
+def test_structured_workout_allows_zero_percent_recovery_intensity() -> None:
+    program = _build_coros_program(
+        CorosWorkoutDraft(
+            date="2026-08-12",
+            name="Recovery",
+            sport="run",
+            steps=[
+                CorosWorkoutStep(
+                    intensity="heart_rate_percent",
+                    intensity_basis="lthr",
+                    intensity_low=0,
+                    intensity_high=80,
+                    intensity_zone=6,
+                )
+            ],
+        )
+    )
+
+    exercises = program["exercises"]
+    assert isinstance(exercises, list)
+    assert (exercises[0]["intensityPercent"], exercises[0]["intensityPercentExtend"]) == (0, 80_000)
+
+
 def test_library_editor_decodes_coros_percentage_intensity() -> None:
     draft = _draft_from_program(
         "library:1",

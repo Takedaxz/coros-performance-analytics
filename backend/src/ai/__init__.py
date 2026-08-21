@@ -79,6 +79,20 @@ def list_models() -> list[str]:
     return flat
 
 
+_MODEL_ALIASES: dict[str, str] = {
+    "3.5-flash0lite": "gemini-3.5-flash-lite",
+    "3.5-flash-lite": "gemini-3.5-flash-lite",
+    "3.5-flashlite": "gemini-3.5-flash-lite",
+    "gemini-3.5-flash0lite": "gemini-3.5-flash-lite",
+    "3.5-flash": "gemini-3.5-flash",
+    "3.6-flash": "gemini-3.6-flash",
+    "3.7-flash": "gemini-3.7-flash",
+    "2.5-flash": "gemini-2.5-flash",
+    "2.5-flash-lite": "gemini-2.5-flash-lite",
+    "3.1-flash-lite": "gemini-3.1-flash-lite",
+}
+
+
 def resolve_model(model_name: str | None) -> tuple[str, str]:
     """Resolve a raw model_name string into (provider_id, clean_model_name)."""
     settings = get_settings()
@@ -90,10 +104,16 @@ def resolve_model(model_name: str | None) -> tuple[str, str]:
         return "openai_compat", settings.openai_compat_model
 
     if model_name.startswith("openai_compat:"):
-        return "openai_compat", model_name.split("openai_compat:", 1)[1]
+        raw_name = model_name.split("openai_compat:", 1)[1]
+        clean_name = _MODEL_ALIASES.get(raw_name.lower(), raw_name)
+        return "openai_compat", clean_name
 
     if model_name.startswith("gemini:"):
-        return "gemini", model_name.split("gemini:", 1)[1]
+        raw_name = model_name.split("gemini:", 1)[1]
+        clean_name = _MODEL_ALIASES.get(raw_name.lower(), raw_name)
+        return "gemini", clean_name
+
+    model_name = _MODEL_ALIASES.get(model_name.lower(), model_name)
 
     # Legacy / non-prefixed model names: check where the model belongs
     if _openai_compat_ready():
@@ -210,7 +230,9 @@ def generate_postmortem(context: str, activity_context: str, model: str | None =
     provider, clean_model = resolve_model(model)
     if provider == "gemini":
         return gemini_client.generate_postmortem(context, activity_context, model=clean_model)
-    return openai_compat_client.generate_postmortem(context, activity_context)
+    return openai_compat_client.generate_postmortem(
+        context, activity_context, model=clean_model
+    )
 
 
 def generate_postmortem_stream(
@@ -222,7 +244,9 @@ def generate_postmortem_stream(
             context, activity_context, model=clean_model
         )
     else:
-        yield from openai_compat_client.generate_postmortem_stream(context, activity_context)
+        yield from openai_compat_client.generate_postmortem_stream(
+            context, activity_context, model=clean_model
+        )
 
 
 __all__ = [

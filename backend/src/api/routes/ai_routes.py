@@ -417,6 +417,7 @@ async def _build_laps_with_km_breakdown(
 @router.get("/postmortem/{activity_id}")
 async def activity_postmortem(
     activity_id: str,
+    model: str | None = None,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """AI-generated postmortem analysis for a specific activity."""
@@ -457,7 +458,7 @@ async def activity_postmortem(
         activity_str += "\n" + "\n".join(lap_lines) + "\n"
 
     # 3. Generate postmortem
-    analysis = generate_postmortem(context, activity_str)
+    analysis = generate_postmortem(context, activity_str, model=model)
 
     return {
         "activity_id": activity_id,
@@ -469,6 +470,7 @@ async def activity_postmortem(
 @router.get("/postmortem/{activity_id}/stream")
 async def activity_postmortem_stream(
     activity_id: str,
+    model: str | None = None,
     db: AsyncSession = Depends(get_db_session),
 ) -> StreamingResponse:
     """Stream AI-generated postmortem analysis for a specific activity in real-time."""
@@ -521,7 +523,7 @@ async def activity_postmortem_stream(
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
-        sync_stream = generate_postmortem_stream(context, activity_str)
+        sync_stream = generate_postmortem_stream(context, activity_str, model=model)
         producer = asyncio.create_task(asyncio.to_thread(_produce, sync_stream))
 
         try:

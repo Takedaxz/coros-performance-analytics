@@ -413,17 +413,22 @@ def generate_postmortem_stream(
     prompt = f"{context}\n\nActivity Details:\n{activity_context}"
     target_model = model or settings.gemini_model
 
-    try:
-        response_stream = client.models.generate_content_stream(
-            model=target_model,
+    def build_request(m: str) -> Iterator[types.GenerateContentResponse]:
+        return client.models.generate_content_stream(
+            model=m,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=POSTMORTEM_PROMPT,
                 temperature=0.5,
             ),
         )
-        for chunk in response_stream:
+
+    try:
+        for chunk in _stream_with_model_fallback(
+            client, build_request, target_model, "postmortem_stream"
+        ):
             if chunk.text:
                 yield chunk.text
     except Exception as e:
         yield f"Error: {str(e)}"
+

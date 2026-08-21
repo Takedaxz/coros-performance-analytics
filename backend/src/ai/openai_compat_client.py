@@ -161,12 +161,13 @@ def generate_briefing(context: str) -> str:
         return f"Error: {exc}"
 
 
-def generate_postmortem(context: str, activity_context: str) -> str:
+def generate_postmortem(context: str, activity_context: str, model: str | None = None) -> str:
     """Generate a postmortem analysis for a specific activity."""
     client = _get_client()
     if not client:
         return "OpenAI-compatible AI is not configured."
 
+    target_model = model or settings.openai_compat_model
     messages: list[dict[str, str]] = [
         {"role": "system", "content": POSTMORTEM_PROMPT},
         {"role": "user", "content": f"{context}\n\nActivity Details:\n{activity_context}"},
@@ -174,7 +175,7 @@ def generate_postmortem(context: str, activity_context: str) -> str:
 
     try:
         response = client.chat.completions.create(
-            model=settings.openai_compat_model,
+            model=target_model,
             messages=messages,  # type: ignore[arg-type]
             stream=False,
         )
@@ -184,13 +185,16 @@ def generate_postmortem(context: str, activity_context: str) -> str:
         return f"Error: {exc}"
 
 
-def generate_postmortem_stream(context: str, activity_context: str) -> Iterator[str]:
+def generate_postmortem_stream(
+    context: str, activity_context: str, model: str | None = None
+) -> Iterator[str]:
     """Stream a postmortem analysis chunk by chunk."""
     client = _get_client()
     if not client:
         yield "OpenAI-compatible AI is not configured."
         return
 
+    target_model = model or settings.openai_compat_model
     messages: list[dict[str, str]] = [
         {"role": "system", "content": POSTMORTEM_PROMPT},
         {"role": "user", "content": f"{context}\n\nActivity Details:\n{activity_context}"},
@@ -198,7 +202,7 @@ def generate_postmortem_stream(context: str, activity_context: str) -> Iterator[
 
     try:
         stream = client.chat.completions.create(
-            model=settings.openai_compat_model,
+            model=target_model,
             messages=messages,  # type: ignore[arg-type]
             stream=True,
         )

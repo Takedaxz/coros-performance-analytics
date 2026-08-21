@@ -65,13 +65,10 @@ export function resolveSportKey(sport?: string, title?: string, subsport?: strin
   const t = (title || "").toLowerCase();
   const sub = (subsport || "").toString();
 
-  // Direct map hit
-  if (s && SPORT_ICON_URLS[s]) return s;
-
   // Keyword / Subsport detections
   if (t.includes("treadmill") || t.includes("indoor run") || sub === "101") return "treadmill";
-  if (t.includes("hyrox")) return "hyrox";
-  if (t.includes("hybrid") || sub === "1200") return "hybrid";
+  if (t.includes("hyrox") || sub === "1200") return "hyrox";
+  if (t.includes("hybrid")) return "hybrid";
   if (t.includes("yoga") || sub === "904" || sub === "905") return "yoga";
   if (t.includes("badminton") || sub === "1000") return "badminton";
   if (t.includes("cardio") || t.includes("skierg") || sub === "400" || sub === "701") return "cardio";
@@ -79,6 +76,9 @@ export function resolveSportKey(sport?: string, title?: string, subsport?: strin
   if (t.includes("trail") || sub === "102") return "trail_run";
   if (s.includes("climb") || s.includes("boulder") || t.includes("climb") || t.includes("boulder")) return "climbing";
   if (s.includes("ski") || t.includes("ski")) return "skiing";
+
+  // Direct map hit
+  if (s && SPORT_ICON_URLS[s]) return s;
 
   // Enum sport mappings
   if (s === "run" || s === "running") return "run";

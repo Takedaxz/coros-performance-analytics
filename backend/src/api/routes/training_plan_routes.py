@@ -600,8 +600,11 @@ def _intensity_fields(step: CorosWorkoutStep, sport: WorkoutSport) -> ScheduleOb
         "heart_rate_percent", "threshold_pace_percent", "effort_pace_percent", "ftp_percent"
     }:
         low, high = sorted((low, high))
-        if not 1 <= low <= 300 or not 1 <= high <= 300:
-            raise HTTPException(status_code=422, detail="Percentage intensity must be from 1% to 300%.")
+        if not 0 <= low <= 300 or not 0 <= high <= 300:
+            raise HTTPException(
+                status_code=422,
+                detail="Percentage intensity must be from 0% to 300%.",
+            )
         intensity_type = {
             "heart_rate_percent": 2,
             "threshold_pace_percent": 3,
