@@ -22,6 +22,7 @@ from src.db.engine import async_session_factory
 from src.db.models import (
     Activity,
     ActivityLap,
+    ActivityRecord,
     DailyHealth,
     FitnessEstimate,
     Goal,
@@ -540,6 +541,7 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
     ).scalar_one_or_none()
     if not activity:
         return {"error": "activity not found"}
+
     laps = (
         (
             await db.execute(
@@ -551,40 +553,116 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
         .scalars()
         .all()
     )
+
+    records = (
+        (
+            await db.execute(
+                select(ActivityRecord)
+                .where(ActivityRecord.activity_id == activity_id)
+                .order_by(ActivityRecord.timestamp.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    km_splits: list[dict[str, Any]] = []
+    if records:
+        valid_recs = [r for r in records if r.distance_m is not None]
+        if valid_recs:
+            start_rec = valid_recs[0]
+            accum_hrs: list[int] = []
+            accum_powers: list[int] = []
+            accum_cadences: list[int] = []
+            km_counter = 1
+
+            for i, r in enumerate(valid_recs):
+                if r.heart_rate_bpm:
+                    accum_hrs.append(r.heart_rate_bpm)
+                if r.power_w:
+                    accum_powers.append(r.power_w)
+                if r.cadence:
+                    accum_cadences.append(r.cadence)
+
+                dist_covered = (r.distance_m or 0) - (start_rec.distance_m or 0)
+                is_last = i == len(valid_recs) - 1
+
+                if dist_covered >= 1000.0 or (is_last and dist_covered > 50):
+                    time_diff_s = (r.timestamp - start_rec.timestamp).total_seconds()
+                    if time_diff_s > 0:
+                        avg_speed = dist_covered / time_diff_s
+                        avg_hr = round(sum(accum_hrs) / len(accum_hrs)) if accum_hrs else None
+                        avg_pwr = (
+                            round(sum(accum_powers) / len(accum_powers)) if accum_powers else None
+                        )
+                        avg_cad = (
+                            round(sum(accum_cadences) / len(accum_cadences))
+                            if accum_cadences
+                            else None
+                        )
+                        elev_delta = (
+                            round(r.altitude_m - start_rec.altitude_m)
+                            if (r.altitude_m is not None and start_rec.altitude_m is not None)
+                            else None
+                        )
+
+                        km_splits.append(
+                            {
+                                "km": km_counter,
+                                "sec": round(time_diff_s),
+                                "m": round(dist_covered),
+                                "pace_s_km": _pace_s_km(avg_speed),
+                                "hr": avg_hr,
+                                "cadence": avg_cad,
+                                "power": avg_pwr,
+                                "elev_delta_m": elev_delta,
+                            }
+                        )
+                        km_counter += 1
+                        start_rec = r
+                        accum_hrs = []
+                        accum_powers = []
+                        accum_cadences = []
+
     return {
         "activity": {
             "id": activity.id,
             "date": activity.start_time.isoformat(),
             "sport": str(activity.sport),
             "title": activity.title,
-            "km": round(activity.distance_m / 1000, 2) if activity.distance_m else None,
-            "min": round(activity.elapsed_time_s / 60, 1) if activity.elapsed_time_s else None,
-            "pace_s_km": _pace_s_km(activity.avg_speed_mps),
-            "hr": activity.avg_hr_bpm,
-            "max_hr": activity.max_hr_bpm,
-            "cadence": activity.avg_cadence,
-            "power": activity.avg_power_w,
-            "norm_power": activity.normalized_power_w,
-            "load": activity.training_load_vendor,
-            "drift": activity.cardiac_drift_pct_app,
-            "elev_gain_m": activity.elevation_gain_m,
-            "elev_loss_m": activity.elevation_loss_m,
-            **({"note": activity.activity_note} if activity.activity_note else {}),
+            "km": round(activity.distance_m / 1000, 2) if getattr(activity, "distance_m", None) else None,
+            "min": round(activity.elapsed_time_s / 60, 1) if getattr(activity, "elapsed_time_s", None) else None,
+            "pace_s_km": _pace_s_km(getattr(activity, "avg_speed_mps", None)),
+            "hr": getattr(activity, "avg_hr_bpm", None),
+            "max_hr": getattr(activity, "max_hr_bpm", None),
+            "cadence": getattr(activity, "avg_cadence", None),
+            "power": getattr(activity, "avg_power_w", None),
+            "max_power": getattr(activity, "max_power_w", None),
+            "norm_power": getattr(activity, "normalized_power_w", None),
+            "load": getattr(activity, "training_load_vendor", None),
+            "drift": getattr(activity, "cardiac_drift_pct_app", None),
+            "efficiency_factor": getattr(activity, "efficiency_factor_app", None),
+            "te_aerobic": getattr(activity, "training_effect_aerobic_vendor", None),
+            "te_anaerobic": getattr(activity, "training_effect_anaerobic_vendor", None),
+            "elev_gain_m": getattr(activity, "elevation_gain_m", None),
+            "elev_loss_m": getattr(activity, "elevation_loss_m", None),
+            **({"note": activity.activity_note} if getattr(activity, "activity_note", None) else {}),
         },
         "laps": [
             {
                 "n": lap.lap_index,
                 "sec": round(lap.elapsed_s),
-                "m": round(lap.distance_m) if lap.distance_m else None,
-                "pace_s_km": _pace_s_km(lap.avg_speed_mps),
-                "hr": lap.avg_hr_bpm,
-                "max_hr": lap.max_hr_bpm,
-                "cadence": lap.avg_cadence,
-                "power": lap.avg_power_w,
-                "trigger": lap.lap_trigger,
+                "m": round(lap.distance_m) if getattr(lap, "distance_m", None) else None,
+                "pace_s_km": _pace_s_km(getattr(lap, "avg_speed_mps", None)),
+                "hr": getattr(lap, "avg_hr_bpm", None),
+                "max_hr": getattr(lap, "max_hr_bpm", None),
+                "cadence": getattr(lap, "avg_cadence", None),
+                "power": getattr(lap, "avg_power_w", None),
+                "trigger": getattr(lap, "lap_trigger", None),
             }
             for lap in laps
         ],
+        "km_splits": km_splits,
     }
 
 

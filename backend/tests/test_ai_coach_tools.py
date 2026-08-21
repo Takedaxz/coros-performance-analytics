@@ -247,7 +247,7 @@ async def test_activity_detail_tool_includes_a_saved_note() -> None:
 
     class Db:
         def __init__(self) -> None:
-            self.results = iter([Result(activity), Result([])])
+            self.results = iter([Result(activity), Result([]), Result([])])
 
         async def execute(self, _statement: object) -> Result:
             return next(self.results)
@@ -413,3 +413,38 @@ async def test_scheduled_workout_details_returns_coros_steps(
     assert result["source"] == "coros"
     assert result["workouts"][0]["title"] == "Intervals"
     assert result["workouts"][0]["steps"][1]["value"] == 1_000
+
+
+@pytest.mark.asyncio
+async def test_compare_activities_tool_returns_deep_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uuid1 = "11111111-1111-4111-8111-111111111111"
+    uuid2 = "22222222-2222-4222-8222-222222222222"
+
+    async def mock_activity_detail(_db: object, _user_id: str, act_id: str) -> dict:
+        return {
+            "activity": {
+                "id": act_id,
+                "title": f"Run {act_id[:4]}",
+                "km": 10.0,
+                "efficiency_factor": 1.45,
+                "te_aerobic": 3.5,
+            },
+            "laps": [],
+            "km_splits": [{"km": 1, "pace_s_km": 270, "hr": 150}],
+        }
+
+    monkeypatch.setattr(coach_tools, "_activity_detail", mock_activity_detail)
+
+    res = await coach_tools._execute_tool(
+        "compare_activities",
+        "owner",
+        {"activity_ids": [uuid1, uuid2]},
+    )
+
+    assert "activities" in res
+    assert len(res["activities"]) == 2
+    assert res["activities"][0]["activity"]["efficiency_factor"] == 1.45
+    assert len(res["activities"][0]["km_splits"]) == 1
+
