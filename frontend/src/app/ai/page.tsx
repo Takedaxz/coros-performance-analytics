@@ -376,18 +376,31 @@ function DeepResearchIcon() {
   );
 }
 
+function CoachingKnowledgeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4.5 5.5A2.5 2.5 0 0 1 7 3h11.5v16H7a2.5 2.5 0 0 0-2.5 2.5z" />
+      <path d="M4.5 5.5V21M8 7.5h7M8 11h7" />
+    </svg>
+  );
+}
+
 function AttachmentPopover({
   isOpen,
   onClose,
   onAddPhotos,
   searchMode,
   onSelectSearchMode,
+  coachingKnowledgeEnabled,
+  onToggleCoachingKnowledge,
 }: {
   isOpen: boolean;
   onClose: () => void;
   onAddPhotos: () => void;
   searchMode: SearchMode;
   onSelectSearchMode: (mode: SearchMode) => void;
+  coachingKnowledgeEnabled: boolean;
+  onToggleCoachingKnowledge: () => void;
 }) {
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -428,6 +441,25 @@ function AttachmentPopover({
         <div className="ai-attachment-info">
           <div className="ai-attachment-title">Add photos & files</div>
           <div className="ai-attachment-subtitle">Upload from computer</div>
+        </div>
+      </button>
+
+      <button
+        type="button"
+        className={`ai-attachment-option${coachingKnowledgeEnabled ? " is-active" : ""}`}
+        role="menuitem"
+        onClick={() => {
+          onToggleCoachingKnowledge();
+          onClose();
+        }}
+      >
+        <span className="ai-attachment-icon"><CoachingKnowledgeIcon /></span>
+        <div className="ai-attachment-info">
+          <div className="ai-attachment-title">
+            Coaching knowledge
+            {coachingKnowledgeEnabled && <span className="ai-attachment-badge">Active</span>}
+          </div>
+          <div className="ai-attachment-subtitle">Require guidance from the coach library</div>
         </div>
       </button>
 
@@ -1094,6 +1126,7 @@ export default function AiPage() {
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
   const [activeAttachmentMenu, setActiveAttachmentMenu] = useState<"landing" | "chat" | null>(null);
   const [searchMode, setSearchMode] = useState<SearchMode>("none");
+  const [coachingKnowledgeEnabled, setCoachingKnowledgeEnabled] = useState(false);
   const [nickname, setNickname] = useState<string>("");
   const [expandedPillGroup, setExpandedPillGroup] = useState<string | null>(null);
   const [draftProjectId, setDraftProjectId] = useState<string | null>(null);
@@ -1679,6 +1712,7 @@ export default function AiPage() {
           images: currentImages,
           force_web_search: searchMode === "web" || searchMode === "deep",
           is_deep_research: searchMode === "deep",
+          force_coaching_knowledge: coachingKnowledgeEnabled,
           history: baseHistory.slice(-12).map((m) => ({
             role: m.role === "ai" ? "assistant" : "user",
             content: m.content,
@@ -1957,6 +1991,15 @@ export default function AiPage() {
                 </button>
               </div>
             )}
+            {coachingKnowledgeEnabled && (
+              <div className="web-search-active-chip">
+                <CoachingKnowledgeIcon />
+                <span>Coaching knowledge</span>
+                <button type="button" onClick={() => setCoachingKnowledgeEnabled(false)} title="Turn off coaching knowledge" aria-label="Turn off coaching knowledge">
+                  <XIcon />
+                </button>
+              </div>
+            )}
             {pendingImages.length > 0 && (
               <div className="staged-images-bar">
                 {pendingImages.map((img, idx) => (
@@ -1996,6 +2039,8 @@ export default function AiPage() {
               onAddPhotos={() => fileInputRef.current?.click()}
               searchMode={searchMode}
               onSelectSearchMode={setSearchMode}
+              coachingKnowledgeEnabled={coachingKnowledgeEnabled}
+              onToggleCoachingKnowledge={() => setCoachingKnowledgeEnabled((enabled) => !enabled)}
             />
             <textarea
               id={inputId}
@@ -2783,6 +2828,15 @@ export default function AiPage() {
                             </button>
                           </div>
                         )}
+                        {coachingKnowledgeEnabled && (
+                          <div className="web-search-active-chip">
+                            <CoachingKnowledgeIcon />
+                            <span>Coaching knowledge</span>
+                            <button type="button" onClick={() => setCoachingKnowledgeEnabled(false)} title="Turn off coaching knowledge" aria-label="Turn off coaching knowledge">
+                              <XIcon />
+                            </button>
+                          </div>
+                        )}
                         {pendingImages.length > 0 && (
                           <div className="staged-images-bar">
                             {pendingImages.map((img, idx) => (
@@ -2822,6 +2876,8 @@ export default function AiPage() {
                           onAddPhotos={() => fileInputRef.current?.click()}
                           searchMode={searchMode}
                           onSelectSearchMode={setSearchMode}
+                          coachingKnowledgeEnabled={coachingKnowledgeEnabled}
+                          onToggleCoachingKnowledge={() => setCoachingKnowledgeEnabled((enabled) => !enabled)}
                         />
                         <textarea
                           id="chat-input"

@@ -8,7 +8,7 @@ from src.ai.context_builder import (
 from src.db.models import Activity, ActivityLap, ActivityRecord
 
 
-def test_personal_record_context_includes_only_4_and_12_week_records() -> None:
+def test_personal_record_context_includes_all_windows() -> None:
     context = _format_personal_records(
         {
             "coros_personal_record_groups": [
@@ -35,6 +35,17 @@ def test_personal_record_context_includes_only_4_and_12_week_records() -> None:
                     ],
                 },
                 {
+                    "type": 2,
+                    "records": [
+                        {
+                            "label": "Half Marathon",
+                            "duration_s": 6000,
+                            "pace_s_per_km": 284,
+                            "date": "2026-03-01",
+                        }
+                    ],
+                },
+                {
                     "type": 4,
                     "records": [
                         {
@@ -51,7 +62,8 @@ def test_personal_record_context_includes_only_4_and_12_week_records() -> None:
 
     assert "**4 weeks:** 10K: 58:18, 5:50/km, 2026-07-30" in context
     assert "**12 weeks:** 5K: 23:23, 4:41/km, 2026-05-02" in context
-    assert "**All:**" not in context
+    assert "**Half year:** Half Marathon: 1:40:00, 4:44/km, 2026-03-01" in context
+    assert "**All time:** 1K: 3:20, 3:20/km, 2026-01-01" in context
     assert "not verified race performances" in context
 
 

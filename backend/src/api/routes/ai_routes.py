@@ -69,19 +69,31 @@ def _unique_tool_calls(tool_calls: list[ToolCallRecord]) -> list[ToolCallRecord]
 
 
 def _format_question_with_search_flags(
-    question: str, force_web_search: bool, is_deep_research: bool
+    question: str,
+    force_web_search: bool,
+    is_deep_research: bool,
+    force_coaching_knowledge: bool,
 ) -> str:
+    instructions: list[str] = []
     if is_deep_research:
-        return (
-            "[USER REQUESTED DEEP RESEARCH MODE: Perform a comprehensive, multi-step iterative research investigation using the `web_search` tool. Search for scientific studies, official rulebooks, or technical guides, compare facts, and synthesize an exhaustive, highly detailed deep research report with cited sources.]\n\n"
-            + question
+        instructions.append(
+            "[USER REQUESTED DEEP RESEARCH MODE: Perform a comprehensive, multi-step iterative "
+            "research investigation using the `web_search` tool. Search for scientific studies, "
+            "official rulebooks, or technical guides, compare facts, and synthesize an exhaustive, "
+            "highly detailed deep research report with cited sources.]"
         )
-    if force_web_search:
-        return (
-            "[USER REQUESTED REAL-TIME WEB SEARCH: Use the `web_search` tool to look up current, up-to-date web information for this query before responding]\n\n"
-            + question
+    elif force_web_search:
+        instructions.append(
+            "[USER REQUESTED REAL-TIME WEB SEARCH: Use the `web_search` tool to look up "
+            "current, up-to-date web information for this query before responding]"
         )
-    return question
+    if force_coaching_knowledge:
+        instructions.append(
+            "[USER REQUESTED COACHING KNOWLEDGE: You MUST call the "
+            "`search_coaching_knowledge` tool before responding and use its returned "
+            "cited guidance in your answer.]"
+        )
+    return "\n\n".join([*instructions, question])
 
 
 async def _display_tool_calls(
@@ -159,6 +171,7 @@ class AskRequest(BaseModel):
     assistant_message_id: UUID | None = None
     force_web_search: bool = False
     is_deep_research: bool = False
+    force_coaching_knowledge: bool = False
 
 
 class AskResponse(BaseModel):
@@ -191,7 +204,7 @@ async def ask_ai(
     history_dicts = [{"role": msg.role, "content": msg.content} for msg in req.history]
     tool_calls: list[ToolCallRecord] = []
     question_text = _format_question_with_search_flags(
-        req.question, req.force_web_search, req.is_deep_research
+        req.question, req.force_web_search, req.is_deep_research, req.force_coaching_knowledge
     )
     answer = await asyncio.to_thread(
         ask_coach,
@@ -254,8 +267,11 @@ async def ask_ai_stream(
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
 
+        question_text = _format_question_with_search_flags(
+            req.question, req.force_web_search, req.is_deep_research, req.force_coaching_knowledge
+        )
         sync_stream = ask_coach_stream(
-            req.question,
+            question_text,
             context,
             history_dicts,
             images=req.images,
@@ -1066,7 +1082,7 @@ async def session_ask_stream(
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
         question_text = _format_question_with_search_flags(
-            req.question, req.force_web_search, req.is_deep_research
+            req.question, req.force_web_search, req.is_deep_research, req.force_coaching_knowledge
         )
         sync_stream = ask_coach_stream(
             question_text,

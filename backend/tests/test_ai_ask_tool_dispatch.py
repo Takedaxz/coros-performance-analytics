@@ -9,7 +9,11 @@ import pytest
 import src.ai as ai_pkg
 from src.ai import coach_agent
 from src.ai.coach_tools import MAX_TOOL_CALLS
-from src.api.routes.ai_routes import _display_tool_calls, _unique_tool_calls
+from src.api.routes.ai_routes import (
+    _display_tool_calls,
+    _format_question_with_search_flags,
+    _unique_tool_calls,
+)
 
 
 def test_tool_call_limit_is_shared_between_agent_and_tools() -> None:
@@ -21,6 +25,24 @@ def test_tool_call_limit_is_shared_between_agent_and_tools() -> None:
 def test_unique_tool_calls_handles_dict_records() -> None:
     call = {"name": "get_training_plan", "arguments": {"start_date": "2026-08-16"}}
     assert _unique_tool_calls([call, call]) == [call]
+
+
+def test_coaching_knowledge_mode_requires_the_library_tool() -> None:
+    question = _format_question_with_search_flags(
+        "How should I recover?", False, False, True
+    )
+
+    assert "MUST call the `search_coaching_knowledge` tool" in question
+    assert question.endswith("How should I recover?")
+
+
+def test_web_and_coaching_knowledge_modes_are_combined() -> None:
+    question = _format_question_with_search_flags(
+        "How should I recover?", True, False, True
+    )
+
+    assert "`web_search` tool" in question
+    assert "`search_coaching_knowledge` tool" in question
 
 
 def test_activity_tool_call_display_uses_title_and_date() -> None:

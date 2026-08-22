@@ -463,8 +463,10 @@ def _detail_activity_records(activity: Activity, raw_detail: dict) -> list[Activ
 
 
 def _record_date(data: dict) -> str | None:
-    for key in ("happenDay", "date", "recordDay", "day"):
+    for key in ("happenDay", "date", "recordDay", "day", "createTime", "startTime", "happenTime"):
         value = data.get(key)
+        if value is None and isinstance(data.get("record"), dict):
+            value = data["record"].get(key)
         if value is None:
             continue
         text = str(value).strip()

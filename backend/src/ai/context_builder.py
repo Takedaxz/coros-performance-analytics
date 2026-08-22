@@ -62,7 +62,7 @@ def _format_pace(speed_mps: float | None, distance_m: int = 1_000) -> str | None
 
 
 def _format_personal_records(preferences: dict[object, object] | None) -> str:
-    """Format the 4- and 12-week COROS personal records for coach context."""
+    """Format COROS personal records for coach context across 4 weeks, 12 weeks, half year, and all time."""
     if not isinstance(preferences, dict):
         return ""
     raw_groups = preferences.get("coros_personal_record_groups")
@@ -73,10 +73,10 @@ def _format_personal_records(preferences: dict[object, object] | None) -> str:
         group_type: group
         for group in raw_groups
         if isinstance(group, dict)
-        and (group_type := group.get("type")) in {1, 3}
+        and (group_type := group.get("type")) in {1, 2, 3, 4}
     }
     lines: list[str] = []
-    for group_type, label in ((1, "4 weeks"), (3, "12 weeks")):
+    for group_type, label in ((1, "4 weeks"), (3, "12 weeks"), (2, "Half year"), (4, "All time")):
         group = groups_by_type.get(group_type)
         records = group.get("records") if isinstance(group, dict) else None
         if not isinstance(records, list):
@@ -108,7 +108,7 @@ def _format_personal_records(preferences: dict[object, object] | None) -> str:
             "#### COROS Personal Records",
             *lines,
             "- **Interpretation:** These are best elapsed times within each window, not "
-            "verified race performances. A 4-week 5K or 10K record without a "
+            "verified race performances. A personal record without a "
             "sustained matching-distance effort may include recovery, rest, or normal "
             "jogging; do not treat it as current race fitness. Cross-check recent "
             "continuous hard sessions and HR before using any record to set training "
