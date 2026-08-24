@@ -5,8 +5,10 @@ import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import NumberStepper from "@/components/NumberStepper";
 import SingleSelect from "@/components/SingleSelect";
+import ExerciseCombobox, { type ExerciseOption } from "@/components/ExerciseCombobox";
 import { SportIcon, getSportVisual } from "@/components/SportActivityIcon";
 import { moveRepeatStep, moveStepAcrossRepeatBoundary, moveWorkoutBlock } from "./workout-order";
+import { resolveExerciseName } from "@/lib/exerciseNames";
 
 interface TrainingEvent {
   uid: string;
@@ -32,6 +34,8 @@ interface WorkoutStepForm {
   target: WorkoutTarget;
   value: number;
   name: string;
+  sets: number;
+  rest_seconds: number;
   repeats: number;
   intensity: WorkoutIntensity;
   intensity_low: number | null;
@@ -158,7 +162,7 @@ function intensitiesFor(sport: WorkoutSport, kind: WorkoutStepForm["kind"]): Wor
 }
 
 function newWorkoutStep(): WorkoutStepForm {
-  return { kind: "training", target: "time", value: 600, name: "", repeats: 1, intensity: "none", intensity_low: null, intensity_high: null, intensity_basis: "max_hr", intensity_zone: null, repeat_group: null, repeat_count: null, repeat_name: null };
+  return { kind: "training", target: "time", value: 600, name: "", sets: 1, rest_seconds: 0, repeats: 1, intensity: "none", intensity_low: null, intensity_high: null, intensity_basis: "max_hr", intensity_zone: null, repeat_group: null, repeat_count: null, repeat_name: null };
 }
 
 function newStructuredWorkoutDraft(date: string): WorkoutDraftForm {
@@ -287,11 +291,14 @@ function exerciseVideo(name: string, videos: Record<string, string>): string | n
 }
 
 function normalizeLoadedDraft(draft: WorkoutEditorData): WorkoutDraftForm {
+  const loadedSets = draft.sport === "strength";
   return {
     ...draft,
     steps: draft.steps.map((step) => ({
       ...step,
       name: /^[TS]\d+$/i.test(step.name.trim()) ? friendlyStepName(step.kind) : step.name,
+      sets: step.sets ?? (loadedSets && step.kind === "training" ? Math.max(1, step.repeats) : 1),
+      rest_seconds: step.rest_seconds ?? 0,
       intensity_basis: step.intensity_basis ?? "max_hr",
       intensity_zone: step.intensity_zone ?? null,
     })),
@@ -368,6 +375,9 @@ export default function TrainingPlanPage() {
   const [workoutDraftCache, setWorkoutDraftCache] = useState<Partial<Record<"structured", WorkoutDraftForm>>>({});
   const [exerciseVideos, setExerciseVideos] = useState<Record<string, string>>({});
   const [exerciseVideosLoaded, setExerciseVideosLoaded] = useState(false);
+  const [exerciseOptions, setExerciseOptions] = useState<ExerciseOption[]>([]);
+  const [exerciseOptionsLoading, setExerciseOptionsLoading] = useState(false);
+  const [exerciseOptionsLoaded, setExerciseOptionsLoaded] = useState(false);
   const [workoutError, setWorkoutError] = useState("");
   const editRequestRef = useRef<AbortController | null>(null);
 
@@ -416,6 +426,35 @@ export default function TrainingPlanPage() {
       .finally(() => setExerciseVideosLoaded(true));
     return () => controller.abort();
   }, [apiBase, exerciseVideosLoaded, workoutDraft?.sport]);
+
+  useEffect(() => {
+    if (workoutDraft?.sport !== "strength") {
+      setExerciseOptions([]);
+      setExerciseOptionsLoaded(false);
+      setExerciseOptionsLoading(false);
+      return;
+    }
+    if (exerciseOptionsLoaded) return;
+    let active = true;
+    setExerciseOptionsLoading(true);
+    void fetch(`${apiBase}/api/training-plan/coros/exercises`)
+      .then((response) => (response.ok ? (response.json() as Promise<ExerciseOption[]>) : []))
+      .then((options) => {
+        if (active) setExerciseOptions(options);
+      })
+      .catch(() => {
+        if (active) setExerciseOptions([]);
+      })
+      .finally(() => {
+        if (active) {
+          setExerciseOptionsLoading(false);
+          setExerciseOptionsLoaded(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [apiBase, exerciseOptionsLoaded, workoutDraft?.sport]);
 
   const eventsByDate = useMemo(() => {
     const grouped: Record<string, TrainingEvent[]> = {};
@@ -707,14 +746,17 @@ export default function TrainingPlanPage() {
     const dragItem: WorkoutDragItem = { scope: nested ? "repeat" : "block", index };
     const isDragging = draggedWorkoutItem?.scope === dragItem.scope && draggedWorkoutItem.index === index;
     const isDropTarget = dropTargetWorkoutItem?.scope === dragItem.scope && dropTargetWorkoutItem.index === index;
+    const isStrengthMovement = workoutDraft.sport === "strength" && step.kind === "training";
     return <article className={`plan-workout-step${isActive ? " is-active" : " is-collapsed"}${isDragging ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`} data-step-kind={step.kind} key={`${index}-${step.name}`} draggable onDragStart={(event) => beginWorkoutDrag(event, dragItem)} onDragEnd={endWorkoutDrag} onDragOver={(event) => allowWorkoutDrop(event, dragItem)} onDrop={(event) => finishWorkoutDrop(event, dragItem)}>
       <header className="plan-workout-step-title"><WorkoutDragHandle /><span className="plan-workout-step-index">{String(index + 1).padStart(2, "0")}</span><button className="plan-workout-step-toggle" type="button" aria-expanded={isActive} onClick={() => setActiveWorkoutStep(isActive ? null : index)}><small>Step {index + 1}</small><strong>{displayStepName(step)}</strong><em>{targetLabel(step.target)}{step.target !== "open" ? ` · ${structureValue(step)}` : ""}</em></button><div className="plan-workout-step-header-actions">{video && <button type="button" aria-label={`${isVideoOpen ? "Hide" : "Show"} ${displayStepName(step)} technique video`} title={`${isVideoOpen ? "Hide" : "Show"} technique video`} aria-pressed={isVideoOpen} onClick={() => setActiveExerciseVideoStep(isVideoOpen ? null : index)}><WorkoutIcon name="video" size={15} /></button>}<button type="button" aria-label="Duplicate step" title="Duplicate step" onClick={() => duplicateStep(index)}><WorkoutIcon name="copy" size={15} /></button><button type="button" aria-label="Delete step" title="Delete step" disabled={workoutDraft.steps.length === 1} onClick={() => setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.filter((_, position) => position !== index) })}><WorkoutIcon name="trash" size={15} /></button></div></header>
       {video && isVideoOpen && <aside className="plan-workout-exercise-video" aria-label={`${displayStepName(step)} technique preview`}><video src={video} controls loop muted playsInline preload="metadata" /></aside>}
-      {isActive && <div className="plan-workout-step-fields">
-        <label><span>Type</span><SingleSelect ariaLabel="Step type" value={step.kind} onChange={(value) => { const kind = value as WorkoutStepForm["kind"]; updateStep(index, { kind, target: targetsFor(workoutDraft.sport, kind)[0] }); }} options={[{ value: "warmup", label: "Warm-up" }, { value: "training", label: "Training" }, { value: "rest", label: "Rest" }, { value: "cooldown", label: "Cool-down" }]} /></label>
-        <label><span>Finish target</span><SingleSelect ariaLabel="Finish target" value={step.target} onChange={(value) => { const nextTarget = value as WorkoutTarget; const nextValue = nextTarget === "distance" ? (step.target === "distance" ? step.value : 1000) : nextTarget === "time" ? (step.target === "time" ? step.value : 600) : step.value; updateStep(index, { target: nextTarget, value: nextValue }); }} options={targets.map((target) => ({ value: target, label: targetLabel(target) }))} /></label>
-        {step.target !== "open" && <label><span>{targetValueLabel(step.target)}</span>{step.target === "time" ? <DurationInput key={step.value} seconds={step.value} onChange={(value) => updateStep(index, { value })} /> : step.target === "distance" ? <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0.001} step={0.1} value={Number((step.value / 1000).toFixed(3))} onChange={(value) => updateStep(index, { value: Math.round((Number(value) || 0) * 1000) })} /> : <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0} value={step.value} onChange={(value) => updateStep(index, { value: Number(value) || 0 })} />}</label>}
-        <label><span>Intensity</span><SingleSelect ariaLabel="Intensity" value={step.intensity} onChange={(value) => { const intensity = value as WorkoutIntensity; updateStep(index, { intensity, intensity_basis: "max_hr", intensity_zone: null, ...initialIntensityValues(intensity) }); }} options={INTENSITY_OPTIONS.filter((option) => intensitiesFor(workoutDraft.sport, step.kind).includes(option.value))} /></label>
+       {isActive && <div className="plan-workout-step-fields">
+         {isStrengthMovement && <label><span>Movement</span><ExerciseCombobox value={step.name} options={exerciseOptions} loading={exerciseOptionsLoading} onChange={(selectedName) => updateStep(index, { name: selectedName })} /></label>}
+         <label><span>Type</span><SingleSelect ariaLabel="Step type" value={step.kind} onChange={(value) => { const kind = value as WorkoutStepForm["kind"]; updateStep(index, { kind, target: targetsFor(workoutDraft.sport, kind)[0] }); }} options={[{ value: "warmup", label: "Warm-up" }, { value: "training", label: "Training" }, { value: "rest", label: "Rest" }, { value: "cooldown", label: "Cool-down" }]} /></label>
+         <label><span>Finish target</span><SingleSelect ariaLabel="Finish target" value={step.target} onChange={(value) => { const nextTarget = value as WorkoutTarget; const nextValue = nextTarget === "distance" ? (step.target === "distance" ? step.value : 1000) : nextTarget === "time" ? (step.target === "time" ? step.value : 600) : step.value; updateStep(index, { target: nextTarget, value: nextValue }); }} options={targets.map((target) => ({ value: target, label: targetLabel(target) }))} /></label>
+         {step.target !== "open" && <label><span>{targetValueLabel(step.target)}</span>{step.target === "time" ? <DurationInput key={step.value} seconds={step.value} onChange={(value) => updateStep(index, { value })} /> : step.target === "distance" ? <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0.001} step={0.1} value={Number((step.value / 1000).toFixed(3))} onChange={(value) => updateStep(index, { value: Math.round((Number(value) || 0) * 1000) })} /> : <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0} value={step.value} onChange={(value) => updateStep(index, { value: Number(value) || 0 })} />}</label>}
+         {isStrengthMovement && <><label><span>Sets</span><NumberStepper ariaLabel="Sets" min={1} max={99} value={step.sets} onChange={(value) => updateStep(index, { sets: Math.max(1, Number(value) || 1) })} /></label><label><span>Rest between sets (sec)</span><NumberStepper ariaLabel="Rest between sets in seconds" min={0} max={3600} value={step.rest_seconds} onChange={(value) => updateStep(index, { rest_seconds: Math.max(0, Number(value) || 0) })} /></label></>}
+         <label><span>Intensity</span><SingleSelect ariaLabel="Intensity" value={step.intensity} onChange={(value) => { const intensity = value as WorkoutIntensity; updateStep(index, { intensity, intensity_basis: "max_hr", intensity_zone: null, ...initialIntensityValues(intensity) }); }} options={INTENSITY_OPTIONS.filter((option) => intensitiesFor(workoutDraft.sport, step.kind).includes(option.value))} /></label>
         {step.intensity === "heart_rate_percent" ? <label><span>Heart-rate basis</span><SingleSelect ariaLabel="Heart-rate basis" value={step.intensity_basis} onChange={(value) => updateStep(index, { intensity_basis: value as WorkoutIntensityBasis, intensity_zone: null, ...initialIntensityValues(step.intensity) })} options={[{ value: "max_hr", label: "% Max Heart Rate" }, { value: "reserve", label: "% Heart Rate Reserve" }, { value: "lthr", label: "% Threshold HR" }]} /></label> : null}
         {step.intensity === "stroke" ? <label><span>Stroke</span><SingleSelect ariaLabel="Stroke" value={String(step.intensity_low ?? 1)} onChange={(value) => updateStep(index, { intensity_low: Number(value), intensity_high: null })} options={STROKE_OPTIONS} /></label> : null}
         {(() => {
@@ -732,7 +774,7 @@ export default function TrainingPlanPage() {
   const structuredRepeatGroups = new Set(workoutDraft?.steps.flatMap((step) => step.repeat_group === null ? [] : [step.repeat_group]) ?? []).size;
   const structuredTotals = (workoutDraft?.steps ?? []).reduce((totals, step) => {
     const multiplier = step.repeat_group === null ? 1 : step.repeat_count ?? 1;
-    if (step.target === "time") totals.seconds += step.value * multiplier;
+    if (step.target === "time") totals.seconds += (step.value * Math.max(1, step.sets) + Math.max(0, step.sets - 1) * step.rest_seconds) * multiplier;
     if (step.target === "distance") totals.distance += step.value * multiplier;
     return totals;
   }, { seconds: 0, distance: 0 });
@@ -987,7 +1029,7 @@ export default function TrainingPlanPage() {
                   <div className="plan-workout-structured">
                     <aside className="plan-workout-builder-settings" aria-label="Workout settings">
                       <div className="plan-workout-pane-heading"><h3>Workout settings</h3><p>Set the basics for your workout.</p></div>
-                      <div className="plan-workout-sport-field"><span>Sport</span><div className="plan-workout-sport-grid" role="group" aria-label="Workout sport">{SPORT_OPTIONS.map((option) => <button key={option.value} type="button" title={option.label} aria-label={option.label} aria-pressed={workoutDraft.sport === option.value} className={workoutDraft.sport === option.value ? "is-active" : ""} onClick={() => setWorkoutDraft({ ...workoutDraft, sport: option.value, steps: workoutDraft.steps.map((step) => { const intensity = intensitiesFor(option.value, step.kind).includes(step.intensity) ? step.intensity : option.value === "indoor_climb" || option.value === "bouldering" ? "grade" : "none"; return { ...step, intensity, ...initialIntensityValues(intensity) }; }) })}><SportIcon sport={option.value} size={22} /></button>)}</div></div>
+                       <div className="plan-workout-sport-field"><span>Sport</span><div className="plan-workout-sport-grid" role="group" aria-label="Workout sport">{SPORT_OPTIONS.map((option) => <button key={option.value} type="button" title={option.label} aria-label={option.label} aria-pressed={workoutDraft.sport === option.value} className={workoutDraft.sport === option.value ? "is-active" : ""} onClick={() => setWorkoutDraft({ ...workoutDraft, sport: option.value, steps: workoutDraft.steps.map((step) => { const intensity = intensitiesFor(option.value, step.kind).includes(step.intensity) ? step.intensity : option.value === "indoor_climb" || option.value === "bouldering" ? "grade" : "none"; const strengthTraining = option.value === "strength" && step.kind === "training"; return { ...step, target: strengthTraining && (step.target === "time" || step.target === "distance") ? "reps" : step.target, value: strengthTraining && (step.target === "time" || step.target === "distance") ? 10 : step.value, sets: strengthTraining ? Math.max(1, step.sets ?? 3) : step.sets, intensity, ...initialIntensityValues(intensity) }; }) })}><SportIcon sport={option.value} size={22} /></button>)}</div></div>
                       <label className="plan-workout-field"><span>Workout name <small>Optional</small></span><input value={workoutDraft.name} placeholder={workoutDraft.sport === "strength" ? "Full-body strength" : workoutDraft.sport === "swim" ? "Pool endurance" : "6 x 800 m"} onChange={(event) => setWorkoutDraft({ ...workoutDraft, name: event.target.value })} /></label>
                       <label className="plan-workout-field plan-workout-builder-description"><span>Description <small>{workoutDraft.description.length} / 300</small></span><textarea maxLength={300} rows={4} value={workoutDraft.description} placeholder="Add coaching notes or the goal of this workout" onChange={(event) => setWorkoutDraft({ ...workoutDraft, description: event.target.value })} /></label>
                       <label className={`plan-workout-save-card${structuredSaveToLibrary ? " is-checked" : ""}`}><input type="checkbox" checked={structuredSaveToLibrary} onChange={(event) => setStructuredSaveToLibrary(event.target.checked)} /><WorkoutIcon name="save" size={18} /><span><strong>Save to library</strong><small>Keep a reusable copy after scheduling.</small></span></label>

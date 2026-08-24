@@ -9,6 +9,7 @@ e.g. the KKU OKMD gateway, vLLM, LM Studio, Ollama (OpenAI-compat mode), etc.
 
 import logging
 from collections.abc import Iterator
+from dataclasses import dataclass
 from functools import lru_cache
 from time import monotonic
 
@@ -17,38 +18,76 @@ from openai import OpenAI
 from src.ai.prompts import COACH_SYSTEM_PROMPT, POSTMORTEM_PROMPT, WEEKLY_BRIEFING_PROMPT
 from src.config import get_settings
 
-settings = get_settings()
 logger = logging.getLogger(__name__)
 _MODEL_CACHE_SECONDS = 300
 
 
-def _get_client() -> OpenAI | None:
+@dataclass(frozen=True)
+class _ProviderConfig:
+    enabled: bool
+    api_key: str
+    base_url: str
+    model: str
+    headers: dict[str, str] | None = None
+
+
+def provider_config(provider: str) -> _ProviderConfig:
+    """Return credentials and request metadata for an OpenAI-compatible provider."""
+    current_settings = get_settings()
+    if provider == "agentrouter":
+        return _ProviderConfig(
+            enabled=bool(current_settings.agentrouter_api_key),
+            api_key=current_settings.agentrouter_api_key,
+            base_url=current_settings.agentrouter_base_url,
+            model=current_settings.agentrouter_model,
+            headers={
+                "Originator": "codex_cli_rs",
+                "User-Agent": "codex_cli_rs/0.101.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464",
+                "Version": "0.101.0",
+                "HTTP-Referer": "https://github.com/Takedaxz/coros-performance-analytics",
+                "X-Title": "coros-core",
+            },
+        )
+    return _ProviderConfig(
+        enabled=current_settings.openai_compat_enabled,
+        api_key=current_settings.openai_compat_api_key,
+        base_url=current_settings.openai_compat_base_url,
+        model=current_settings.openai_compat_model,
+    )
+
+
+def _get_client(provider: str = "openai_compat") -> OpenAI | None:
     """Return an initialised OpenAI-compat client, or None if not configured."""
-    if not settings.openai_compat_enabled or not settings.openai_compat_api_key:
+    config = provider_config(provider)
+    if not config.enabled or not config.api_key:
         return None
     return OpenAI(
-        api_key=settings.openai_compat_api_key,
-        base_url=settings.openai_compat_base_url,
+        api_key=config.api_key,
+        base_url=config.base_url,
+        default_headers=config.headers,
     )
 
 
 @lru_cache(maxsize=1)
-def _discover_models(_cache_bucket: int) -> tuple[str, ...]:
-    client = _get_client()
+def _discover_models(_cache_bucket: int, provider: str = "openai_compat") -> tuple[str, ...]:
+    config = provider_config(provider)
+    client = _get_client() if provider == "openai_compat" else _get_client(provider)
     if not client:
-        return (settings.openai_compat_model,)
+        return (config.model,)
     try:
         models = tuple(sorted(model.id for model in client.models.list().data))
-        return models or (settings.openai_compat_model,)
+        return models or (config.model,)
     except Exception:
         logger.exception("OpenAI-compatible model discovery failed")
-        return (settings.openai_compat_model,)
+        return (config.model,)
 
 
-def list_models() -> list[str]:
+def list_models(provider: str = "openai_compat") -> list[str]:
     """Return discovered model IDs with a five-minute in-process cache."""
     cache_bucket = int(monotonic() // _MODEL_CACHE_SECONDS)
-    return list(_discover_models(cache_bucket))
+    if provider == "openai_compat":
+        return list(_discover_models(cache_bucket))
+    return list(_discover_models(cache_bucket, provider))
 
 
 def _build_history_messages(history: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -69,9 +108,12 @@ def ask_coach(
     question: str,
     context: str,
     history: list[dict] | None = None,
+    provider: str = "openai_compat",
+    model: str | None = None,
 ) -> str:
     """Ask the AI coach a question (non-streaming)."""
-    client = _get_client()
+    config = provider_config(provider)
+    client = _get_client() if provider == "openai_compat" else _get_client(provider)
     if not client:
         return "OpenAI-compatible AI is not configured."
 
@@ -81,7 +123,7 @@ def ask_coach(
 
     try:
         response = client.chat.completions.create(
-            model=settings.openai_compat_model,
+            model=model or config.model,
             messages=messages,  # type: ignore[arg-type]
             stream=False,
         )
@@ -96,9 +138,11 @@ def ask_coach_stream(
     context: str,
     history: list[dict[str, str]] | None = None,
     model: str | None = None,
+    provider: str = "openai_compat",
 ) -> Iterator[str]:
     """Stream the AI coach response chunk by chunk."""
-    client = _get_client()
+    config = provider_config(provider)
+    client = _get_client() if provider == "openai_compat" else _get_client(provider)
     if not client:
         yield "OpenAI-compatible AI is not configured."
         return
@@ -109,7 +153,7 @@ def ask_coach_stream(
 
     try:
         stream = client.chat.completions.create(
-            model=model or settings.openai_compat_model,
+            model=model or config.model,
             messages=messages,  # type: ignore[arg-type]
             stream=True,
         )
@@ -138,9 +182,12 @@ def ask_coach_stream(
         yield "Error communicating with AI."
 
 
-def generate_briefing(context: str) -> str:
+def generate_briefing(
+    context: str, provider: str = "openai_compat", model: str | None = None
+) -> str:
     """Generate a weekly briefing (non-streaming)."""
-    client = _get_client()
+    config = provider_config(provider)
+    client = _get_client() if provider == "openai_compat" else _get_client(provider)
     if not client:
         return "OpenAI-compatible AI is not configured."
 
@@ -151,7 +198,7 @@ def generate_briefing(context: str) -> str:
 
     try:
         response = client.chat.completions.create(
-            model=settings.openai_compat_model,
+            model=model or config.model,
             messages=messages,  # type: ignore[arg-type]
             stream=False,
         )
@@ -161,13 +208,19 @@ def generate_briefing(context: str) -> str:
         return f"Error: {exc}"
 
 
-def generate_postmortem(context: str, activity_context: str, model: str | None = None) -> str:
+def generate_postmortem(
+    context: str,
+    activity_context: str,
+    model: str | None = None,
+    provider: str = "openai_compat",
+) -> str:
     """Generate a postmortem analysis for a specific activity."""
-    client = _get_client()
+    config = provider_config(provider)
+    client = _get_client() if provider == "openai_compat" else _get_client(provider)
     if not client:
         return "OpenAI-compatible AI is not configured."
 
-    target_model = model or settings.openai_compat_model
+    target_model = model or config.model
     messages: list[dict[str, str]] = [
         {"role": "system", "content": POSTMORTEM_PROMPT},
         {"role": "user", "content": f"{context}\n\nActivity Details:\n{activity_context}"},
@@ -186,15 +239,19 @@ def generate_postmortem(context: str, activity_context: str, model: str | None =
 
 
 def generate_postmortem_stream(
-    context: str, activity_context: str, model: str | None = None
+    context: str,
+    activity_context: str,
+    model: str | None = None,
+    provider: str = "openai_compat",
 ) -> Iterator[str]:
     """Stream a postmortem analysis chunk by chunk."""
-    client = _get_client()
+    config = provider_config(provider)
+    client = _get_client() if provider == "openai_compat" else _get_client(provider)
     if not client:
         yield "OpenAI-compatible AI is not configured."
         return
 
-    target_model = model or settings.openai_compat_model
+    target_model = model or config.model
     messages: list[dict[str, str]] = [
         {"role": "system", "content": POSTMORTEM_PROMPT},
         {"role": "user", "content": f"{context}\n\nActivity Details:\n{activity_context}"},

@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     openai_compat_base_url: str = "https://gen.ai.kku.ac.th/okmd/api/v1"
     openai_compat_model: str = "gemini-3.5-flash-lite"
 
+    # --- AgentRouter (OpenAI-compatible AI) ---
+    agentrouter_api_key: str = ""
+    agentrouter_base_url: str = "https://agentrouter.org/v1"
+    agentrouter_model: str = "gpt-5.5"
+
     # --- Web Search Providers ---
     tavily_api_key: str = ""
     brave_search_api_key: str = ""

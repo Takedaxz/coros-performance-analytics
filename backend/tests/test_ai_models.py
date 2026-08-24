@@ -51,23 +51,46 @@ def test_resolve_model_prefixes() -> None:
         "claude-sonnet-4.6",
     )
     assert resolve_model("gemini:gemini-3.5-flash") == ("gemini", "gemini-3.5-flash")
+    assert resolve_model("agentrouter:gpt-5.5") == ("agentrouter", "gpt-5.5")
+
+
+def test_agentrouter_matches_tradingagents_client_configuration() -> None:
+    config = openai_compat_client.provider_config("agentrouter")
+
+    assert config.base_url == "https://agentrouter.org/v1"
+    assert config.headers == {
+        "Originator": "codex_cli_rs",
+        "User-Agent": "codex_cli_rs/0.101.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464",
+        "Version": "0.101.0",
+        "HTTP-Referer": "https://github.com/TauricResearch/TradingAgents",
+        "X-Title": "TradingAgents",
+    }
 
 
 def test_list_provider_models(monkeypatch) -> None:
-    monkeypatch.setattr(openai_compat_client, "list_models", lambda: ["claude-sonnet-4.6"])
+    monkeypatch.setattr(
+        openai_compat_client,
+        "list_models",
+        lambda provider="openai_compat": ["gpt-5.5"]
+        if provider == "agentrouter"
+        else ["claude-sonnet-4.6"],
+    )
     monkeypatch.setattr(gemini_client, "list_models", lambda: ["gemini-3.5-flash"])
 
     # Ensure ready flags are true for testing
     from src import ai
     monkeypatch.setattr(ai, "_openai_compat_ready", lambda: True)
+    monkeypatch.setattr(ai, "_agentrouter_ready", lambda: True)
     monkeypatch.setattr(ai, "_gemini_ready", lambda: True)
 
     providers = list_provider_models()
-    assert len(providers) == 2
+    assert len(providers) == 3
     assert providers[0]["id"] == "gemini"
     assert providers[0]["models"][0]["id"] == "gemini:gemini-3.5-flash"
     assert providers[1]["id"] == "openai_compat"
     assert providers[1]["models"][0]["id"] == "openai_compat:claude-sonnet-4.6"
+    assert providers[2]["id"] == "agentrouter"
+    assert providers[2]["models"][0]["id"] == "agentrouter:gpt-5.5"
 
 
 def test_coach_stream_retries_gemini_quota_errors_with_flash_lite(monkeypatch) -> None:
@@ -142,4 +165,3 @@ def test_generate_postmortem_passes_resolved_model(monkeypatch) -> None:
     res = ai.generate_postmortem("Context", "Activity", model="3.5-flash0lite")
     assert res == "Postmortem OK"
     assert passed_model == ["gemini-3.5-flash-lite"]
-

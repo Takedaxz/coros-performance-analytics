@@ -823,3 +823,30 @@ def test_build_coros_program_distance_units() -> None:
     program_hyrox = _build_coros_program(draft_hyrox)
     assert program_hyrox["exercises"][0]["targetValue"] == 5000
     assert program_hyrox["exercises"][0]["targetDisplayUnit"] == 2
+
+
+def test_build_strength_movement_preserves_sets_reps_and_set_rest() -> None:
+    draft = CorosWorkoutDraft(
+        date="2026-08-12",
+        name="Strength",
+        sport="strength",
+        steps=[
+            CorosWorkoutStep(
+                kind="training",
+                name="Back squat",
+                target="reps",
+                value=8,
+                sets=4,
+                rest_seconds=90,
+            )
+        ],
+    )
+
+    exercise = _build_coros_program(draft)["exercises"][0]
+
+    assert exercise["name"] == "Back squat"
+    assert exercise["targetType"] == 3
+    assert exercise["targetValue"] == 8
+    assert exercise["sets"] == 4
+    assert exercise["restType"] == 1
+    assert exercise["restValue"] == 90

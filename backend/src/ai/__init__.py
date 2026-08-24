@@ -38,6 +38,11 @@ def _openai_compat_ready() -> bool:
     return settings.openai_compat_enabled and bool(settings.openai_compat_api_key)
 
 
+def _agentrouter_ready() -> bool:
+    settings = get_settings()
+    return bool(settings.agentrouter_api_key)
+
+
 def _gemini_ready() -> bool:
     settings = get_settings()
     return settings.gemini_enabled and bool(settings.gemini_api_key)
@@ -64,6 +69,16 @@ def list_provider_models() -> list[dict[str, Any]]:
                 "id": "openai_compat",
                 "name": "OKMD OpenAI-Compatible",
                 "models": [{"id": f"openai_compat:{m}", "name": m} for m in raw_models],
+            }
+        )
+
+    if _agentrouter_ready():
+        raw_models = openai_compat_client.list_models("agentrouter")
+        providers.append(
+            {
+                "id": "agentrouter",
+                "name": "AgentRouter",
+                "models": [{"id": f"agentrouter:{m}", "name": m} for m in raw_models],
             }
         )
 
@@ -99,6 +114,8 @@ def resolve_model(model_name: str | None) -> tuple[str, str]:
     if not model_name:
         if _openai_compat_ready():
             return "openai_compat", settings.openai_compat_model
+        if _agentrouter_ready():
+            return "agentrouter", settings.agentrouter_model
         if _gemini_ready():
             return "gemini", settings.gemini_model
         return "openai_compat", settings.openai_compat_model
@@ -107,6 +124,11 @@ def resolve_model(model_name: str | None) -> tuple[str, str]:
         raw_name = model_name.split("openai_compat:", 1)[1]
         clean_name = _MODEL_ALIASES.get(raw_name.lower(), raw_name)
         return "openai_compat", clean_name
+
+    if model_name.startswith("agentrouter:"):
+        raw_name = model_name.split("agentrouter:", 1)[1]
+        clean_name = _MODEL_ALIASES.get(raw_name.lower(), raw_name)
+        return "agentrouter", clean_name
 
     if model_name.startswith("gemini:"):
         raw_name = model_name.split("gemini:", 1)[1]
@@ -121,6 +143,11 @@ def resolve_model(model_name: str | None) -> tuple[str, str]:
         if model_name in compat_models:
             return "openai_compat", model_name
 
+    if _agentrouter_ready():
+        agentrouter_models = openai_compat_client.list_models("agentrouter")
+        if model_name in agentrouter_models:
+            return "agentrouter", model_name
+
     if _gemini_ready():
         gemini_models = gemini_client.list_models()
         if model_name in gemini_models or model_name.startswith("gemini"):
@@ -129,6 +156,8 @@ def resolve_model(model_name: str | None) -> tuple[str, str]:
     # Fallback to active default provider
     if _openai_compat_ready():
         return "openai_compat", model_name
+    if _agentrouter_ready():
+        return "agentrouter", model_name
     return "gemini", model_name
 
 
@@ -223,7 +252,7 @@ def generate_briefing(context: str, model: str | None = None) -> str:
     provider, clean_model = resolve_model(model)
     if provider == "gemini":
         return gemini_client.generate_briefing(context, model=clean_model)
-    return openai_compat_client.generate_briefing(context)
+    return openai_compat_client.generate_briefing(context, provider=provider, model=clean_model)
 
 
 def generate_postmortem(context: str, activity_context: str, model: str | None = None) -> str:
@@ -231,7 +260,7 @@ def generate_postmortem(context: str, activity_context: str, model: str | None =
     if provider == "gemini":
         return gemini_client.generate_postmortem(context, activity_context, model=clean_model)
     return openai_compat_client.generate_postmortem(
-        context, activity_context, model=clean_model
+        context, activity_context, model=clean_model, provider=provider
     )
 
 
@@ -245,7 +274,7 @@ def generate_postmortem_stream(
         )
     else:
         yield from openai_compat_client.generate_postmortem_stream(
-            context, activity_context, model=clean_model
+            context, activity_context, model=clean_model, provider=provider
         )
 
 

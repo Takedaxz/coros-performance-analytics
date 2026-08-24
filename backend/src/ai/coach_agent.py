@@ -20,6 +20,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 from src.ai.coach_tools import MAX_TOOL_CALLS, ToolCallRecord, coach_tool_functions
+from src.ai.openai_compat_client import provider_config
 from src.ai.prompts import COACH_SYSTEM_PROMPT
 from src.config import get_settings
 
@@ -59,10 +60,12 @@ def _model(provider: str, model_name: str) -> ChatGoogleGenerativeAI | ChatOpenA
             temperature=0.7,
             request_timeout=60,
         )
+    config = provider_config(provider)
     return ChatOpenAI(
         model=model_name,
-        api_key=SecretStr(settings.openai_compat_api_key),
-        base_url=settings.openai_compat_base_url,
+        api_key=SecretStr(config.api_key),
+        base_url=config.base_url,
+        default_headers=config.headers,
         temperature=0.7,
         timeout=60,
         max_retries=0,
@@ -249,6 +252,7 @@ def ask_coach_with_tools_stream(
 
     for _ in range(MAX_TOOL_CALLS):
         response: AIMessageChunk | None = None
+        tool_round_has_text = False
         for chunk in model_with_tools.stream(messages):
             if response is None:
                 response = cast("AIMessageChunk", chunk)
@@ -256,12 +260,17 @@ def ask_coach_with_tools_stream(
                 response = cast("AIMessageChunk", response + chunk)
             text, thinking_open = _stream_text(chunk, thinking_open)
             if text:
+                tool_round_has_text = True
                 yield text
 
         if response is None or not response.tool_calls:
             if thinking_open:
                 yield "</think>\n"
             return
+
+        if tool_round_has_text:
+            yield "<tool-thought>\n"
+        thinking_open = False
 
         _append_tool_results(_streamed_tool_response(response), tools_by_name, messages, tool_calls)
         if len(tool_calls) >= MAX_TOOL_CALLS:

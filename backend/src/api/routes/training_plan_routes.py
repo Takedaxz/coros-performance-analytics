@@ -168,6 +168,8 @@ class CorosWorkoutStep(BaseModel):
     target: WorkoutTarget = "time"
     value: float = Field(default=600, ge=0, le=1_000_000)
     name: str = Field(default="", max_length=80)
+    sets: int = Field(default=1, ge=1, le=99)
+    rest_seconds: int = Field(default=0, ge=0, le=3_600)
     repeats: int = Field(default=1, ge=1, le=99)
     intensity: WorkoutIntensity = "none"
     intensity_low: float | None = Field(default=None, ge=-8, le=1_000_000)
@@ -278,6 +280,64 @@ def _exercise_video_catalog(value: object) -> dict[str, str]:
         if video_url:
             videos.setdefault(re.sub(r"[^a-z0-9]+", "", name.lower()), video_url)
     return videos
+
+
+def _extract_media_urls(row: ScheduleObject) -> tuple[str | None, str | None]:
+    thumbnail_url: str | None = None
+    video_url: str | None = None
+
+    raw_vinfo = row.get("videoInfos")
+    if isinstance(raw_vinfo, str):
+        try:
+            raw_vinfo = json.loads(raw_vinfo)
+        except Exception:
+            raw_vinfo = None
+    if isinstance(raw_vinfo, list):
+        for item in raw_vinfo:
+            if isinstance(item, dict):
+                if not thumbnail_url and isinstance(item.get("coverUrl"), str) and item["coverUrl"].strip():
+                    thumbnail_url = item["coverUrl"].strip()
+                if not video_url and isinstance(item.get("videoUrl"), str) and item["videoUrl"].strip():
+                    video_url = item["videoUrl"].strip()
+
+    if not thumbnail_url:
+        for key in ("thumbnailUrl", "sourceUrl", "coverUrl"):
+            val = row.get(key)
+            if isinstance(val, str) and val.strip():
+                thumbnail_url = val.strip()
+                break
+
+    if not video_url:
+        for key in ("videoUrl", "url"):
+            val = row.get(key)
+            if isinstance(val, str) and val.strip():
+                video_url = val.strip()
+                break
+
+    return thumbnail_url, video_url
+
+
+def _exercise_options(value: object) -> list[dict[str, str]]:
+    options: dict[str, dict[str, str]] = {}
+    for row in _exercise_catalog_rows(value):
+        name = next(
+            (str(row[key]).strip() for key in ("displayName", "exerciseName", "nameText", "name")
+             if isinstance(row.get(key), str) and str(row[key]).strip()),
+            None,
+        )
+        exercise_id = next(
+            (str(row[key]) for key in ("exerciseId", "originId", "id") if row.get(key) is not None),
+            None,
+        )
+        if name and exercise_id and exercise_id not in options:
+            thumb, vid = _extract_media_urls(row)
+            item: dict[str, str] = {"id": exercise_id, "name": name}
+            if thumb:
+                item["thumbnail_url"] = thumb
+            if vid:
+                item["video_url"] = vid
+            options[exercise_id] = item
+    return sorted(options.values(), key=lambda item: item["name"].lower())
 
 
 class CorosWorkoutPreview(BaseModel):
@@ -812,10 +872,24 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
                 "targetType": target_type,
                 "targetValue": target_value,
                 "targetDisplayUnit": display_unit,
-                "sets": step.repeats,
+                "sets": (
+                    step.sets
+                    if draft.sport == "strength" and step.kind == "training"
+                    else step.repeats
+                ),
                 "sortNo": sort_no,
-                "restType": 3,
-                "restValue": 0,
+                "restType": (
+                    1
+                    if draft.sport == "strength"
+                    and step.kind == "training"
+                    and step.rest_seconds > 0
+                    else 3
+                ),
+                "restValue": (
+                    step.rest_seconds
+                    if draft.sport == "strength" and step.kind == "training"
+                    else 0
+                ),
                 "groupId": group_id,
                 "isGroup": False,
                 "originId": origin_id,
@@ -1153,6 +1227,20 @@ def _draft_from_program(
                     target=target,
                     value=value,
                     name=_exercise_display_name(exercise, kind),
+                    sets=(
+                        exercise_sets
+                        if kind == "training"
+                        and sport == "strength"
+                        and isinstance(exercise_sets, int)
+                        else 1
+                    ),
+                    rest_seconds=(
+                        int(exercise.get("restValue"))
+                        if kind == "training"
+                        and sport == "strength"
+                        and isinstance(exercise.get("restValue"), (int, float))
+                        else 0
+                    ),
                     repeats=exercise_sets if isinstance(exercise_sets, int) else 1,
                     intensity=intensity,
                     intensity_low=(float(raw_low) / percent_divisor if is_percent else float(raw_low) / divisor)
@@ -1498,6 +1586,22 @@ async def coros_exercise_videos(
             "/training/exercise/query", {"sportType": 4, "keyword": ""}
         )
         return _exercise_video_catalog(catalog)
+    except CorosApiClientError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"COROS exercise catalog unavailable: {exc}"
+        ) from exc
+
+
+@router.get("/coros/exercises")
+async def coros_exercises(
+    db: AsyncSession = Depends(get_db_session),
+) -> list[dict[str, str]]:
+    """Return selectable COROS strength movements for the calendar editor."""
+    try:
+        catalog = await (await _coros_client(db)).get_training_hub(
+            "/training/exercise/query", {"sportType": 4, "keyword": ""}
+        )
+        return _exercise_options(catalog)
     except CorosApiClientError as exc:
         raise HTTPException(
             status_code=502, detail=f"COROS exercise catalog unavailable: {exc}"

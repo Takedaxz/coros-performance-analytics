@@ -219,6 +219,9 @@ All settings are in `.env` (copy from `.env.example`):
 | `OPENAI_COMPAT_API_KEY` | Optional | — | OpenAI-compatible API key (enables OpenAI-compatible gateway models) |
 | `OPENAI_COMPAT_BASE_URL` | Optional | `https://gen.ai.kku.ac.th/okmd/api/v1` | OpenAI-compatible Base URL (KKU OKMD, vLLM, LM Studio, Ollama) |
 | `OPENAI_COMPAT_MODEL` | Optional | `claude-sonnet-4.6` | Default OpenAI-compatible Model ID |
+| `AGENTROUTER_API_KEY` | Optional | — | AgentRouter API key |
+| `AGENTROUTER_BASE_URL` | Optional | `https://agentrouter.org/v1` | AgentRouter OpenAI-compatible Base URL |
+| `AGENTROUTER_MODEL` | Optional | `gpt-5.5` | Default AgentRouter model ID |
 | `APP_SECRET_KEY` | Production | `change-me-in-production` | Secret key |
 
 ---

@@ -42,9 +42,10 @@ settings = get_settings()
 def _ai_enabled() -> bool:
     """Return True if at least one AI backend is fully configured."""
     st = get_settings()
-    compat_ready = bool(st.openai_compat_api_key)
+    compat_ready = st.openai_compat_enabled and bool(st.openai_compat_api_key)
+    agentrouter_ready = bool(st.agentrouter_api_key)
     gemini_ready = bool(st.gemini_api_key)
-    return compat_ready or gemini_ready
+    return compat_ready or agentrouter_ready or gemini_ready
 
 
 def _active_model() -> str:
@@ -54,6 +55,8 @@ def _active_model() -> str:
         return f"gemini:{st.gemini_model}"
     if bool(st.openai_compat_api_key):
         return f"openai_compat:{st.openai_compat_model}"
+    if bool(st.agentrouter_api_key):
+        return f"agentrouter:{st.agentrouter_model}"
     return f"gemini:{st.gemini_model}"
 
 
@@ -190,7 +193,7 @@ async def ask_ai(
     if not _ai_enabled():
         raise HTTPException(
             status_code=400,
-            detail="No AI backend is enabled. Set OPENAI_COMPAT_ENABLED=true or GEMINI_ENABLED=true.",
+            detail="No AI backend is enabled. Enable Gemini, OpenAI-compatible, or AgentRouter AI.",
         )
 
     # 1. Build the compact default context; calendar details are fetched on demand.
@@ -236,7 +239,7 @@ async def ask_ai_stream(
     if not _ai_enabled():
         raise HTTPException(
             status_code=400,
-            detail="No AI backend is enabled. Set OPENAI_COMPAT_ENABLED=true or GEMINI_ENABLED=true.",
+            detail="No AI backend is enabled. Enable Gemini, OpenAI-compatible, or AgentRouter AI.",
         )
 
     # 1. Build the compact default context; calendar details are fetched on demand.
@@ -537,7 +540,7 @@ async def activity_postmortem_stream(
     if not _ai_enabled():
         raise HTTPException(
             status_code=400,
-            detail="No AI backend is enabled. Set OPENAI_COMPAT_ENABLED=true or GEMINI_ENABLED=true.",
+            detail="No AI backend is enabled. Enable Gemini, OpenAI-compatible, or AgentRouter AI.",
         )
 
     act_res = await db.execute(select(Activity).where(Activity.id == activity_id))

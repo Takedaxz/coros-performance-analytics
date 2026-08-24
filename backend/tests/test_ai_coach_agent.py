@@ -363,6 +363,59 @@ def test_streams_a_direct_answer_without_a_non_streaming_model_call(monkeypatch)
     assert answer == "Streaming directly"
 
 
+def test_tool_round_preamble_is_streamed_as_thinking(monkeypatch) -> None:
+    class Tool:
+        name = "get_activities"
+
+        def invoke(self, _arguments: dict[str, str]) -> dict[str, str]:
+            return {"status": "ok"}
+
+    class Model:
+        calls = 0
+
+        def bind_tools(self, _tools: list[object]) -> "Model":
+            return self
+
+        def stream(self, _messages: list[object]):
+            self.calls += 1
+            if self.calls == 1:
+                return iter(
+                    [
+                        AIMessageChunk(content="I’ll check the planned sessions "),
+                        AIMessageChunk(
+                            content="first.",
+                            tool_call_chunks=[
+                                {"name": "get_activities", "args": "{}", "id": "1", "index": 0}
+                            ],
+                        )
+                    ]
+                )
+            return iter([AIMessageChunk(content="# Coach’s call")])
+
+    monkeypatch.setattr(coach_agent, "_model", lambda _provider, _model: Model())
+    monkeypatch.setattr(coach_agent, "_tools", lambda _user_id, _loop: [Tool()])
+
+    chunks = list(
+        coach_agent.ask_coach_with_tools_stream(
+            "gemini",
+            "gemini-3.5-flash-lite",
+            "Question",
+            "Snapshot",
+            None,
+            "user-id",
+            asyncio.new_event_loop(),
+            [],
+        )
+    )
+
+    assert chunks == [
+        "I’ll check the planned sessions ",
+        "first.",
+        "<tool-thought>\n",
+        "# Coach’s call",
+    ]
+
+
 def test_openai_compat_streams_reasoning_before_its_answer(monkeypatch) -> None:
     class Model:
         def bind_tools(self, _tools: list[object]) -> "Model":

@@ -168,20 +168,10 @@ interface StrengthDetail {
 
 type ActivityMetric = [label: string, value: string | number, unit?: string];
 
-const STRENGTH_BODY_REGION_NAMES: Record<string, string> = {
-  S4208: "Full Body",
-  S4209: "Shoulders",
-  S4210: "Arms",
-  S4211: "Chest",
-  S4212: "Back",
-  S4213: "Abs",
-  S4214: "Legs & Hips",
-};
+import { resolveExerciseName } from "@/lib/exerciseNames";
 
 function strengthExerciseName(nameKey: string, name: string | null | undefined): string {
-  const rawName = name?.trim();
-  if (rawName && !/^[TS]\d/.test(rawName)) return rawName;
-  return STRENGTH_BODY_REGION_NAMES[nameKey] ?? nameKey;
+  return resolveExerciseName(nameKey, name);
 }
 
 interface RecordPoint {

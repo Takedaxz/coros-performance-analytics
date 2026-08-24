@@ -10,7 +10,7 @@ import rehypeKatex from "rehype-katex";
 import { WaveThinkingText } from "@/components/WaveThinkingText";
 import AIModelIcon from "@/components/AIModelIcon";
 import { SPORT_ICON_URLS, SportIcon } from "@/components/SportActivityIcon";
-import { removeLegacyEvidenceUsed } from "./answer-display";
+import { parseThinkingAndAnswer, removeLegacyEvidenceUsed } from "./answer-display";
 import { usePathname, useRouter } from "next/navigation";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -624,25 +624,6 @@ function XIcon() {
       <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   );
-}
-
-function parseThinkingAndAnswer(rawContent: string): { thinking: string | null; answer: string; isThinkingActive: boolean } {
-  if (!rawContent.includes("<think>")) {
-    return { thinking: null, answer: rawContent, isThinkingActive: false };
-  }
-
-  const thinkStartIndex = rawContent.indexOf("<think>");
-  const thinkEndIndex = rawContent.indexOf("</think>");
-
-  if (thinkEndIndex !== -1) {
-    const thinking = rawContent.slice(thinkStartIndex + 7, thinkEndIndex).trim();
-    const answer = (rawContent.slice(0, thinkStartIndex) + rawContent.slice(thinkEndIndex + 8)).trim();
-    return { thinking: thinking || null, answer, isThinkingActive: false };
-  }
-
-  const thinking = rawContent.slice(thinkStartIndex + 7).trim();
-  const answer = rawContent.slice(0, thinkStartIndex).trim();
-  return { thinking: thinking || null, answer, isThinkingActive: true };
 }
 
 function ChevronIcon({ isOpen }: { isOpen: boolean }) {
@@ -1294,6 +1275,9 @@ export default function AiPage() {
       if (!chatHistory) return;
       chatHistory.scrollTop = chatHistory.scrollHeight;
       sessionScrollRef.current = false;
+    } else if (isLoading) {
+      const chatHistory = chatHistoryRef.current;
+      if (chatHistory) chatHistory.scrollTop = chatHistory.scrollHeight;
     } else {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
