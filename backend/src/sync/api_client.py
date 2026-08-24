@@ -141,17 +141,25 @@ class CorosApiClient:
             ),
         }
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            body = resp.json()
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(url, json=payload, headers=headers)
+                break
+            except httpx.ConnectTimeout:
+                if attempt:
+                    raise CorosApiClientError("COROS login connection timed out") from None
+                logger.warning("coros_login: connection timed out, retrying once")
+                await asyncio.sleep(0.5)
+        resp.raise_for_status()
+        body = resp.json()
 
-            if body.get("result") != "0000":
-                raise CorosApiClientError(f"Login failed: {body.get('message')}")
+        if body.get("result") != "0000":
+            raise CorosApiClientError(f"Login failed: {body.get('message')}")
 
-            data = body.get("data", {})
-            self.access_token = data.get("accessToken")
-            self.user_id = data.get("userId")
+        data = body.get("data", {})
+        self.access_token = data.get("accessToken")
+        self.user_id = data.get("userId")
 
         await self._cache_token(self.access_token, self.user_id)
         logger.info("coros_login: fresh login completed, token cached")
@@ -253,9 +261,16 @@ class CorosApiClient:
         }
         async with httpx.AsyncClient(timeout=30) as client:
             for attempt in range(2):
-                response = await client.get(
-                    url, params=params, headers=self._get_training_hub_headers()
-                )
+                try:
+                    response = await client.get(
+                        url, params=params, headers=self._get_training_hub_headers()
+                    )
+                except httpx.ConnectTimeout:
+                    if attempt:
+                        raise CorosApiClientError("Training calendar connection timed out") from None
+                    logger.warning("coros_calendar: connection timed out, retrying once")
+                    await asyncio.sleep(0.5)
+                    continue
                 body: object = response.json() if response.status_code == 200 else None
                 if not attempt and _training_hub_token_invalid(response.status_code, body):
                     await self._invalidate_token()

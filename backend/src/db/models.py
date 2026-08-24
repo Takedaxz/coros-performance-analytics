@@ -145,6 +145,7 @@ class Goal(Base):
     goal_target_time: Mapped[str | None] = mapped_column(String(20), nullable=True)
     goal_result_time: Mapped[str | None] = mapped_column(String(20), nullable=True)
     goal_race_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    goal_race_tier: Mapped[str | None] = mapped_column(String(1), nullable=True)
     weekly_training_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 

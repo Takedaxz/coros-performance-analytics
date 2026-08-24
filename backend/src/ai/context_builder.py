@@ -22,6 +22,13 @@ from src.db.models import (
 
 _USER_TZ = ZoneInfo("Asia/Bangkok")  # UTC+7
 _DETAIL_CONTEXT_CHAR_BUDGET = 40_000
+_RACE_TIER_LABELS = {
+    "A": "primary race",
+    "B": "important race",
+    "C": "supporting race",
+    "D": "training race",
+    "E": "low-priority race",
+}
 _STRENGTH_REGION_NAMES = {
     "S4208": "Full Body",
     "S4209": "Shoulders",
@@ -545,6 +552,10 @@ async def _fetch_user_goal(db: AsyncSession, user_id: str) -> str:
 
     if active_goals:
         parts.append("### Athlete Goals")
+        parts.append(
+            "Race tiers rank priority: A is highest and E is lowest. Use them to resolve "
+            "conflicts in training load, taper, recovery, and race scheduling."
+        )
         for i, goal in enumerate(active_goals, 1):
             goal_details = []
             if goal.goal_race_name:
@@ -561,6 +572,9 @@ async def _fetch_user_goal(db: AsyncSession, user_id: str) -> str:
                 goal_details.append(f"  - **Actual Finish Time:** {goal.goal_result_time}")
             if goal.goal_race_note:
                 goal_details.append(f"  - **Race Notes:** {goal.goal_race_note}")
+            if goal.goal_race_tier:
+                tier_label = _RACE_TIER_LABELS.get(goal.goal_race_tier, "race")
+                goal_details.append(f"  - **Race Tier:** {goal.goal_race_tier} ({tier_label})")
             if goal.weekly_training_hours:
                 goal_details.append(
                     f"  - **Weekly Training Target:** {goal.weekly_training_hours}h"
@@ -593,6 +607,9 @@ async def _fetch_user_goal(db: AsyncSession, user_id: str) -> str:
                 parts.append(f"  - **Actual Finish Time:** {goal.goal_result_time}")
             if goal.goal_race_note:
                 parts.append(f"  - **Race Notes:** {goal.goal_race_note}")
+            if goal.goal_race_tier:
+                tier_label = _RACE_TIER_LABELS.get(goal.goal_race_tier, "race")
+                parts.append(f"  - **Race Tier:** {goal.goal_race_tier} ({tier_label})")
             if goal.weekly_training_hours:
                 parts.append(
                     f"  - **Pre-race Weekly Training Target:** {goal.weekly_training_hours}h"

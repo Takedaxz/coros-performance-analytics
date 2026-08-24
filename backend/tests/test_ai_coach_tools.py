@@ -13,6 +13,7 @@ from src.ai.coach_tools import (
     _health_trend,
     _pace_s_km,
     _past_race_goals,
+    _rank_strength_exercises,
     _scheduled_workout_details,
     _sport_type,
     coach_tool_functions,
@@ -37,6 +38,38 @@ def test_activity_tool_rejects_unknown_sport() -> None:
 def test_activity_tool_computes_compact_pace() -> None:
     assert _pace_s_km(3.0) == 333
     assert _pace_s_km(None) is None
+
+
+def test_strength_exercise_search_returns_ranked_coros_identity() -> None:
+    result = _rank_strength_exercises(
+        {
+            "exercises": [
+                {"id": "1", "name": "T1001", "overview": "sid_strength_back_squat"},
+                {"id": "2", "name": "T1002", "overview": "sid_strength_front_squat"},
+                {"id": "3", "name": "T1003", "overview": "sid_strength_deadlift"},
+            ]
+        },
+        ["back squat", "deadlift"],
+    )
+
+    assert result["matches"] == [
+        {
+            "query": "back squat",
+            "matches": [
+                {"name": "Back Squat", "exercise_code": "T1001", "exercise_id": "1"},
+                {"name": "Front Squat", "exercise_code": "T1002", "exercise_id": "2"},
+                {"name": "Deadlift", "exercise_code": "T1003", "exercise_id": "3"},
+            ],
+        },
+        {
+            "query": "deadlift",
+            "matches": [
+                {"name": "Deadlift", "exercise_code": "T1003", "exercise_id": "3"},
+                {"name": "Back Squat", "exercise_code": "T1001", "exercise_id": "1"},
+                {"name": "Front Squat", "exercise_code": "T1002", "exercise_id": "2"},
+            ],
+        },
+    ]
 
 
 def test_calendar_change_proposal_validates_a_draft_without_writing() -> None:
@@ -316,6 +349,7 @@ async def test_past_race_goals_tool_returns_result_time_and_notes() -> None:
         goal_result_time="1:38:42",
         goal_description="First HYROX race; sled push was the limiter.",
         goal_race_note="Went out too hard but finished strong.",
+        goal_race_tier="B",
         weekly_training_hours=8.0,
         is_active=False,
     )
@@ -342,6 +376,7 @@ async def test_past_race_goals_tool_returns_result_time_and_notes() -> None:
             "result_time": "1:38:42",
             "notes": "First HYROX race; sled push was the limiter.",
             "race_notes": "Went out too hard but finished strong.",
+            "race_tier": "B",
             "weekly_training_hours": 8.0,
             "active": False,
         }
@@ -447,4 +482,3 @@ async def test_compare_activities_tool_returns_deep_details(
     assert len(res["activities"]) == 2
     assert res["activities"][0]["activity"]["efficiency_factor"] == 1.45
     assert len(res["activities"][0]["km_splits"]) == 1
-

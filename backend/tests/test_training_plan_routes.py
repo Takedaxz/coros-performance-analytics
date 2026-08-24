@@ -14,6 +14,7 @@ from src.api.routes.training_plan_routes import (
     _draft_from_program,
     _exercise_video_catalog,
     _parse_coros_schedule,
+    _preserve_raw_exercise_identity,
     _schedule_library_hyrox,
     _schedule_new_workout,
     fetch_coros_calendar,
@@ -152,6 +153,32 @@ async def test_coros_calendar_network_timeout_becomes_502(monkeypatch: pytest.Mo
     assert error.value.detail == "COROS Calendar unavailable: network request failed."
 
 
+@pytest.mark.asyncio
+async def test_coros_calendar_uses_the_shared_token_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    token_cache = object()
+    captured: dict[str, object] = {}
+
+    async def load_credentials(_db: object, _secret: str) -> tuple[str, str]:
+        return "athlete@example.com", "password"
+
+    class Client:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+        async def login(self) -> None:
+            return None
+
+        async def fetch_training_schedule(self, _start: str, _end: str) -> dict[str, object]:
+            return {}
+
+    monkeypatch.setattr(training_plan_routes, "load_coros_credentials", load_credentials)
+    monkeypatch.setattr(training_plan_routes, "_coros_redis", lambda: token_cache)
+    monkeypatch.setattr(training_plan_routes, "CorosApiClient", Client)
+
+    assert await fetch_coros_calendar(dt.date(2026, 8, 16), dt.date(2026, 8, 16), object()) == []
+    assert captured["redis"] is token_cache
+
+
 def test_structured_hyrox_workout_uses_coros_units() -> None:
     program = _build_coros_program(
         CorosWorkoutDraft(
@@ -165,6 +192,7 @@ def test_structured_hyrox_workout_uses_coros_units() -> None:
                     name="Sled Push",
                     target="distance",
                     value=50,
+                    rest_seconds=90,
                     intensity="weight",
                     intensity_low=100,
                 ),
@@ -182,6 +210,7 @@ def test_structured_hyrox_workout_uses_coros_units() -> None:
     assert exercises[1]["name"] == "T1394"
     assert exercises[1]["subType"] == 2
     assert exercises[1]["overview"] == "sid_strength_sledpush"
+    assert (exercises[1]["restType"], exercises[1]["restValue"]) == (1, 90)
 
 
 def test_swim_program_uses_the_selected_pool_length() -> None:
@@ -303,6 +332,19 @@ def test_structured_hyrox_workout_uses_coros_hybrid_program_target() -> None:
     assert program["isTargetTypeConsistent"] == 0
 
 
+def test_hyrox_running_step_does_not_send_set_rest() -> None:
+    exercise = _build_coros_program(
+        CorosWorkoutDraft(
+            date="2026-08-12",
+            name="HYROX run",
+            sport="hyrox",
+            steps=[CorosWorkoutStep(name="Training", target="distance", value=1000, rest_seconds=30)],
+        )
+    )["exercises"][0]
+
+    assert (exercise["restType"], exercise["restValue"]) == (3, 0)
+
+
 def test_structured_hyrox_workout_rejects_station_reps() -> None:
     with pytest.raises(HTTPException, match="Ski Erg must use a distance target"):
         _build_coros_program(
@@ -315,6 +357,19 @@ def test_structured_hyrox_workout_rejects_station_reps() -> None:
         )
 
 
+def test_structured_hyrox_workout_allows_station_open_target() -> None:
+    exercise = _build_coros_program(
+        CorosWorkoutDraft(
+            date="2026-08-12",
+            name="HYROX stations",
+            sport="hyrox",
+            steps=[CorosWorkoutStep(name="Ski Erg", target="open", value=0)],
+        )
+    )["exercises"][0]
+
+    assert (exercise["targetType"], exercise["targetValue"]) == (1, 0)
+
+
 @pytest.mark.parametrize(
     ("sport", "kind", "target", "name"),
     [
@@ -322,6 +377,8 @@ def test_structured_hyrox_workout_rejects_station_reps() -> None:
         ("ride", "training", "load", ""),
         ("swim", "training", "time", ""),
         ("strength", "training", "reps", "Squat"),
+        ("strength", "training", "distance", "T1393"),
+        ("strength", "training", "distance", "T1207"),
         ("trail_run", "training", "elevation_gain", ""),
         ("indoor_climb", "training", "routes", ""),
         ("bouldering", "training", "routes", ""),
@@ -414,15 +471,57 @@ def test_library_editor_converts_coros_weight_grams_to_kilograms() -> None:
         {
             "name": "Hyrox",
             "sportType": 9,
-            "exercises": [{"exerciseType": 2, "targetType": 5, "targetValue": 5_000, "intensityType": 1, "intensityValue": 24_000, "intensityValueExtend": 24_000}],
+            "exercises": [{"exerciseType": 2, "targetType": 5, "targetValue": 5_000, "intensityType": 1, "intensityValue": 24_000, "intensityValueExtend": 0}],
         },
     )
 
     assert draft.steps[0].intensity_low == 24
+    assert draft.steps[0].intensity_high == 24
     program = _build_coros_program(CorosWorkoutDraft(date="2026-08-12", name="Hyrox", sport="hyrox", steps=draft.steps))
     exercises = program["exercises"]
     assert isinstance(exercises, list)
     assert exercises[0]["intensityValue"] == 24_000
+
+
+def test_structured_weight_uses_coros_strength_payload_shape() -> None:
+    exercise = _build_coros_program(
+        CorosWorkoutDraft(
+            date="2026-08-12",
+            name="Strength",
+            sport="strength",
+            steps=[
+                CorosWorkoutStep(
+                    kind="training",
+                    name="Back squat",
+                    target="reps",
+                    value=5,
+                    intensity="weight",
+                    intensity_low=10,
+                )
+            ],
+        )
+    )["exercises"][0]
+
+    assert {
+        key: exercise[key]
+        for key in (
+            "intensityType",
+            "intensityValue",
+            "intensityValueExtend",
+            "intensityMultiplier",
+            "intensityDisplayUnit",
+            "intensityPercent",
+            "intensityPercentExtend",
+        )
+    } == {
+        "intensityType": 1,
+        "intensityValue": 10_000,
+        "intensityValueExtend": 0,
+        "intensityMultiplier": 0,
+        "intensityDisplayUnit": 6,
+        "intensityPercent": 10_000_000,
+        "intensityPercentExtend": 0,
+    }
 
 
 def test_structured_workout_encodes_coros_percentage_intensity() -> None:
@@ -850,3 +949,93 @@ def test_build_strength_movement_preserves_sets_reps_and_set_rest() -> None:
     assert exercise["sets"] == 4
     assert exercise["restType"] == 1
     assert exercise["restValue"] == 90
+
+
+def test_build_strength_movement_uses_selected_coros_identity() -> None:
+    exercise = _build_coros_program(
+        CorosWorkoutDraft(
+            date="2026-08-12",
+            name="Strength",
+            sport="strength",
+            steps=[
+                CorosWorkoutStep(
+                    kind="training",
+                    name="Back squat",
+                    exercise_code="T1001",
+                    exercise_id="425827615547506688",
+                    target="reps",
+                    value=8,
+                )
+            ],
+        )
+    )["exercises"][0]
+
+    assert exercise["name"] == "T1001"
+    assert exercise["originId"] == "425827615547506688"
+
+
+def test_edit_preserves_raw_coros_skierg_identity() -> None:
+    program = _build_coros_program(
+        CorosWorkoutDraft(
+            date="2026-08-12",
+            name="Strength",
+            sport="strength",
+            steps=[
+                CorosWorkoutStep(
+                    kind="training",
+                    name="SkiErg",
+                    exercise_code="T1393",
+                    exercise_id="476760420131192832",
+                    target="distance",
+                    value=1000,
+                    rest_seconds=30,
+                ),
+                CorosWorkoutStep(
+                    kind="training",
+                    name="SkiErg",
+                    exercise_code="T1393",
+                    exercise_id="476760420131192832",
+                    target="distance",
+                    value=500,
+                ),
+            ],
+        )
+    )
+    previous = {
+        "exercises": [
+            {
+                "name": "T1393",
+                "originId": "476760420131192832",
+                "sportType": 9,
+                "subType": 2,
+                "exerciseKind": 1,
+                "overview": "sid_strength_skierg",
+                "equipment": [16],
+                "animationId": 375,
+                "targetType": 5,
+                "targetDisplayUnit": 1,
+                "thumbnailUrl": "https://oss.coros.com/skierg.png",
+                "videoInfos": [{"videoUrl": "https://oss.coros.com/skierg.mp4"}],
+            },
+            {
+                "name": "T1393",
+                "originId": "476760420131192832",
+                "sportType": 4,
+                "subType": 0,
+                "targetType": 5,
+                "targetDisplayUnit": 2,
+            },
+        ]
+    }
+
+    exercises = _preserve_raw_exercise_identity(program, previous)["exercises"]
+    exercise = exercises[0]
+
+    assert exercise["sportType"] == 9
+    assert exercise["subType"] == 2
+    assert exercise["exerciseKind"] == 1
+    assert exercise["targetDisplayUnit"] == 1
+    assert exercise["thumbnailUrl"] == "https://oss.coros.com/skierg.png"
+    assert exercise["targetValue"] == 100_000
+    assert exercises[1]["sportType"] == 4
+    assert exercises[1]["subType"] == 0

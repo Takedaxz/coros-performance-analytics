@@ -16,6 +16,7 @@ interface UserGoal {
   goal_target_time: string;
   goal_result_time: string;
   goal_race_note: string;
+  goal_race_tier: string;
   weekly_training_hours: string;
   is_active?: boolean;
 }
@@ -42,6 +43,7 @@ const EMPTY_GOAL: UserGoal = {
   goal_target_time: "",
   goal_result_time: "",
   goal_race_note: "",
+  goal_race_tier: "",
   weekly_training_hours: "",
   is_active: true,
 };
@@ -156,6 +158,7 @@ export default function SettingsPage() {
           goal_target_time: item.goal_target_time ?? "",
           goal_result_time: item.goal_result_time ?? "",
           goal_race_note: item.goal_race_note ?? "",
+          goal_race_tier: item.goal_race_tier ?? "",
           weekly_training_hours: item.weekly_training_hours?.toString() ?? "",
           is_active: item.is_active,
         })));
@@ -362,6 +365,7 @@ export default function SettingsPage() {
       goal_target_time: normalizedTargetTime(goalForm.goal_target_time),
       goal_result_time: normalizedTargetTime(goalForm.goal_result_time),
       goal_race_note: goalForm.goal_race_note || null,
+      goal_race_tier: goalForm.goal_race_tier || null,
       weekly_training_hours: goalForm.weekly_training_hours
         ? parseFloat(goalForm.weekly_training_hours)
         : null,
@@ -437,6 +441,7 @@ export default function SettingsPage() {
       goal_target_time: g.goal_target_time,
       goal_result_time: g.goal_result_time,
       goal_race_note: g.goal_race_note,
+      goal_race_tier: g.goal_race_tier,
       weekly_training_hours: g.weekly_training_hours,
       is_active: g.is_active,
     });
@@ -734,6 +739,23 @@ export default function SettingsPage() {
                           />
                         </div>
                         <div className="settings-field">
+                          <label htmlFor="goal-tier">Race tier</label>
+                          <SingleSelect
+                            id="goal-tier"
+                            ariaLabel="Race tier"
+                            value={goalForm.goal_race_tier}
+                            onChange={(goal_race_tier) => setGoalForm((goal) => ({ ...goal, goal_race_tier }))}
+                            options={[
+                              { value: "", label: "Not set" },
+                              { value: "A", label: "A — Primary race" },
+                              { value: "B", label: "B — Important race" },
+                              { value: "C", label: "C — Supporting race" },
+                              { value: "D", label: "D — Training race" },
+                              { value: "E", label: "E — Low priority" },
+                            ]}
+                          />
+                        </div>
+                        <div className="settings-field">
                           <label id="goal-time-label">Target time</label>
                           <div className="settings-target-time" aria-labelledby="goal-time-label">
                             <div className="settings-target-time-part">
@@ -896,6 +918,7 @@ export default function SettingsPage() {
                                   </div>
                                   <div className="settings-goal-meta">
                                     {g.goal_race_date && <span>{g.goal_race_date}</span>}
+                                    {g.goal_race_tier && <span>Tier {g.goal_race_tier}</span>}
                                     {g.goal_target_time && <span>Target {g.goal_target_time}</span>}
                                     {g.goal_result_time && <span>Result {g.goal_result_time}</span>}
                                     {g.weekly_training_hours && <span>{g.weekly_training_hours} hr / week</span>}

@@ -10,6 +10,7 @@ import rehypeKatex from "rehype-katex";
 import { WaveThinkingText } from "@/components/WaveThinkingText";
 import AIModelIcon from "@/components/AIModelIcon";
 import { SPORT_ICON_URLS, SportIcon } from "@/components/SportActivityIcon";
+import { resolveExerciseName } from "@/lib/exerciseNames";
 import { parseThinkingAndAnswer, removeLegacyEvidenceUsed } from "./answer-display";
 import { usePathname, useRouter } from "next/navigation";
 
@@ -34,7 +35,9 @@ const TOOL_LABELS: Record<string, string> = {
 };
 
 function toolLabel(tool: string): string {
-  return TOOL_LABELS[tool] ?? tool.replace(/^get_/, "").replaceAll("_", " ");
+  return capitalizeFirstLetter(
+    TOOL_LABELS[tool] ?? tool.replace(/^get_/, "").replaceAll("_", " "),
+  );
 }
 
 function capitalizeFirstLetter(str: string): string {
@@ -226,12 +229,23 @@ function formatToolTooltip(tool: ToolCall): string {
 
 function uniqueToolCalls(tools: (ToolCall | string)[]): ToolCall[] {
   const seen = new Set<string>();
-  return tools.map(normalizeToolCall).filter((tool) => {
+  const calendarChanges = new Map<string, number>();
+  const unique: ToolCall[] = [];
+  for (const tool of tools.map(normalizeToolCall)) {
     const key = `${tool.name}:${JSON.stringify(tool.arguments)}`;
-    if (seen.has(key)) return false;
+    if (seen.has(key)) continue;
     seen.add(key);
-    return true;
-  });
+    const change = calendarChangeAction(tool);
+    const changeKey = change && `${change.action}:${change.uid ?? change.date ?? ""}`;
+    const previousIndex = changeKey === null ? undefined : calendarChanges.get(changeKey);
+    if (previousIndex !== undefined) {
+      unique[previousIndex] = tool;
+      continue;
+    }
+    if (changeKey) calendarChanges.set(changeKey, unique.length);
+    unique.push(tool);
+  }
+  return unique;
 }
 
 function SourcesIcon() {
@@ -3108,7 +3122,10 @@ export default function AiPage() {
                 {steps.length > 0 && (
                   <ol className="calendar-change-steps">
                     {steps.map((step, index) => {
-                      const stepName = typeof step.name === "string" ? step.name : "Step";
+                      const stepName = resolveExerciseName(
+                        typeof step.exercise_code === "string" ? step.exercise_code : null,
+                        typeof step.name === "string" ? step.name : "Step",
+                      );
                       const target = calendarStepTarget(step);
                       const repeats = typeof step.repeat_count === "number" ? step.repeat_count : step.repeats;
                       const intensity = calendarStepIntensity(step);

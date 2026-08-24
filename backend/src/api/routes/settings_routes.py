@@ -41,6 +41,7 @@ class UserGoal(BaseModel):
     goal_target_time: str | None = None      # e.g. "3:59:00"
     goal_result_time: str | None = None
     goal_race_note: str | None = None
+    goal_race_tier: Literal["A", "B", "C", "D", "E"] | None = None
     weekly_training_hours: float | None = None
 
 
@@ -52,6 +53,7 @@ class GoalResponse(BaseModel):
     goal_target_time: str | None = None
     goal_result_time: str | None = None
     goal_race_note: str | None = None
+    goal_race_tier: Literal["A", "B", "C", "D", "E"] | None = None
     weekly_training_hours: float | None = None
     is_active: bool
     created_at: datetime.datetime
@@ -68,6 +70,7 @@ class GoalCreate(BaseModel):
     goal_target_time: str | None = None
     goal_result_time: str | None = None
     goal_race_note: str | None = None
+    goal_race_tier: Literal["A", "B", "C", "D", "E"] | None = None
     weekly_training_hours: float | None = None
     is_active: bool = True
 
@@ -79,6 +82,7 @@ class GoalUpdate(BaseModel):
     goal_target_time: str | None = None
     goal_result_time: str | None = None
     goal_race_note: str | None = None
+    goal_race_tier: Literal["A", "B", "C", "D", "E"] | None = None
     weekly_training_hours: float | None = None
     is_active: bool | None = None
 
@@ -258,6 +262,7 @@ async def get_goal(db: AsyncSession = Depends(get_db_session)) -> UserGoal:
         goal_target_time=goal.goal_target_time,
         goal_result_time=goal.goal_result_time,
         goal_race_note=goal.goal_race_note,
+        goal_race_tier=goal.goal_race_tier,
         weekly_training_hours=goal.weekly_training_hours,
     )
 
@@ -288,6 +293,7 @@ async def update_goal(
     goal.goal_target_time = payload.goal_target_time
     goal.goal_result_time = payload.goal_result_time
     goal.goal_race_note = payload.goal_race_note
+    goal.goal_race_tier = payload.goal_race_tier
     goal.weekly_training_hours = payload.weekly_training_hours
     goal.updated_at = datetime.datetime.utcnow()
 
@@ -301,6 +307,7 @@ async def update_goal(
         goal_target_time=goal.goal_target_time,
         goal_result_time=goal.goal_result_time,
         goal_race_note=goal.goal_race_note,
+        goal_race_tier=goal.goal_race_tier,
         weekly_training_hours=goal.weekly_training_hours,
     )
 
@@ -330,6 +337,7 @@ async def create_goal(
         goal_target_time=payload.goal_target_time,
         goal_result_time=payload.goal_result_time,
         goal_race_note=payload.goal_race_note,
+        goal_race_tier=payload.goal_race_tier,
         weekly_training_hours=payload.weekly_training_hours,
         is_active=payload.is_active,
     )
@@ -366,6 +374,8 @@ async def update_user_goal(
         goal.goal_result_time = payload.goal_result_time
     if "goal_race_note" in update_data:
         goal.goal_race_note = payload.goal_race_note
+    if "goal_race_tier" in update_data:
+        goal.goal_race_tier = payload.goal_race_tier
     if "weekly_training_hours" in update_data:
         goal.weekly_training_hours = payload.weekly_training_hours
     if "is_active" in update_data:

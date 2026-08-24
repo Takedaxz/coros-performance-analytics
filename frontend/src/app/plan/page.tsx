@@ -34,6 +34,8 @@ interface WorkoutStepForm {
   target: WorkoutTarget;
   value: number;
   name: string;
+  exercise_code: string | null;
+  exercise_id: string | null;
   sets: number;
   rest_seconds: number;
   repeats: number;
@@ -68,6 +70,9 @@ interface LibraryWorkout {
 
 type WorkoutDragItem = { scope: "block" | "repeat"; index: number };
 type CalendarMoveNotice = { kind: "pending" | "success" | "error"; message: string };
+type DeleteTarget =
+  | { kind: "calendar"; uid: string; name: string }
+  | { kind: "library"; workout: LibraryWorkout };
 
 const WORKOUT_ICON_PATHS = {
   calendar: "M3 5h18M7 3v4m10-4v4M5 9h14v12H5z",
@@ -162,7 +167,7 @@ function intensitiesFor(sport: WorkoutSport, kind: WorkoutStepForm["kind"]): Wor
 }
 
 function newWorkoutStep(): WorkoutStepForm {
-  return { kind: "training", target: "time", value: 600, name: "", sets: 1, rest_seconds: 0, repeats: 1, intensity: "none", intensity_low: null, intensity_high: null, intensity_basis: "max_hr", intensity_zone: null, repeat_group: null, repeat_count: null, repeat_name: null };
+  return { kind: "training", target: "time", value: 600, name: "", exercise_code: null, exercise_id: null, sets: 1, rest_seconds: 0, repeats: 1, intensity: "none", intensity_low: null, intensity_high: null, intensity_basis: "max_hr", intensity_zone: null, repeat_group: null, repeat_count: null, repeat_name: null };
 }
 
 function newStructuredWorkoutDraft(date: string): WorkoutDraftForm {
@@ -179,17 +184,21 @@ function newStructuredWorkoutDraft(date: string): WorkoutDraftForm {
   };
 }
 
-function targetsFor(sport: WorkoutSport, kind: WorkoutStepForm["kind"]): WorkoutTarget[] {
+function targetsFor(sport: WorkoutSport, kind: WorkoutStepForm["kind"], movement = ""): WorkoutTarget[] {
   if (sport === "indoor_climb" || sport === "bouldering") return ["routes", "time", "open"];
   if (kind === "rest") {
     if (sport === "strength" || sport === "hyrox") return ["time", "hr_recovery", "open"];
     if (sport === "trail_run" || sport === "xc_ski") return ["time", "distance", "load", "hr_recovery", "elevation_gain", "open"];
     return ["time", "distance", "load", "hr_recovery", "open"];
   }
-  if (sport === "strength") return ["reps", "time", "open"];
+  if (sport === "strength") return kind === "training" && ["skierg", "indoorrower", "rower", "t1393", "t1207"].includes(movement.toLowerCase().replace(/[^a-z0-9]+/g, "")) ? ["reps", "time", "distance", "open"] : ["reps", "time", "open"];
   if (sport === "hyrox") return ["time", "distance", "load", "reps", "open"];
   if (sport === "trail_run" || sport === "xc_ski") return ["time", "distance", "load", "elevation_gain", "open"];
   return ["time", "distance", "load", "open"];
+}
+
+function isHyroxFunctionalStation(name: string): boolean {
+  return ["skierg", "sledpush", "sledpull", "burpee", "burpeebroadjumps", "indoorrower", "rower", "farmerswalk", "farmerscarry", "dumbbelllunges", "sandbaglunges", "wallballs"].includes(name.toLowerCase().replace(/[^a-z0-9]+/g, ""));
 }
 
 function targetLabel(target: WorkoutTarget): string {
@@ -283,11 +292,20 @@ function friendlyStepName(kind: WorkoutStepForm["kind"]): string {
 }
 
 function displayStepName(step: WorkoutStepForm): string {
-  return step.name.trim() || friendlyStepName(step.kind);
+  return step.exercise_code
+    ? resolveExerciseName(step.exercise_code, step.name)
+    : step.name.trim() || friendlyStepName(step.kind);
 }
 
-function exerciseVideo(name: string, videos: Record<string, string>): string | null {
-  return videos[name.toLowerCase().replace(/[^a-z0-9]+/g, "")] ?? null;
+function exerciseVideo(name: string, videos: Record<string, string>, options: ExerciseOption[] = []): string | null {
+  const key = name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (videos[key]) return videos[key];
+  const matched = options.find(
+    (opt) =>
+      opt.name.toLowerCase().replace(/[^a-z0-9]+/g, "") === key ||
+      resolveExerciseName(opt.name, opt.name).toLowerCase().replace(/[^a-z0-9]+/g, "") === key
+  );
+  return matched?.video_url ?? null;
 }
 
 function normalizeLoadedDraft(draft: WorkoutEditorData): WorkoutDraftForm {
@@ -296,7 +314,9 @@ function normalizeLoadedDraft(draft: WorkoutEditorData): WorkoutDraftForm {
     ...draft,
     steps: draft.steps.map((step) => ({
       ...step,
-      name: /^[TS]\d+$/i.test(step.name.trim()) ? friendlyStepName(step.kind) : step.name,
+      name: step.exercise_code ? resolveExerciseName(step.exercise_code, step.name) : /^[TS]\d+$/i.test(step.name.trim()) ? friendlyStepName(step.kind) : step.name,
+      exercise_code: step.exercise_code ?? null,
+      exercise_id: step.exercise_id ?? null,
       sets: step.sets ?? (loadedSets && step.kind === "training" ? Math.max(1, step.repeats) : 1),
       rest_seconds: step.rest_seconds ?? 0,
       intensity_basis: step.intensity_basis ?? "max_hr",
@@ -305,7 +325,7 @@ function normalizeLoadedDraft(draft: WorkoutEditorData): WorkoutDraftForm {
   };
 }
 
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function localDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -316,9 +336,9 @@ function localDateKey(date: Date): string {
 
 function calendarDays(anchor: Date): Date[] {
   const firstOfMonth = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
-  const mondayOffset = (firstOfMonth.getDay() + 6) % 7;
+  const sundayOffset = firstOfMonth.getDay();
   const firstCell = new Date(firstOfMonth);
-  firstCell.setDate(firstOfMonth.getDate() - mondayOffset);
+  firstCell.setDate(firstOfMonth.getDate() - sundayOffset);
   return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(firstCell);
     date.setDate(firstCell.getDate() + index);
@@ -352,7 +372,6 @@ export default function TrainingPlanPage() {
   const [events, setEvents] = useState<TrainingEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
-  const [calendarVersion, setCalendarVersion] = useState(0);
   const [calendarMoveNotice, setCalendarMoveNotice] = useState<CalendarMoveNotice | null>(null);
   const [draggedCalendarWorkout, setDraggedCalendarWorkout] = useState<TrainingEvent | null>(null);
   const [calendarDropDate, setCalendarDropDate] = useState<string | null>(null);
@@ -364,6 +383,7 @@ export default function TrainingPlanPage() {
   const [selectedLibraryWorkoutId, setSelectedLibraryWorkoutId] = useState<string | null>(null);
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [deletingLibraryWorkoutId, setDeletingLibraryWorkoutId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [isSavingWorkout, setIsSavingWorkout] = useState(false);
   const [isLoadingWorkoutEditor, setIsLoadingWorkoutEditor] = useState(false);
   const [workoutLoadError, setWorkoutLoadError] = useState("");
@@ -408,7 +428,7 @@ export default function TrainingPlanPage() {
       }
     }
     void fetchCalendarData();
-  }, [calendarVersion, firstDate, lastDate, source]);
+  }, [firstDate, lastDate, source]);
 
   useEffect(() => {
     if (!calendarMoveNotice || calendarMoveNotice.kind === "pending") return;
@@ -417,7 +437,7 @@ export default function TrainingPlanPage() {
   }, [calendarMoveNotice]);
 
   useEffect(() => {
-    if (workoutDraft?.sport !== "hyrox" || exerciseVideosLoaded) return;
+    if (!workoutDraft || exerciseVideosLoaded) return;
     const controller = new AbortController();
     void fetch(`${apiBase}/api/training-plan/coros/exercise-videos`, { signal: controller.signal })
       .then((response) => response.ok ? response.json() as Promise<Record<string, string>> : {})
@@ -425,7 +445,7 @@ export default function TrainingPlanPage() {
       .catch(() => undefined)
       .finally(() => setExerciseVideosLoaded(true));
     return () => controller.abort();
-  }, [apiBase, exerciseVideosLoaded, workoutDraft?.sport]);
+  }, [apiBase, exerciseVideosLoaded, workoutDraft]);
 
   useEffect(() => {
     if (workoutDraft?.sport !== "strength") {
@@ -563,8 +583,6 @@ export default function TrainingPlanPage() {
     }
   };
   const deleteLibraryWorkout = async (workout: LibraryWorkout) => {
-    if (!window.confirm(`Delete \"${workout.name}\" from your COROS library? This cannot be undone.`)) return;
-    setWorkoutError("");
     setDeletingLibraryWorkoutId(workout.id);
     try {
       const response = await fetch(`${apiBase}/api/training-plan/coros/library/${encodeURIComponent(workout.id)}`, {
@@ -573,18 +591,32 @@ export default function TrainingPlanPage() {
         body: JSON.stringify({ confirmed: true }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      setLibraryWorkouts((workouts) => workouts.filter((item) => item.id !== workout.id));
-      setSelectedLibraryWorkoutId((id) => id === workout.id ? null : id);
-    } catch (cause) {
-      setWorkoutError(cause instanceof Error ? cause.message : "Could not delete saved workout.");
     } finally {
       setDeletingLibraryWorkoutId(null);
     }
   };
   const saveWorkout = async () => {
     if (!workoutDraft) return;
+    const draft = { ...workoutDraft, name: workoutDraft.name.trim() || "Structured Workout" };
+    const previous = editingUid ? events.find((event) => event.uid === editingUid) : undefined;
+    const pendingUid = `pending:${Date.now()}`;
+    const pending: TrainingEvent = {
+      uid: editingUid ?? pendingUid,
+      summary: draft.name,
+      start: draft.date,
+      end: draft.date,
+      description: draft.description,
+      location: "",
+      event_type: draft.sport === "ride" ? "ride" : draft.sport === "swim" ? "swim" : draft.sport === "strength" || draft.sport === "hyrox" ? "strength" : "run",
+      is_all_day: true,
+      workout_steps: draft.steps,
+    };
     setIsSavingWorkout(true);
     setWorkoutError("");
+    setEvents((current) => previous ? current.map((event) => event.uid === previous.uid ? pending : event) : [...current, pending]);
+    setSelectedDate(draft.date);
+    setWorkoutDraft(null);
+    setCalendarMoveNotice({ kind: "pending", message: "Saving workout…" });
     try {
       const method = editingUid ? "PUT" : "POST";
       const path = editingUid
@@ -594,16 +626,22 @@ export default function TrainingPlanPage() {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          draft: { ...workoutDraft, name: workoutDraft.name.trim() || "Structured Workout" },
+          draft,
           confirmed: true,
           save_to_library: structuredSaveToLibrary,
         }),
       });
       if (!response.ok) throw new Error((await response.json() as { detail?: string }).detail || `HTTP ${response.status}`);
-      setWorkoutDraft(null);
-      setCalendarVersion((value) => value + 1);
+      const saved: TrainingEvent = await response.json();
+      setEvents((current) => current.map((event) => event.uid === pending.uid ? saved : event));
+      setCalendarMoveNotice({ kind: "success", message: `${saved.summary} saved.` });
     } catch (cause) {
+      setEvents((current) => previous ? current.map((event) => event.uid === pending.uid ? previous : event) : current.filter((event) => event.uid !== pendingUid));
+      setEditingUid(editingUid);
+      setWorkoutEditorMode("structured");
+      setWorkoutDraft(draft);
       setWorkoutError(cause instanceof Error ? cause.message : "Could not save workout.");
+      setCalendarMoveNotice({ kind: "error", message: "Could not save workout." });
     } finally {
       setIsSavingWorkout(false);
     }
@@ -623,7 +661,6 @@ export default function TrainingPlanPage() {
       const moved: TrainingEvent = await response.json();
       setEvents((current) => current.map((event) => event.uid === uid ? moved : event));
       setCalendarMoveNotice({ kind: "success", message: `${previous.summary} moved successfully.` });
-      setCalendarVersion((value) => value + 1);
     } catch (cause) {
       setEvents((current) => current.map((event) => event.uid === uid ? previous : event));
       setSelectedDate(previous.start.slice(0, 10));
@@ -653,17 +690,41 @@ export default function TrainingPlanPage() {
     if (workout && workout.start.slice(0, 10) !== date) void moveWorkoutToDate(workout.uid, date);
   };
   const deleteWorkout = async (uid: string) => {
-    if (!window.confirm("Delete this COROS Calendar workout?")) return;
-    setWorkoutError("");
-    try {
-      const response = await fetch(`${apiBase}/api/training-plan/coros/workouts/${encodeURIComponent(uid)}`, {
-        method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmed: true }),
+    const response = await fetch(`${apiBase}/api/training-plan/coros/workouts/${encodeURIComponent(uid)}`, {
+      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmed: true }),
+    });
+    if (!response.ok) throw new Error((await response.json() as { detail?: string }).detail || `HTTP ${response.status}`);
+  };
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (target.kind === "library") {
+      const index = libraryWorkouts.findIndex((workout) => workout.id === target.workout.id);
+      const wasSelected = selectedLibraryWorkoutId === target.workout.id;
+      setWorkoutError("");
+      setLibraryWorkouts((workouts) => workouts.filter((workout) => workout.id !== target.workout.id));
+      if (wasSelected) setSelectedLibraryWorkoutId(null);
+      void deleteLibraryWorkout(target.workout).catch((cause) => {
+        setLibraryWorkouts((workouts) => index < 0 || workouts.some((workout) => workout.id === target.workout.id) ? workouts : [
+          ...workouts.slice(0, index), target.workout, ...workouts.slice(index),
+        ]);
+        if (wasSelected) setSelectedLibraryWorkoutId(target.workout.id);
+        setWorkoutError(cause instanceof Error ? cause.message : "Could not delete saved workout.");
       });
-      if (!response.ok) throw new Error((await response.json() as { detail?: string }).detail || `HTTP ${response.status}`);
-      setCalendarVersion((value) => value + 1);
-    } catch (cause) {
-      setWorkoutError(cause instanceof Error ? cause.message : "Could not delete workout.");
+      return;
     }
+    const previous = events.find((event) => event.uid === target.uid);
+    if (!previous) return;
+    setEvents((current) => current.filter((event) => event.uid !== target.uid));
+    setCalendarMoveNotice({ kind: "pending", message: `Deleting ${previous.summary}…` });
+    void deleteWorkout(target.uid).then(
+      () => setCalendarMoveNotice({ kind: "success", message: `${previous.summary} deleted.` }),
+      (cause: unknown) => {
+        setEvents((current) => current.some((event) => event.uid === previous.uid) ? current : [...current, previous]);
+        setCalendarMoveNotice({ kind: "error", message: cause instanceof Error ? cause.message : "Could not delete workout." });
+      },
+    );
   };
   const updateStep = (index: number, update: Partial<WorkoutStepForm>) => {
     if (!workoutDraft) return;
@@ -739,23 +800,24 @@ export default function TrainingPlanPage() {
   };
   const stepEditor = (step: WorkoutStepForm, index: number, nested = false) => {
     if (!workoutDraft) return null;
-    const targets = targetsFor(workoutDraft.sport, step.kind);
-    const video = exerciseVideo(step.name, exerciseVideos);
+    const targets = targetsFor(workoutDraft.sport, step.kind, step.exercise_code ?? step.name);
+    const video = exerciseVideo(step.name, exerciseVideos, exerciseOptions);
     const isVideoOpen = activeExerciseVideoStep === index;
     const isActive = activeWorkoutStep === index;
     const dragItem: WorkoutDragItem = { scope: nested ? "repeat" : "block", index };
     const isDragging = draggedWorkoutItem?.scope === dragItem.scope && draggedWorkoutItem.index === index;
     const isDropTarget = dropTargetWorkoutItem?.scope === dragItem.scope && dropTargetWorkoutItem.index === index;
     const isStrengthMovement = workoutDraft.sport === "strength" && step.kind === "training";
+    const supportsSetRest = step.kind === "training" && (workoutDraft.sport === "strength" || workoutDraft.sport === "hyrox" && isHyroxFunctionalStation(step.name));
     return <article className={`plan-workout-step${isActive ? " is-active" : " is-collapsed"}${isDragging ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`} data-step-kind={step.kind} key={`${index}-${step.name}`} draggable onDragStart={(event) => beginWorkoutDrag(event, dragItem)} onDragEnd={endWorkoutDrag} onDragOver={(event) => allowWorkoutDrop(event, dragItem)} onDrop={(event) => finishWorkoutDrop(event, dragItem)}>
       <header className="plan-workout-step-title"><WorkoutDragHandle /><span className="plan-workout-step-index">{String(index + 1).padStart(2, "0")}</span><button className="plan-workout-step-toggle" type="button" aria-expanded={isActive} onClick={() => setActiveWorkoutStep(isActive ? null : index)}><small>Step {index + 1}</small><strong>{displayStepName(step)}</strong><em>{targetLabel(step.target)}{step.target !== "open" ? ` · ${structureValue(step)}` : ""}</em></button><div className="plan-workout-step-header-actions">{video && <button type="button" aria-label={`${isVideoOpen ? "Hide" : "Show"} ${displayStepName(step)} technique video`} title={`${isVideoOpen ? "Hide" : "Show"} technique video`} aria-pressed={isVideoOpen} onClick={() => setActiveExerciseVideoStep(isVideoOpen ? null : index)}><WorkoutIcon name="video" size={15} /></button>}<button type="button" aria-label="Duplicate step" title="Duplicate step" onClick={() => duplicateStep(index)}><WorkoutIcon name="copy" size={15} /></button><button type="button" aria-label="Delete step" title="Delete step" disabled={workoutDraft.steps.length === 1} onClick={() => setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.filter((_, position) => position !== index) })}><WorkoutIcon name="trash" size={15} /></button></div></header>
       {video && isVideoOpen && <aside className="plan-workout-exercise-video" aria-label={`${displayStepName(step)} technique preview`}><video src={video} controls loop muted playsInline preload="metadata" /></aside>}
        {isActive && <div className="plan-workout-step-fields">
-         {isStrengthMovement && <label><span>Movement</span><ExerciseCombobox value={step.name} options={exerciseOptions} loading={exerciseOptionsLoading} onChange={(selectedName) => updateStep(index, { name: selectedName })} /></label>}
-         <label><span>Type</span><SingleSelect ariaLabel="Step type" value={step.kind} onChange={(value) => { const kind = value as WorkoutStepForm["kind"]; updateStep(index, { kind, target: targetsFor(workoutDraft.sport, kind)[0] }); }} options={[{ value: "warmup", label: "Warm-up" }, { value: "training", label: "Training" }, { value: "rest", label: "Rest" }, { value: "cooldown", label: "Cool-down" }]} /></label>
+         {isStrengthMovement && <label><span>Movement</span><ExerciseCombobox value={step.name} options={exerciseOptions} loading={exerciseOptionsLoading} onChange={(selectedName, option) => updateStep(index, { name: resolveExerciseName(selectedName, selectedName), exercise_code: selectedName, exercise_id: option?.id ?? null })} /></label>}
+         <label><span>Type</span><SingleSelect ariaLabel="Step type" value={step.kind} onChange={(value) => { const kind = value as WorkoutStepForm["kind"]; updateStep(index, { kind, target: targetsFor(workoutDraft.sport, kind, step.exercise_code ?? step.name)[0] }); }} options={[{ value: "warmup", label: "Warm-up" }, { value: "training", label: "Training" }, { value: "rest", label: "Rest" }, { value: "cooldown", label: "Cool-down" }]} /></label>
          <label><span>Finish target</span><SingleSelect ariaLabel="Finish target" value={step.target} onChange={(value) => { const nextTarget = value as WorkoutTarget; const nextValue = nextTarget === "distance" ? (step.target === "distance" ? step.value : 1000) : nextTarget === "time" ? (step.target === "time" ? step.value : 600) : step.value; updateStep(index, { target: nextTarget, value: nextValue }); }} options={targets.map((target) => ({ value: target, label: targetLabel(target) }))} /></label>
          {step.target !== "open" && <label><span>{targetValueLabel(step.target)}</span>{step.target === "time" ? <DurationInput key={step.value} seconds={step.value} onChange={(value) => updateStep(index, { value })} /> : step.target === "distance" ? <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0.001} step={0.1} value={Number((step.value / 1000).toFixed(3))} onChange={(value) => updateStep(index, { value: Math.round((Number(value) || 0) * 1000) })} /> : <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0} value={step.value} onChange={(value) => updateStep(index, { value: Number(value) || 0 })} />}</label>}
-         {isStrengthMovement && <><label><span>Sets</span><NumberStepper ariaLabel="Sets" min={1} max={99} value={step.sets} onChange={(value) => updateStep(index, { sets: Math.max(1, Number(value) || 1) })} /></label><label><span>Rest between sets (sec)</span><NumberStepper ariaLabel="Rest between sets in seconds" min={0} max={3600} value={step.rest_seconds} onChange={(value) => updateStep(index, { rest_seconds: Math.max(0, Number(value) || 0) })} /></label></>}
+         {isStrengthMovement && <label><span>Sets</span><NumberStepper ariaLabel="Sets" min={1} max={99} value={step.sets} onChange={(value) => updateStep(index, { sets: Math.max(1, Number(value) || 1) })} /></label>}{supportsSetRest && <label className="plan-workout-rest-between-sets"><span>Rest between sets (sec)</span><NumberStepper ariaLabel="Rest between sets in seconds" min={0} max={3600} value={step.rest_seconds} onChange={(value) => updateStep(index, { rest_seconds: Math.max(0, Number(value) || 0) })} /></label>}
          <label><span>Intensity</span><SingleSelect ariaLabel="Intensity" value={step.intensity} onChange={(value) => { const intensity = value as WorkoutIntensity; updateStep(index, { intensity, intensity_basis: "max_hr", intensity_zone: null, ...initialIntensityValues(intensity) }); }} options={INTENSITY_OPTIONS.filter((option) => intensitiesFor(workoutDraft.sport, step.kind).includes(option.value))} /></label>
         {step.intensity === "heart_rate_percent" ? <label><span>Heart-rate basis</span><SingleSelect ariaLabel="Heart-rate basis" value={step.intensity_basis} onChange={(value) => updateStep(index, { intensity_basis: value as WorkoutIntensityBasis, intensity_zone: null, ...initialIntensityValues(step.intensity) })} options={[{ value: "max_hr", label: "% Max Heart Rate" }, { value: "reserve", label: "% Heart Rate Reserve" }, { value: "lthr", label: "% Threshold HR" }]} /></label> : null}
         {step.intensity === "stroke" ? <label><span>Stroke</span><SingleSelect ariaLabel="Stroke" value={String(step.intensity_low ?? 1)} onChange={(value) => updateStep(index, { intensity_low: Number(value), intensity_high: null })} options={STROKE_OPTIONS} /></label> : null}
@@ -943,7 +1005,7 @@ export default function TrainingPlanPage() {
                     {source === "coros" && (
                       <div className="plan-workout-actions">
                         <button className="btn btn-secondary btn-sm" type="button" onClick={() => void openEditWorkout(event.uid)}>Edit</button>
-                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => void deleteWorkout(event.uid)}>Delete</button>
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => setDeleteTarget({ kind: "calendar", uid: event.uid, name: event.summary })}>Delete</button>
                       </div>
                     )}
                   </div>
@@ -1005,7 +1067,7 @@ export default function TrainingPlanPage() {
                                 className="plan-workout-library-delete"
                                 aria-label={`Delete ${workout.name}`}
                                 title={`Delete ${workout.name}`}
-                                onClick={() => void deleteLibraryWorkout(workout)}
+                                onClick={() => setDeleteTarget({ kind: "library", workout })}
                                 disabled={deletingLibraryWorkoutId === workout.id}
                               >
                                 {deletingLibraryWorkoutId === workout.id ? "…" : <WorkoutIcon name="trash" size={15} />}
@@ -1031,7 +1093,7 @@ export default function TrainingPlanPage() {
                       <div className="plan-workout-pane-heading"><h3>Workout settings</h3><p>Set the basics for your workout.</p></div>
                        <div className="plan-workout-sport-field"><span>Sport</span><div className="plan-workout-sport-grid" role="group" aria-label="Workout sport">{SPORT_OPTIONS.map((option) => <button key={option.value} type="button" title={option.label} aria-label={option.label} aria-pressed={workoutDraft.sport === option.value} className={workoutDraft.sport === option.value ? "is-active" : ""} onClick={() => setWorkoutDraft({ ...workoutDraft, sport: option.value, steps: workoutDraft.steps.map((step) => { const intensity = intensitiesFor(option.value, step.kind).includes(step.intensity) ? step.intensity : option.value === "indoor_climb" || option.value === "bouldering" ? "grade" : "none"; const strengthTraining = option.value === "strength" && step.kind === "training"; return { ...step, target: strengthTraining && (step.target === "time" || step.target === "distance") ? "reps" : step.target, value: strengthTraining && (step.target === "time" || step.target === "distance") ? 10 : step.value, sets: strengthTraining ? Math.max(1, step.sets ?? 3) : step.sets, intensity, ...initialIntensityValues(intensity) }; }) })}><SportIcon sport={option.value} size={22} /></button>)}</div></div>
                       <label className="plan-workout-field"><span>Workout name <small>Optional</small></span><input value={workoutDraft.name} placeholder={workoutDraft.sport === "strength" ? "Full-body strength" : workoutDraft.sport === "swim" ? "Pool endurance" : "6 x 800 m"} onChange={(event) => setWorkoutDraft({ ...workoutDraft, name: event.target.value })} /></label>
-                      <label className="plan-workout-field plan-workout-builder-description"><span>Description <small>{workoutDraft.description.length} / 300</small></span><textarea maxLength={300} rows={4} value={workoutDraft.description} placeholder="Add coaching notes or the goal of this workout" onChange={(event) => setWorkoutDraft({ ...workoutDraft, description: event.target.value })} /></label>
+                      <label className="plan-workout-field plan-workout-builder-description"><span>Description <small>{workoutDraft.description.length} / 200</small></span><textarea maxLength={200} rows={4} value={workoutDraft.description} placeholder="Add coaching notes or the goal of this workout" onChange={(event) => setWorkoutDraft({ ...workoutDraft, description: event.target.value })} /></label>
                       <label className={`plan-workout-save-card${structuredSaveToLibrary ? " is-checked" : ""}`}><input type="checkbox" checked={structuredSaveToLibrary} onChange={(event) => setStructuredSaveToLibrary(event.target.checked)} /><WorkoutIcon name="save" size={18} /><span><strong>Save to library</strong><small>Keep a reusable copy after scheduling.</small></span></label>
                     </aside>
                     <section className="plan-workout-builder-canvas" aria-labelledby="plan-workout-steps-title">
@@ -1054,6 +1116,17 @@ export default function TrainingPlanPage() {
               </section>
             </div>
           )}
+          {deleteTarget && <dialog open className="ai-delete-dialog" aria-labelledby="plan-delete-title">
+            <div className="ai-delete-dialog-content">
+              <span className="ai-delete-dialog-label">Delete workout</span>
+              <h2 id="plan-delete-title">Delete {deleteTarget.kind === "library" ? "saved workout" : "scheduled workout"}?</h2>
+              <p><strong>{deleteTarget.kind === "library" ? deleteTarget.workout.name : deleteTarget.name}</strong> will be removed from COROS.</p>
+              <div className="ai-delete-dialog-actions">
+                <button className="btn btn-secondary" type="button" onClick={() => setDeleteTarget(null)}>Cancel</button>
+                <button className="btn ai-delete-dialog-confirm" type="button" onClick={confirmDelete}>Delete</button>
+              </div>
+            </div>
+          </dialog>}
         </div>
       </main>
     </div>

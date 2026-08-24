@@ -5,6 +5,7 @@ import datetime as dt
 import re
 from collections.abc import Callable
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from difflib import SequenceMatcher
 from typing import Any, Literal, NotRequired
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -99,6 +100,10 @@ def coach_tool_functions(
         """Get the structured COROS workouts scheduled on one date, including steps and targets."""
         return run("get_scheduled_workout_details", timeout_seconds=45.0, date=date)
 
+    def search_strength_exercises(names: list[str]) -> dict[str, Any]:
+        """Find up to five COROS strength-catalog matches for each requested movement name."""
+        return run("search_strength_exercises", names=names)
+
     def get_fitness_history(days: int) -> dict[str, Any]:
         """Get fitness estimates and race predictions for 28, 56, 90, or 180 days."""
         return run("get_fitness_history", days=days)
@@ -119,13 +124,13 @@ def coach_tool_functions(
     from src.api.routes.training_plan_routes import CorosWorkoutDraft
 
     def propose_create_calendar_workout(draft: CorosWorkoutDraft) -> dict[str, Any]:
-        """Prepare a new COROS workout after checking the target date in COROS Calendar."""
+        """Prepare a new COROS workout (keep description concise, max 200 chars, only a few words)."""
         return _calendar_change_proposal("create", draft=draft.model_dump())
 
     def propose_update_calendar_workout(
         uid: str, draft: CorosWorkoutDraft
     ) -> dict[str, Any]:
-        """Prepare an edit to a COROS workout identified by a calendar UID."""
+        """Prepare an edit to a COROS workout (keep description concise, max 200 chars, only a few words)."""
         return _calendar_change_proposal("update", draft=draft.model_dump(), uid=uid)
 
     def propose_move_calendar_workout(uid: str, date: str) -> dict[str, Any]:
@@ -143,6 +148,7 @@ def coach_tool_functions(
         compare_activities,
         get_training_plan,
         get_scheduled_workout_details,
+        search_strength_exercises,
         get_fitness_history,
         get_past_race_goals,
         search_coaching_knowledge,
@@ -281,6 +287,20 @@ async def _execute_tool(name: str, user_id: str, arguments: dict[str, Any]) -> d
             except ValueError:
                 return {"error": "date must be a real YYYY-MM-DD value"}
             return await _scheduled_workout_details(db, date)
+        if name == "search_strength_exercises":
+            names = arguments.get("names")
+            if (
+                not isinstance(names, list)
+                or not 1 <= len(names) <= 10
+                or any(
+                    not isinstance(item, str) or not 2 <= len(item.strip()) <= 80
+                    for item in names
+                )
+            ):
+                return {
+                    "error": "names must contain 1 to 10 movement names, each 2 to 80 characters"
+                }
+            return await _strength_exercise_matches(db, [item.strip() for item in names])
         if name == "get_activities":
             return await _activities(db, user_id, arguments)
         if name == "get_activity_detail":
@@ -484,6 +504,85 @@ async def _scheduled_workout_details(db: Any, date: dt.date) -> dict[str, Any]:
             for workout in workouts
         ],
     }
+
+
+def _exercise_match_name(row: dict[str, object]) -> str | None:
+    for key in ("overview", "displayName", "exerciseName", "nameText", "name"):
+        value = row.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        name = re.sub(r"^sid_[a-z]+_", "", value.strip(), flags=re.IGNORECASE)
+        return name.replace("_", " ").title()
+    return None
+
+
+def _normalised_exercise_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _strength_match_score(query: str, exercise: dict[str, str]) -> tuple[int, str]:
+    normalised_name = _normalised_exercise_name(exercise["name"])
+    if normalised_name == query:
+        relevance = 1_000
+    elif query in normalised_name or normalised_name in query:
+        relevance = 800
+    else:
+        relevance = round(SequenceMatcher(None, query, normalised_name).ratio() * 100)
+    return relevance, exercise["name"].lower()
+
+
+def _rank_strength_exercises(catalog: object, names: list[str]) -> dict[str, Any]:
+    from src.api.routes.training_plan_routes import _exercise_catalog_rows
+
+    exercises: dict[str, dict[str, str]] = {}
+    for row in _exercise_catalog_rows(catalog):
+        display_name = _exercise_match_name(row)
+        exercise_code = row.get("name")
+        exercise_id = next(
+            (str(row[key]) for key in ("exerciseId", "originId", "id") if row.get(key) is not None),
+            None,
+        )
+        if (
+            display_name is None
+            or not isinstance(exercise_code, str)
+            or not exercise_code.strip()
+            or exercise_id is None
+        ):
+            continue
+        exercises.setdefault(
+            exercise_id,
+            {
+                "name": display_name,
+                "exercise_code": exercise_code.strip(),
+                "exercise_id": exercise_id,
+            },
+        )
+
+    results: list[dict[str, Any]] = []
+    for query in names:
+        normalised_query = _normalised_exercise_name(query)
+        matches = sorted(
+            exercises.values(),
+            key=lambda exercise: (
+                -_strength_match_score(normalised_query, exercise)[0],
+                _strength_match_score(normalised_query, exercise)[1],
+            ),
+        )[:5]
+        results.append({"query": query, "matches": matches})
+    return {"matches": results}
+
+
+async def _strength_exercise_matches(db: Any, names: list[str]) -> dict[str, Any]:
+    from src.api.routes.training_plan_routes import _coros_client
+    from src.sync.api_client import CorosApiClientError
+
+    try:
+        catalog = await (await _coros_client(db)).get_training_hub(
+            "/training/exercise/query", {"sportType": 4, "keyword": ""}
+        )
+    except CorosApiClientError as exc:
+        return {"error": f"COROS exercise catalog unavailable: {exc}"}
+    return _rank_strength_exercises(catalog, names)
 
 
 async def _activities(db: Any, user_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -725,6 +824,7 @@ async def _past_race_goals(db: Any, user_id: str) -> dict[str, Any]:
                     "result_time": goal.goal_result_time,
                     "notes": goal.goal_description,
                     "race_notes": goal.goal_race_note,
+                    "race_tier": goal.goal_race_tier,
                     "weekly_training_hours": goal.weekly_training_hours,
                     "active": goal.is_active,
                 }

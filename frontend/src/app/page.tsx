@@ -252,23 +252,36 @@ export default function DashboardPage() {
   const recordGroups = personalRecords?.groups ?? [];
   const activeRecordGroup =
     recordGroups.find((group) => group.type === selectedRecordGroup) ?? recordGroups[0];
-  const displayedRecords = activeRecordGroup
-    ? [
-        ...activeRecordGroup.records,
-        ...(activeRecordGroup.records.some((record) => record.type === 13)
-          ? []
-          : [
-              {
-                type: 13,
-                label: "Marathon",
-                distance_m: 42_195,
-                duration_s: null,
-                pace_s_per_km: null,
-                date: null,
-              },
-            ]),
-      ]
-    : [];
+  const displayedRecords: PersonalRecord[] = (() => {
+    if (!activeRecordGroup) return [];
+    const STANDARD_PERSONAL_RECORDS = [
+      { type: 7, label: "1K", distance_m: 1_000 },
+      { type: 6, label: "3K", distance_m: 3_000 },
+      { type: 5, label: "5K", distance_m: 5_000 },
+      { type: 4, label: "10K", distance_m: 10_000 },
+      { type: 2, label: "Half Marathon", distance_m: 21_097.5 },
+      { type: 13, label: "Marathon", distance_m: 42_195 },
+    ];
+    const achievedMap = new Map(activeRecordGroup.records.map((record) => [record.type, record]));
+    const list: PersonalRecord[] = STANDARD_PERSONAL_RECORDS.map((std) => {
+      const achieved = achievedMap.get(std.type);
+      if (achieved) return achieved;
+      return {
+        type: std.type,
+        label: std.label,
+        distance_m: std.distance_m,
+        duration_s: null,
+        pace_s_per_km: null,
+        date: null,
+      };
+    });
+    for (const record of activeRecordGroup.records) {
+      if (!STANDARD_PERSONAL_RECORDS.some((std) => std.type === record.type)) {
+        list.push(record);
+      }
+    }
+    return list;
+  })();
 
   // Build current week bar chart data starting from MONDAY (Mon - Sun)
   const today = new Date();
@@ -811,28 +824,36 @@ export default function DashboardPage() {
                             ? formatRecordDuration(record.duration_s)
                             : "--";
                       return (
-                        <div key={record.type} style={{ padding: "12px", background: `radial-gradient(circle at 0 0, ${glowColor}, transparent 64%), var(--color-surface-secondary)`, border: `1px solid ${glowColor}`, borderRadius: "14px", minWidth: 0 }}>
-                          <span style={{ display: "block", color: "var(--color-text-secondary)", fontSize: "11px", fontWeight: 750 }}>
-                            {record.label}
-                          </span>
-                          <strong style={{ display: "block", marginTop: "7px", fontSize: "22px", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
-                            {value}
-                          </strong>
-                          {!isElevation && record.pace_s_per_km != null && (
-                            <span style={{ display: "block", marginTop: "7px", color: "var(--color-text-secondary)", fontSize: "11px" }}>
-                              {formatRecordPace(record.pace_s_per_km)} /km
+                        <div key={record.type} style={{ padding: "12px", background: `radial-gradient(circle at 0 0, ${glowColor}, transparent 64%), var(--color-surface-secondary)`, border: `1px solid ${glowColor}`, borderRadius: "14px", minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between", minHeight: "112px" }}>
+                          <div>
+                            <span style={{ display: "block", color: "var(--color-text-secondary)", fontSize: "11px", fontWeight: 750 }}>
+                              {record.label}
                             </span>
-                          )}
-                          {!isElevation && record.duration_s == null && (
-                            <span style={{ display: "block", marginTop: "7px", color: "var(--color-text-muted)", fontSize: "11px" }}>
-                              Not recorded
-                            </span>
-                          )}
-                          {record.date && (
-                            <span style={{ display: "block", marginTop: "9px", color: "var(--color-text-muted)", fontSize: "10px" }}>
-                              {new Date(`${record.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                            </span>
-                          )}
+                            <strong style={{ display: "block", marginTop: "7px", fontSize: "22px", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+                              {value}
+                            </strong>
+                          </div>
+                          <div>
+                            {!isElevation && record.pace_s_per_km != null && (
+                              <span style={{ display: "block", marginTop: "7px", color: "var(--color-text-secondary)", fontSize: "11px" }}>
+                                {formatRecordPace(record.pace_s_per_km)} /km
+                              </span>
+                            )}
+                            {!isElevation && record.duration_s == null && (
+                              <span style={{ display: "block", marginTop: "7px", color: "var(--color-text-muted)", fontSize: "11px" }}>
+                                Not recorded
+                              </span>
+                            )}
+                            {record.date ? (
+                              <span style={{ display: "block", marginTop: "7px", color: "var(--color-text-muted)", fontSize: "10px" }}>
+                                {new Date(`${record.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                              </span>
+                            ) : (
+                              <span style={{ display: "block", marginTop: "7px", color: "transparent", fontSize: "10px", userSelect: "none" }} aria-hidden="true">
+                                &nbsp;
+                              </span>
+                            )}
+                          </div>
                         </div>
                       );
                     })}

@@ -18,6 +18,31 @@ interface ExerciseComboboxProps {
   onChange: (selectedName: string, option?: ExerciseOption) => void;
 }
 
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="6" />
+      <path d="m16 16 4 4" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg className={open ? "is-open" : ""} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m7 10 5 5 5-5" />
+    </svg>
+  );
+}
+
+function ClearIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+      <path d="m7 7 10 10M17 7 7 17" />
+    </svg>
+  );
+}
+
 export default function ExerciseCombobox({
   value,
   options,
@@ -123,22 +148,20 @@ export default function ExerciseCombobox({
               className="exercise-option-thumb-inline"
               loading="lazy"
             />
-          ) : (
-            <span className="exercise-thumb-placeholder">🏋️</span>
-          )}
+          ) : null}
           <span className="exercise-selected-label">
             {loading
               ? "Loading movements..."
               : resolvedValueName || "Select movement"}
           </span>
-          <span className="exercise-combobox-arrow">{isOpen ? "▲" : "▼"}</span>
+          <span className="exercise-combobox-arrow"><ChevronIcon open={isOpen} /></span>
         </button>
       </div>
 
       {isOpen && !disabled && !loading && (
         <div className="exercise-combobox-dropdown" role="listbox">
           <div className="exercise-search-wrap">
-            <span className="exercise-search-icon">🔍</span>
+            <span className="exercise-search-icon"><SearchIcon /></span>
             <input
               ref={searchInputRef}
               type="text"
@@ -154,7 +177,7 @@ export default function ExerciseCombobox({
                 onClick={() => setQuery("")}
                 aria-label="Clear search"
               >
-                ✕
+                <ClearIcon />
               </button>
             )}
           </div>
@@ -183,9 +206,7 @@ export default function ExerciseCombobox({
                           className="exercise-option-thumb"
                           loading="lazy"
                         />
-                      ) : (
-                        <span className="exercise-option-thumb-fallback">🏋️</span>
-                      )}
+                      ) : null}
                       <span className="exercise-option-name">{option.label}</span>
                     </button>
                   </li>
@@ -193,21 +214,6 @@ export default function ExerciseCombobox({
               })
             )}
           </ul>
-        </div>
-      )}
-
-      {selectedOption?.video_url && (
-        <div className="exercise-video-preview" aria-label="Exercise demonstration video">
-          <video
-            src={selectedOption.video_url}
-            poster={selectedOption.thumbnail_url}
-            controls
-            loop
-            muted
-            playsInline
-            preload="metadata"
-          />
-          <small className="exercise-video-caption">Technique Demo: {selectedOption.label}</small>
         </div>
       )}
     </div>

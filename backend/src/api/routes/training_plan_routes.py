@@ -8,8 +8,10 @@ from typing import Literal, cast
 from urllib.parse import urlparse
 
 import httpx
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import get_settings
@@ -19,11 +21,19 @@ from src.sync.api_client import CorosApiClient, CorosApiClientError
 
 router = APIRouter()
 settings = get_settings()
+_coros_token_cache: Redis | None = None
 
 _ICAL_URL = "https://p135-caldav.icloud.com/published/2/MTAzNTc1NTUzNDMxMDM1N4gPI9Eruy25g9v9R_Ci0txlHRMQJW0ifWYN4qF0Rbss"
 EventType = Literal["run", "ride", "strength", "swim", "yoga", "pilates", "race", "other"]
 ScheduleObject = dict[str, object]
 _COROS_EXERCISE_VIDEO_PREFIX = "/source/exercise_gif/"
+
+
+def _coros_redis() -> Redis:
+    global _coros_token_cache
+    if _coros_token_cache is None:
+        _coros_token_cache = aioredis.from_url(settings.redis_url, decode_responses=False)
+    return _coros_token_cache
 
 
 CalendarSource = Literal["ical", "coros"]
@@ -168,6 +178,8 @@ class CorosWorkoutStep(BaseModel):
     target: WorkoutTarget = "time"
     value: float = Field(default=600, ge=0, le=1_000_000)
     name: str = Field(default="", max_length=80)
+    exercise_code: str | None = Field(default=None, max_length=80)
+    exercise_id: str | None = Field(default=None, max_length=80)
     sets: int = Field(default=1, ge=1, le=99)
     rest_seconds: int = Field(default=0, ge=0, le=3_600)
     repeats: int = Field(default=1, ge=1, le=99)
@@ -186,7 +198,7 @@ class CorosWorkoutDraft(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     sport: WorkoutSport
     pool_length_m: int | None = Field(default=None, ge=1, le=100)
-    description: str = Field(default="", max_length=300)
+    description: str = Field(default="", max_length=200)
     steps: list[CorosWorkoutStep] = Field(min_length=1, max_length=50)
 
 
@@ -601,7 +613,7 @@ async def fetch_coros_calendar(
     password = (creds[1] if creds else None) or settings.coros_password
     if not email or not password:
         raise HTTPException(status_code=400, detail="Configure COROS credentials in Settings.")
-    client = CorosApiClient(email=email, password=password)
+    client = CorosApiClient(email=email, password=password, redis=_coros_redis())
     try:
         await client.login()
         return _parse_coros_schedule(
@@ -725,12 +737,24 @@ def _intensity_fields(step: CorosWorkoutStep, sport: WorkoutSport) -> ScheduleOb
         "pace": (3, 1),
         "effort_pace": (8, 1),
     }[step.intensity]
+    if step.intensity == "weight":
+        return {
+            "intensityType": intensity_type,
+            "intensityValue": round(low * 1000),
+            "intensityValueExtend": 0,
+            "intensityMultiplier": 0,
+            "intensityDisplayUnit": display_unit,
+            "hrType": 0,
+            "isIntensityPercent": False,
+            "intensityCustom": 0,
+            "intensityPercent": round(low * 1_000_000),
+            "intensityPercentExtend": 0,
+        }
     multiplier = {
         "heart_rate": 1,
         "pace": 1000,
         "effort_pace": 1000,
         "speed": 100,
-        "weight": 1000,
     }.get(step.intensity, 0)
     return {
         "intensityType": intensity_type,
@@ -759,7 +783,30 @@ def _hyrox_target(step: CorosWorkoutStep) -> WorkoutTarget | None:
     return _HYROX_TARGET_CONFIG.get(normalized_name)
 
 
-def _allowed_targets(sport: WorkoutSport, kind: WorkoutStepKind) -> frozenset[WorkoutTarget]:
+_DISTANCE_STRENGTH_MOVEMENTS = frozenset({"skierg", "indoorrower", "rower", "t1393", "t1207"})
+_RAW_EXERCISE_IDENTITY_FIELDS = (
+    "sportType",
+    "subType",
+    "exerciseKind",
+    "overview",
+    "equipment",
+    "muscle",
+    "muscleRelevance",
+    "animationId",
+    "gradeSystem",
+    "packageTime",
+    "onsightGradeOffset",
+    "isDefaultAdd",
+    "thumbnailUrl",
+    "coverUrlArrStr",
+    "videoUrlArrStr",
+    "videoInfos",
+)
+
+
+def _allowed_targets(
+    sport: WorkoutSport, kind: WorkoutStepKind, movement: str = ""
+) -> frozenset[WorkoutTarget]:
     if sport in {"indoor_climb", "bouldering"}:
         return frozenset({"routes", "time", "open"})
     if kind == "rest":
@@ -769,12 +816,53 @@ def _allowed_targets(sport: WorkoutSport, kind: WorkoutStepKind) -> frozenset[Wo
             return frozenset({"time", "distance", "load", "hr_recovery", "elevation_gain", "open"})
         return frozenset({"time", "distance", "load", "hr_recovery", "open"})
     if sport == "strength":
+        normalized_movement = re.sub(r"[^a-z0-9]+", "", movement.lower())
+        if kind == "training" and normalized_movement in _DISTANCE_STRENGTH_MOVEMENTS:
+            return frozenset({"reps", "time", "distance", "open"})
         return frozenset({"reps", "time", "open"})
     if sport == "hyrox":
         return frozenset({"time", "distance", "load", "reps", "open"})
     if sport in {"trail_run", "xc_ski"}:
         return frozenset({"time", "distance", "load", "elevation_gain", "open"})
     return frozenset({"time", "distance", "load", "open"})
+
+
+def _exercise_identity(exercise: ScheduleObject) -> str | None:
+    origin_id = exercise.get("originId")
+    if origin_id is not None and str(origin_id) not in {"", "0"}:
+        return f"origin:{origin_id}"
+    name = exercise.get("name")
+    return f"name:{name}" if isinstance(name, str) and name else None
+
+
+def _preserve_raw_exercise_identity(
+    program: ScheduleObject, previous: ScheduleObject
+) -> ScheduleObject:
+    raw_exercises = previous.get("exercises")
+    new_exercises = program.get("exercises")
+    if not isinstance(raw_exercises, list) or not isinstance(new_exercises, list):
+        return program
+    raw_by_identity: dict[str, list[ScheduleObject]] = {}
+    for exercise in raw_exercises:
+        if not isinstance(exercise, dict) or exercise.get("isGroup") is True:
+            continue
+        identity = _exercise_identity(cast(ScheduleObject, exercise))
+        if identity is not None:
+            raw_by_identity.setdefault(identity, []).append(cast(ScheduleObject, exercise))
+    for exercise in new_exercises:
+        if not isinstance(exercise, dict) or exercise.get("isGroup") is True:
+            continue
+        current = cast(ScheduleObject, exercise)
+        matches = raw_by_identity.get(_exercise_identity(current) or "")
+        if not matches:
+            continue
+        previous_exercise = matches.pop(0)
+        for field in _RAW_EXERCISE_IDENTITY_FIELDS:
+            if field in previous_exercise:
+                current[field] = previous_exercise[field]
+        if previous_exercise.get("targetType") == current.get("targetType"):
+            current["targetDisplayUnit"] = previous_exercise.get("targetDisplayUnit", 0)
+    return program
 
 
 def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
@@ -786,7 +874,9 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
     def build_exercise(
         step: CorosWorkoutStep, exercise_id: int, sort_no: int, group_id: str
     ) -> tuple[ScheduleObject, int, int]:
-        if step.target not in _allowed_targets(draft.sport, step.kind):
+        if step.target not in _allowed_targets(
+            draft.sport, step.kind, step.exercise_code or step.name
+        ):
             raise HTTPException(
                 status_code=422,
                 detail=f"{step.target} is not available for {draft.sport} {step.kind} steps.",
@@ -819,7 +909,7 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
             duration = target_value if step.target == "time" else 0
         hyrox_fields = _hyrox_exercise_fields(step) if draft.sport == "hyrox" else None
         expected_hyrox_target = _hyrox_target(step) if draft.sport == "hyrox" else None
-        if expected_hyrox_target is not None and step.target != expected_hyrox_target:
+        if expected_hyrox_target is not None and step.target not in {expected_hyrox_target, "open"}:
             raise HTTPException(
                 status_code=422,
                 detail=f"HYROX {step.name.strip()} must use a {expected_hyrox_target} target.",
@@ -831,11 +921,18 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
             origin_id,
             exercise_kind,
         ) = hyrox_fields or (
-            step.name.strip() or _friendly_step_name(step.kind),
+            step.exercise_code.strip()
+            if draft.sport == "strength" and step.kind == "training" and step.exercise_code
+            else step.name.strip() or _friendly_step_name(step.kind),
             0,
             "sid_strength_training" if draft.sport in {"strength", "hyrox"} else overview,
-            "0",
+            step.exercise_id.strip()
+            if draft.sport == "strength" and step.kind == "training" and step.exercise_id
+            else "0",
             0,
+        )
+        supports_set_rest = draft.sport == "strength" or (
+            hyrox_fields is not None and exercise_kind > 0
         )
         normalized_name = re.sub(r"[^a-z0-9]+", "", step.name.lower())
         hyrox_metadata = _HYROX_EXERCISE_METADATA.get(normalized_name, {}) if hyrox_fields else {}
@@ -880,14 +977,14 @@ def _build_coros_program(draft: CorosWorkoutDraft) -> ScheduleObject:
                 "sortNo": sort_no,
                 "restType": (
                     1
-                    if draft.sport == "strength"
+                    if supports_set_rest
                     and step.kind == "training"
                     and step.rest_seconds > 0
                     else 3
                 ),
                 "restValue": (
                     step.rest_seconds
-                    if draft.sport == "strength" and step.kind == "training"
+                    if supports_set_rest and step.kind == "training"
                     else 0
                 ),
                 "groupId": group_id,
@@ -1048,7 +1145,7 @@ async def _coros_client(db: AsyncSession) -> CorosApiClient:
     password = (creds[1] if creds else None) or settings.coros_password
     if not email or not password:
         raise HTTPException(status_code=400, detail="Configure COROS credentials in Settings.")
-    client = CorosApiClient(email=email, password=password)
+    client = CorosApiClient(email=email, password=password, redis=_coros_redis())
     try:
         await client.login()
     except CorosApiClientError as exc:
@@ -1210,6 +1307,8 @@ def _draft_from_program(
             divisor = 1000 if intensity == "weight" or intensity in {"pace", "effort_pace"} and multiplier == 1000 else 100 if intensity == "speed" else 1
             raw_low = intensity_percent if is_percent else intensity_value
             raw_high = intensity_percent_high if is_percent else intensity_high
+            if intensity == "weight" and raw_high == 0:
+                raw_high = raw_low
             if intensity == "grade":
                 offset = exercise.get("onsightGradeOffset")
                 raw_low = float(offset) - 32 if isinstance(offset, (int, float)) else 0
@@ -1221,12 +1320,32 @@ def _draft_from_program(
             group = groups.get(raw_group_id)
             exercise_sets = exercise.get("sets")
             group_sets = group.get("sets") if group else None
+            raw_name = exercise.get("name")
+            origin_id = exercise.get("originId")
+            exercise_code = (
+                raw_name.strip()
+                if sport == "strength"
+                and kind == "training"
+                and isinstance(raw_name, str)
+                and re.fullmatch(r"[TS]\d+", raw_name.strip(), re.IGNORECASE)
+                else None
+            )
+            exercise_id = (
+                str(origin_id)
+                if sport == "strength"
+                and kind == "training"
+                and origin_id is not None
+                and str(origin_id) != "0"
+                else None
+            )
             steps.append(
                 CorosWorkoutStep(
                     kind=kind,
                     target=target,
                     value=value,
                     name=_exercise_display_name(exercise, kind),
+                    exercise_code=exercise_code,
+                    exercise_id=exercise_id,
                     sets=(
                         exercise_sets
                         if kind == "training"
@@ -1237,7 +1356,7 @@ def _draft_from_program(
                     rest_seconds=(
                         int(exercise.get("restValue"))
                         if kind == "training"
-                        and sport == "strength"
+                        and sport in {"strength", "hyrox"}
                         and isinstance(exercise.get("restValue"), (int, float))
                         else 0
                     ),
@@ -1477,9 +1596,8 @@ def _calculate_program_summary(program: dict[str, object]) -> tuple[int, int, fl
             val = float(target_val * sets)
             if target_type == 2:  # time target in seconds
                 total_time += int(val)
-            elif target_type in {1, 5}:  # COROS distance target in meters
-                dist = val / 100.0 if val >= 100000 else val
-                total_distance += dist
+            elif target_type in {1, 5}:  # COROS distance target in centimeters
+                total_distance += val / 100.0
 
     return step_count, total_time, total_distance, step_kinds
 
@@ -1663,7 +1781,7 @@ async def edit_coros_workout(
                 },
             )
             return moved
-        program = _build_coros_program(request.draft)
+        program = _preserve_raw_exercise_identity(_build_coros_program(request.draft), previous)
         for key in ("id", "idInPlan", "authorId", "userId", "version", "createTimestamp"):
             if key in previous:
                 program[key] = previous[key]

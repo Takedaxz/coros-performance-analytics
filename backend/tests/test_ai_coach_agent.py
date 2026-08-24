@@ -47,6 +47,12 @@ def test_calendar_changes_use_coros_workouts_and_require_update_uid() -> None:
     assert "pool_length_m" in COACH_SYSTEM_PROMPT
     assert "prefer percentage-based threshold targets" in COACH_SYSTEM_PROMPT
     assert "Use exact bpm, pace, or time" in COACH_SYSTEM_PROMPT
+    assert 'intensity: "weight"' in COACH_SYSTEM_PROMPT
+    assert "RPE is not a weight" in COACH_SYSTEM_PROMPT
+    assert "most recent\n   recorded kilograms" in COACH_SYSTEM_PROMPT
+    assert "profile body weight as a reference" in COACH_SYSTEM_PROMPT
+    assert "A is the highest priority and E is the lowest" in COACH_SYSTEM_PROMPT
+    assert 'intensity: "none"' in COACH_SYSTEM_PROMPT
     loop = asyncio.new_event_loop()
     try:
         tools = {tool.name: tool for tool in coach_agent._tools("owner", loop)}
@@ -57,6 +63,7 @@ def test_calendar_changes_use_coros_workouts_and_require_update_uid() -> None:
     update_schema = tools["propose_update_calendar_workout"].args_schema.model_json_schema()
     assert "steps" in str(create_schema)
     assert update_schema["required"] == ["uid", "draft"]
+    assert "names" in tools["search_strength_exercises"].args_schema.model_json_schema()["properties"]
 
 
 def test_past_race_questions_require_the_past_race_goals_tool() -> None:

@@ -3716,7 +3716,7 @@ table.data-table .lap-split-table tr:hover td {
   display: flex;
   flex-direction: column;
   gap: 0;
-  height: min(1040px, calc(100dvh - 48px));
+  height: min(760px, calc(100dvh - 48px));
   max-height: none;
   max-width: 960px;
   overflow: hidden;
@@ -3724,9 +3724,6 @@ table.data-table .lap-split-table tr:hover td {
   width: 100%;
 }
 
-.plan-workout-editor.is-library {
-  height: min(760px, calc(100dvh - 48px));
-}
 
 .plan-workout-editor-header,
 .plan-workout-editor-footer,
@@ -4099,7 +4096,7 @@ table.data-table .lap-split-table tr:hover td {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  padding: 4px var(--space-6) var(--space-2) 0;
+  padding: 4px var(--space-6) var(--space-2) 3px;
 }
 
 .plan-workout-sport-field {
@@ -4166,6 +4163,12 @@ table.data-table .lap-split-table tr:hover td {
   min-height: 96px;
   padding: 10px 12px;
   resize: vertical;
+}
+
+.plan-workout-builder-description textarea:focus-visible {
+  border-color: var(--color-accent-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent-primary) 30%, transparent);
+  outline: none;
 }
 
 .plan-workout-builder-canvas {
@@ -4769,6 +4772,12 @@ table.data-table .lap-split-table tr:hover td {
 
 .plan-workout-step-fields label { min-width: 0; }
 
+.plan-workout-step-fields .plan-workout-rest-between-sets > span {
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
 .plan-workout-step-fields input { font-weight: var(--weight-bold); }
 
 .plan-workout-step-fields .number-stepper {
@@ -4785,6 +4794,7 @@ table.data-table .lap-split-table tr:hover td {
 .plan-workout-step-fields .single-select-trigger {
   border-radius: var(--radius-sm);
   font-size: 13px;
+  font-weight: var(--weight-semibold);
   justify-content: space-between;
   min-height: 40px;
   min-width: 0;
@@ -6484,7 +6494,9 @@ details[open] > .ai-session-group-summary {
   color: var(--color-text-primary);
   inset: 0;
   margin: auto;
+  max-height: calc(100vh - 64px);
   max-width: calc(100vw - 32px);
+  overflow: hidden;
   padding: 0;
   position: fixed;
   width: 420px;
@@ -6496,7 +6508,14 @@ details[open] > .ai-session-group-summary {
 }
 
 .ai-delete-dialog-content {
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
   padding: var(--space-6);
+  scrollbar-color: var(--color-surface-interactive) transparent;
+}
+
+.ai-delete-dialog-content::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .ai-delete-dialog-label {
@@ -8315,7 +8334,9 @@ details[open] > .ai-session-group-summary {
   box-shadow: var(--shadow-lg);
   color: var(--color-text-primary);
   margin: auto;
+  max-height: calc(100vh - 64px);
   max-width: calc(100vw - 32px);
+  overflow: hidden;
   padding: 0;
   width: 500px;
 }
@@ -8326,7 +8347,14 @@ details[open] > .ai-session-group-summary {
 }
 
 .calendar-change-dialog-content {
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
   padding: var(--space-6);
+  scrollbar-color: var(--color-surface-interactive) transparent;
+}
+
+.calendar-change-dialog-content::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .calendar-change-dialog-label {
@@ -10406,7 +10434,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .exercise-combobox-container {
   position: relative;
   width: 100%;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .exercise-combobox-trigger {
@@ -10416,51 +10444,45 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .exercise-combobox-button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  min-width: 140px;
-  padding: 8px 12px;
-  background: var(--color-surface, #ffffff);
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 8px;
-  color: var(--color-text-primary, #0f172a);
-  font-size: 13.5px;
-  font-weight: 500;
+  min-height: 42px;
+  min-width: 0;
+  padding: 4px 0 4px 6px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: var(--weight-semibold);
   text-align: left;
   cursor: pointer;
   box-sizing: border-box;
-  transition: border-color 150ms ease, box-shadow 150ms ease;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 
 .exercise-combobox-button:hover:not(:disabled) {
-  border-color: #00bf8f;
+  background: var(--color-surface-interactive);
+  border-color: var(--border-color-hover);
 }
 
 .exercise-combobox-button:focus-visible {
-  outline: 2px solid #00bf8f;
-  outline-offset: 1px;
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
 }
 
 .exercise-combobox-button:disabled {
-  opacity: 0.6;
   cursor: not-allowed;
 }
 
 .exercise-option-thumb-inline {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 32px;
+  height: 22px;
+  border-radius: 5px;
   object-fit: cover;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  background: var(--color-surface);
+  border: 1px solid var(--border-color);
   flex-shrink: 0;
-}
-
-.exercise-thumb-placeholder {
-  font-size: 16px;
-  flex-shrink: 0;
-  width: 28px;
-  text-align: center;
 }
 
 .exercise-selected-label {
@@ -10471,9 +10493,23 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .exercise-combobox-arrow {
-  font-size: 10px;
+  align-items: center;
+  align-self: stretch;
+  border-left: 1px solid var(--border-color);
   color: var(--color-text-muted, #64748b);
-  margin-left: 4px;
+  display: grid;
+  flex: 0 0 38px;
+  justify-content: center;
+}
+
+.exercise-combobox-arrow svg {
+  height: 16px;
+  transition: transform var(--transition-fast);
+  width: 16px;
+}
+
+.exercise-combobox-arrow svg.is-open {
+  transform: rotate(180deg);
 }
 
 .exercise-combobox-dropdown {
@@ -10483,10 +10519,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   min-width: 320px;
   width: max(100%, 320px);
   z-index: 1000;
-  background: var(--color-surface, #ffffff);
-  border: 1px solid var(--border-color, #cbd5e1);
-  border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), 0 4px 12px rgba(0, 0, 0, 0.08);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--border-color-hover);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.14);
   max-height: 340px;
   display: flex;
   flex-direction: column;
@@ -10498,27 +10534,32 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   position: relative;
   display: flex;
   align-items: center;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
-  background: var(--color-surface-secondary, #f8fafc);
-  gap: 6px;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--color-surface-secondary);
+  gap: var(--space-2);
 }
 
 .exercise-search-icon {
-  font-size: 13px;
-  color: #64748b;
+  color: var(--color-text-muted);
+  display: grid;
   flex-shrink: 0;
+}
+
+.exercise-search-icon svg {
+  height: 16px;
+  width: 16px;
 }
 
 .exercise-search-input {
   flex: 1;
   width: 100%;
-  padding: 7px 28px 7px 8px;
-  border: 1.5px solid var(--border-color, #cbd5e1);
-  border-radius: 6px;
-  font-size: 13px;
-  background: var(--color-surface, #ffffff);
-  color: var(--color-text-primary, #0f172a);
+  padding: 7px 30px 7px 4px;
+  border: 0;
+  border-radius: 0;
+  font-size: var(--text-sm);
+  background: transparent;
+  color: var(--color-text-primary);
   outline: none;
   box-sizing: border-box;
 }
@@ -10528,23 +10569,27 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .exercise-search-input:focus {
-  border-color: #00bf8f;
-  box-shadow: 0 0 0 3px rgba(0, 191, 143, 0.15);
+  box-shadow: none;
 }
 
 .exercise-search-clear {
   position: absolute;
-  right: 18px;
+  right: 10px;
   background: transparent;
   border: none;
-  color: #94a3b8;
-  font-size: 12px;
+  color: var(--color-text-muted);
+  display: grid;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 4px;
+}
+
+.exercise-search-clear svg {
+  height: 14px;
+  width: 14px;
 }
 
 .exercise-search-clear:hover {
-  color: #475569;
+  color: var(--color-text-primary);
 }
 
 .exercise-options-list {
@@ -10563,14 +10608,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .exercise-option-btn {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 8px 10px;
   background: transparent;
   border: none;
-  border-radius: 8px;
-  color: var(--color-text-primary, #0f172a);
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
   font-weight: 500;
   text-align: left;
   cursor: pointer;
@@ -10583,30 +10628,18 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .exercise-option-btn.is-selected {
-  background-color: rgba(0, 191, 143, 0.12);
-  color: #008f6b;
+  background-color: var(--color-surface-interactive);
+  color: var(--color-text-primary);
   font-weight: 600;
 }
 
 .exercise-option-thumb {
   width: 36px;
   height: 36px;
-  border-radius: 6px;
+  border-radius: 5px;
   object-fit: cover;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  flex-shrink: 0;
-}
-
-.exercise-option-thumb-fallback {
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  background: #f1f5f9;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
+  background: var(--color-surface-secondary);
+  border: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
@@ -10649,3 +10682,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   text-align: center;
 }
 
+@media (max-width: 380px) {
+  .exercise-combobox-dropdown {
+    min-width: 100%;
+    width: 100%;
+  }
+}
