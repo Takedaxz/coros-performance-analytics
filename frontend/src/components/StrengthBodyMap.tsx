@@ -6,14 +6,24 @@ type StrengthBodyMapProps = {
   exercises: Array<{ name_key: string; sets: number }>;
 };
 
-const AREA_BY_COROS_KEY: Record<string, BodyArea | "full"> = {
-  S4208: "full",
-  S4209: "shoulders",
-  S4210: "arms",
-  S4211: "chest",
-  S4212: "back",
-  S4213: "abs",
-  S4214: "legs",
+const AREAS_BY_COROS_KEY: Record<string, Array<BodyArea | "full">> = {
+  S4208: ["full"],
+  S4209: ["shoulders"],
+  S4210: ["arms"],
+  S4211: ["chest"],
+  S4212: ["back"],
+  S4213: ["abs"],
+  S4214: ["legs"],
+  T1061: ["legs", "abs"],
+  T1070: ["legs"],
+  T1226: ["legs"],
+  T1243: ["abs"],
+  T1287: ["legs", "back"],
+  T1393: ["back", "arms", "legs"],
+  T1394: ["legs", "shoulders", "arms"],
+  T1395: ["back", "arms", "legs"],
+  T1396: ["full"],
+  T1397: ["legs", "shoulders", "arms"],
 };
 
 const AREA_NAMES: Record<BodyArea, string> = {
@@ -102,11 +112,13 @@ export default function StrengthBodyMap({ exercises }: StrengthBodyMapProps) {
   const areas = Object.keys(loads) as BodyArea[];
 
   exercises.forEach((exercise) => {
-    const area = AREA_BY_COROS_KEY[exercise.name_key];
-    if (area === "full") {
+    const exerciseAreas = AREAS_BY_COROS_KEY[exercise.name_key] ?? [];
+    if (exerciseAreas.includes("full")) {
       areas.forEach((bodyArea) => { loads[bodyArea] += exercise.sets; });
-    } else if (area) {
-      loads[area] += exercise.sets;
+    } else {
+      exerciseAreas
+        .filter((area): area is BodyArea => area !== "full")
+        .forEach((area) => { loads[area] += exercise.sets; });
     }
   });
 

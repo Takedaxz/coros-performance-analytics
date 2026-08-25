@@ -226,6 +226,25 @@ async def test_activity_upsert_reads_and_flushes_once_for_a_batch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_activity_title_prioritizes_strength_over_hyrox() -> None:
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    db.flush = AsyncMock()
+    client = MagicMock()
+
+    await _upsert_activities(
+        db,
+        "user-id",
+        [{"startTime": 1_785_450_000, "sportType": 1200, "name": "HYROX Weak-Station Strength"}],
+        client,
+    )
+
+    assert db.add.call_args.args[0].sport == SportType.STRENGTH
+
+
+@pytest.mark.asyncio
 async def test_sync_updates_coros_heart_rate_profile() -> None:
     user = MagicMock(max_hr_bpm=None, resting_hr_bpm=None)
     db = MagicMock()

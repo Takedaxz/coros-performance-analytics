@@ -67,6 +67,7 @@ export function resolveSportKey(sport?: string, title?: string, subsport?: strin
 
   // Keyword / Subsport detections
   if (t.includes("treadmill") || t.includes("indoor run") || sub === "101") return "treadmill";
+  if (s === "strength" || t.includes("strength")) return "strength";
   if (t.includes("hyrox") || sub === "1200") return "hyrox";
   if (t.includes("hybrid")) return "hybrid";
   if (t.includes("yoga") || sub === "904" || sub === "905") return "yoga";

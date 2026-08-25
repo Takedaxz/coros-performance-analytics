@@ -4,7 +4,7 @@ import asyncio
 import datetime
 import json
 import logging
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Sequence
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -344,12 +344,42 @@ def _format_pace(speed_mps: float) -> str:
     return f"{m}:{s:02d}/km"
 
 
+def _postmortem_focus(sport: str) -> str:
+    focuses = {
+        "run": "Pacing, split consistency, and heart-rate response.",
+        "trail_run": "Effort, pacing, elevation, and heart-rate response.",
+        "ride": "Power, pacing, elevation, and heart-rate response.",
+        "swim": "Intervals, pace, stroke/cadence, and heart-rate response when available.",
+        "walk": "Pacing, duration, and heart-rate response.",
+        "hike": "Duration, elevation, effort, and heart-rate response.",
+        "strength": (
+            "Session structure, work-rest pattern, training load, and exercise modifications."
+        ),
+        "hyrox": "Station execution, work-rest pattern, training load, and heart-rate response.",
+        "multisport": "Each discipline's execution and the transitions between them.",
+        "other": "Session structure, effort, training load, and available telemetry.",
+    }
+    return focuses.get(sport, focuses["other"])
+
+
+def _postmortem_sport(activity: Activity) -> str:
+    title = (activity.title or "").casefold()
+    if "strength" in title:
+        return "strength"
+    if "hyrox" in title:
+        return "hyrox"
+    return str(activity.sport)
+
+
 async def _build_laps_with_km_breakdown(
-    db: AsyncSession, activity_id: str, laps: list[ActivityLap]
+    db: AsyncSession, activity: Activity, laps: Sequence[ActivityLap]
 ) -> list[str]:
+    if _postmortem_sport(activity) not in {"run", "trail_run", "ride", "walk", "hike"}:
+        return []
+
     records_res = await db.execute(
         select(ActivityRecord)
-        .where(ActivityRecord.activity_id == activity_id)
+        .where(ActivityRecord.activity_id == activity.id)
         .order_by(ActivityRecord.timestamp.asc())
     )
     records = records_res.scalars().all()
@@ -459,6 +489,7 @@ def _build_activity_summary_string(activity: Activity, lap_lines: list[str]) -> 
     summary_parts = [
         f"Title: {activity.title}",
         f"Sport: {activity.sport.value if activity.sport else '--'}",
+        f"Analysis Focus: {_postmortem_focus(_postmortem_sport(activity))}",
         f"Date: {activity.start_time}",
         f"Distance: {activity.distance_m / 1000 if activity.distance_m else 0:.2f} km",
         f"Duration: {activity.elapsed_time_s / 60 if activity.elapsed_time_s else 0:.1f} mins",
@@ -517,7 +548,7 @@ async def activity_postmortem(
 
     # 2. Build context
     context = await build_training_context(db, user_id=get_owner_id(), days=7)
-    lap_lines = await _build_laps_with_km_breakdown(db, activity_id, laps)
+    lap_lines = await _build_laps_with_km_breakdown(db, activity, laps)
     activity_str = _build_activity_summary_string(activity, lap_lines)
 
     # 3. Generate postmortem
@@ -556,7 +587,7 @@ async def activity_postmortem_stream(
     laps = laps_res.scalars().all()
 
     context = await build_training_context(db, user_id=get_owner_id(), days=7)
-    lap_lines = await _build_laps_with_km_breakdown(db, activity_id, laps)
+    lap_lines = await _build_laps_with_km_breakdown(db, activity, laps)
     activity_str = _build_activity_summary_string(activity, lap_lines)
 
     async def event_generator() -> AsyncIterator[str]:

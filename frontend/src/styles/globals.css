@@ -9055,6 +9055,34 @@ details[open] > .ai-session-group-summary {
   }
 }
 
+.thinking-text-shimmer {
+  display: inline-block;
+  background: linear-gradient(
+    90deg,
+    var(--color-text-muted) 0%,
+    var(--color-accent-primary) 50%,
+    var(--color-text-muted) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: thinking-text-shimmer 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+
+@keyframes thinking-text-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+
 .ai-thinking .avatar-sq.ai {
   animation: ai-thinking-avatar 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }

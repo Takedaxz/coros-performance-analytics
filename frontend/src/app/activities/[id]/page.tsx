@@ -1055,7 +1055,10 @@ export default function ActivityDetailPage() {
     );
   };
 
-  const strength = activity.sport === "strength" ? activity.strength_detail : undefined;
+  const activityTitle = activity.title?.toLocaleLowerCase() ?? "";
+  const isStrength = activity.sport === "strength" || activityTitle.includes("strength");
+  const isHyrox = !isStrength && (activity.subsport === "1200" || activityTitle.includes("hyrox"));
+  const strength = isStrength ? activity.strength_detail : undefined;
   const isSwim = activity.sport === "swim";
   const triathlonLegs = ["swim", "ride", "run"]
     .map((sport) => ({
@@ -1108,7 +1111,6 @@ export default function ActivityDetailPage() {
     return { ...leg, distance, duration, avgHr, avgPower, avgCadence, transition };
   });
   const isTriathlon = activity.sport === "multisport" && triathlonLegDetails.length > 1;
-  const isHyrox = activity.subsport === "1200";
   const hasStructuredLapPhases = (
     isRun &&
     !isHyrox &&
@@ -1741,7 +1743,7 @@ export default function ActivityDetailPage() {
             </div>
           )}
 
-          {activity.sport !== "strength" && !isTriathlon && activity.laps.length > 0 && (
+          {!isStrength && !isTriathlon && activity.laps.length > 0 && (
             <div className="card breakdown-card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
               <BreakdownHeader
                 title={isHyrox ? "Station Breakdown" : "Split Breakdown"}
@@ -1998,7 +2000,7 @@ export default function ActivityDetailPage() {
                   <span className="card-title">AI Performance Coach Analysis</span>
                   {!postmortem && (
                     <span className="ai-analysis-meta">
-                      Workout execution, pacing, load & recovery
+                      Workout execution, load & recovery
                     </span>
                   )}
                 </div>
@@ -2018,7 +2020,7 @@ export default function ActivityDetailPage() {
               <div className="msg-row ai-row ai-analysis-thinking">
                 <div className="avatar-sq ai" aria-label="AI Coach is analyzing"><AiGlyph /></div>
                 <div className="ai-text">
-                  <WaveThinkingText text="evaluating splits & physiological recovery" />
+                  <WaveThinkingText text="evaluating session data & recovery" />
                 </div>
               </div>
             )}

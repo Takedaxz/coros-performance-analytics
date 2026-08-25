@@ -1077,6 +1077,10 @@ async def _upsert_activities(
         else:
             sport_enum = SportType.OTHER
 
+        activity_name = str(item.get("name") or item.get("remark") or "")
+        if "strength" in activity_name.casefold():
+            sport_enum = SportType.STRENGTH
+
         activity = existing_by_start.get(start_dt)
 
         source_hash = hashlib.sha256(f"api:{start_dt.isoformat()}:{raw_sport}".encode()).hexdigest()
@@ -1095,7 +1099,7 @@ async def _upsert_activities(
                 user_id=user_id,
                 sport=sport_enum,
                 subsport=str(raw_sport),
-                title=item.get("name") or item.get("remark", "Activity"),
+                title=activity_name or "Activity",
                 start_time=start_dt,
                 distance_m=dist,
                 elapsed_time_s=elapsed,
