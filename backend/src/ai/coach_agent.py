@@ -131,6 +131,7 @@ def _append_tool_results(
                 record: ToolCallRecord = {"name": name, "arguments": arguments}
                 tool_calls.append(record)
                 result = tool.invoke(arguments)
+                record["result"] = result
                 knowledge = result.get("knowledge") if name == "search_coaching_knowledge" else None
                 if isinstance(knowledge, list) and all(isinstance(excerpt, str) for excerpt in knowledge):
                     record["display_result"] = {"knowledge": knowledge}
@@ -152,6 +153,7 @@ def _append_tool_results(
             except Exception:
                 logger.exception("AI Coach tool failed", extra={"tool_name": name})
                 result = {"error": "Tool failed."}
+                record["result"] = result
                 status = "error"
         messages.append(
             ToolMessage(

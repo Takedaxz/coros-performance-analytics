@@ -10,8 +10,11 @@ import src.ai as ai_pkg
 from src.ai import coach_agent
 from src.ai.coach_tools import MAX_TOOL_CALLS
 from src.api.routes.ai_routes import (
+    ChatMessage,
+    ChatToolCall,
     _display_tool_calls,
     _format_question_with_search_flags,
+    _history_for_model,
     _unique_tool_calls,
 )
 
@@ -25,6 +28,25 @@ def test_tool_call_limit_is_shared_between_agent_and_tools() -> None:
 def test_unique_tool_calls_handles_dict_records() -> None:
     call = {"name": "get_training_plan", "arguments": {"start_date": "2026-08-16"}}
     assert _unique_tool_calls([call, call]) == [call]
+
+
+def test_history_keeps_results_for_three_recent_tool_messages_only() -> None:
+    history = [
+        ChatMessage(
+            role="assistant",
+            content=f"Message {index}",
+            tool_calls=[ChatToolCall(name="get_training_plan", arguments={"day": index}, result={"payload": index})],
+        )
+        for index in range(7)
+    ]
+
+    formatted = _history_for_model(history)
+
+    assert "[Tool usage]" not in formatted[0]["content"]
+    assert '"arguments":{"day":1}' in formatted[1]["content"]
+    assert '"result"' not in formatted[1]["content"]
+    assert '"result":{"payload":4}' in formatted[4]["content"]
+    assert '"result":{"payload":6}' in formatted[6]["content"]
 
 
 def test_coaching_knowledge_mode_requires_the_library_tool() -> None:
@@ -139,6 +161,28 @@ def test_ask_coach_returns_a_safe_error_when_the_langchain_loop_raises(monkeypat
 
     assert answer == "Error communicating with AI."
     assert calls == ["get_activities"]
+
+
+def test_ask_coach_explains_unsupported_image_error(monkeypatch) -> None:
+    def failing_tools(*_args, **_kwargs):
+        raise RuntimeError("This model does not support image")
+
+    monkeypatch.setattr(ai_pkg, "ask_coach_with_tools", failing_tools)
+    monkeypatch.setattr(ai_pkg, "resolve_model", lambda _m: ("openai_compat", "model-a"))
+
+    answer = ai_pkg.ask_coach(
+        "What is this?",
+        "Snapshot",
+        images=["data:image/png;base64,abc"],
+        user_id="owner",
+        tool_calls=[],
+        event_loop=asyncio.new_event_loop(),
+    )
+
+    assert answer == (
+        "The selected AI model does not support image attachments. "
+        "Choose a vision-capable model or remove the image."
+    )
 
 
 def test_tool_loop_raises_instead_of_returning_an_error_string(monkeypatch) -> None:

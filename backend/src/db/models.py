@@ -108,7 +108,6 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, server_default=text("now()"), onupdate=datetime.utcnow
     )
-
     devices: Mapped[list["Device"]] = relationship(back_populates="user")
     activities: Mapped[list["Activity"]] = relationship(back_populates="user")
     goals: Mapped[list["Goal"]] = relationship(back_populates="user", cascade="all, delete-orphan")

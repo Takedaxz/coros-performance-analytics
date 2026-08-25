@@ -627,6 +627,29 @@ def test_library_editor_uses_friendly_names_for_coros_template_codes() -> None:
     assert [step.name for step in draft.steps] == ["Warm Up", "Rest"]
 
 
+def test_strength_editor_does_not_turn_sets_into_step_repeats() -> None:
+    draft = _draft_from_program(
+        "library:1",
+        "20260811",
+        {
+            "name": "Upper Day",
+            "sportType": 4,
+            "exercises": [
+                {
+                    "exerciseType": 2,
+                    "targetType": 3,
+                    "targetValue": 7,
+                    "name": "T1042",
+                    "sets": 3,
+                }
+            ],
+        },
+    )
+
+    assert draft.steps[0].sets == 3
+    assert draft.steps[0].repeats == 1
+
+
 def test_library_editor_uses_coros_exercise_labels_for_hyrox_steps() -> None:
     draft = _draft_from_program(
         "library:1",

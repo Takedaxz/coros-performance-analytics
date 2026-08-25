@@ -30,6 +30,7 @@ from src.db.models import (
     SleepSession,
     SportType,
 )
+from src.sync.api_client import CorosApiClientError
 
 _TREND_DAYS = frozenset({7, 14, 28, 56})
 _FITNESS_DAYS = frozenset({28, 56, 90, 180})
@@ -54,6 +55,7 @@ class ToolCallRecord(TypedDict):
     arguments: dict[str, Any]
     display_arguments: NotRequired[dict[str, Any]]
     display_result: NotRequired[dict[str, Any]]
+    result: NotRequired[dict[str, Any]]
 
 
 def coach_tool_functions(
@@ -487,22 +489,48 @@ async def _health_trend(db: Any, user_id: str, days: int) -> dict[str, Any]:
 
 
 async def _scheduled_workout_details(db: Any, date: dt.date) -> dict[str, Any]:
-    from src.api.routes.training_plan_routes import fetch_coros_calendar
+    from src.api.routes.training_plan_routes import (
+        _coros_client,
+        _exercise_name_map,
+        fetch_coros_calendar,
+    )
 
     workouts = await fetch_coros_calendar(date, date, db)
+    exercise_codes = {
+        code
+        for workout in workouts
+        for step in workout.workout_steps
+        for code in (step.exercise_code, step.exercise_id)
+        if code
+    }
+    exercise_names: dict[str, str] = {}
+    if exercise_codes:
+        try:
+            catalog = await (await _coros_client(db)).get_training_hub(
+                "/training/exercise/query", {"sportType": 4, "keyword": ""}
+            )
+            exercise_names = _exercise_name_map(catalog)
+        except (CorosApiClientError, HTTPException):
+            exercise_names = {}
+    workout_payloads: list[dict[str, object]] = []
+    for workout in workouts:
+        steps: list[dict[str, object]] = []
+        for step in workout.workout_steps:
+            payload = step.model_dump(exclude_none=True)
+            lookup_key = step.exercise_code or step.exercise_id or ""
+            payload["name"] = exercise_names.get(lookup_key, payload["name"])
+            steps.append(payload)
+        workout_payloads.append({
+            "id": workout.uid,
+            "title": workout.summary,
+            "sport": workout.event_type,
+            "description": workout.description or None,
+            "steps": steps,
+        })
     return {
         "source": "coros",
         "date": date.isoformat(),
-        "workouts": [
-            {
-                "id": workout.uid,
-                "title": workout.summary,
-                "sport": workout.event_type,
-                "description": workout.description or None,
-                "steps": [step.model_dump(exclude_none=True) for step in workout.workout_steps],
-            }
-            for workout in workouts
-        ],
+        "workouts": workout_payloads,
     }
 
 

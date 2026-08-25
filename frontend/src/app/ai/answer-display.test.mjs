@@ -39,3 +39,11 @@ test("moves streamed pre-tool text into active thinking without delaying it", ()
     },
   );
 });
+
+test("marks an empty think marker as active immediately", () => {
+  assert.deepEqual(parseThinkingAndAnswer("<think>"), {
+    thinking: null,
+    answer: "",
+    isThinkingActive: true,
+  });
+});

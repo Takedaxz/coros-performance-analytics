@@ -451,6 +451,51 @@ async def test_scheduled_workout_details_returns_coros_steps(
 
 
 @pytest.mark.asyncio
+async def test_scheduled_workout_details_resolves_exercise_codes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fetch_calendar(
+        _start_date: dt.date, _end_date: dt.date, _db: object
+    ) -> list[TrainingEvent]:
+        return [
+            TrainingEvent(
+                uid="coros:1:2:20260818",
+                summary="Upper Day",
+                start="2026-08-18",
+                end="2026-08-18",
+                description="",
+                location="",
+                event_type="strength",
+                is_all_day=True,
+                workout_steps=[
+                    CorosWorkoutStep(
+                        kind="training",
+                        target="reps",
+                        value=7,
+                        name="Training",
+                        exercise_code="T1042",
+                        exercise_id="123",
+                    )
+                ],
+            )
+        ]
+
+    class CatalogClient:
+        async def get_training_hub(self, _path: str, _params: dict[str, str]) -> object:
+            return {"data": [{"id": "123", "name": "T1042", "displayName": "Incline Bench Press"}]}
+
+    async def coros_client(_db: object) -> CatalogClient:
+        return CatalogClient()
+
+    monkeypatch.setattr(training_plan_routes, "fetch_coros_calendar", fetch_calendar)
+    monkeypatch.setattr(training_plan_routes, "_coros_client", coros_client)
+
+    result = await _scheduled_workout_details(object(), dt.date(2026, 8, 18))
+
+    assert result["workouts"][0]["steps"][0]["name"] == "Incline Bench Press"
+
+
+@pytest.mark.asyncio
 async def test_compare_activities_tool_returns_deep_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

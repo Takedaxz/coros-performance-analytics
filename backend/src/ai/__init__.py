@@ -21,6 +21,17 @@ _GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite"
 _GEMINI_RATE_LIMIT_TERMS = ("429", "quota", "exhausted", "resource exhausted")
 
 
+def _user_facing_error(error: Exception) -> str:
+    """Map known provider failures to actionable messages without leaking internals."""
+    message = str(error).lower()
+    if "does not support image" in message or "image input is not supported" in message:
+        return (
+            "The selected AI model does not support image attachments. "
+            "Choose a vision-capable model or remove the image."
+        )
+    return "Error communicating with AI."
+
+
 def _can_fallback_to_gemini_flash_lite(
     provider: str, model: str, error: Exception, tool_calls: list[ToolCallRecord]
 ) -> bool:
@@ -198,7 +209,7 @@ def ask_coach(
             except Exception:
                 logger.exception("Gemini Coach fallback failed")
         logger.exception("AI Coach request failed", extra={"provider": provider})
-        return "Error communicating with AI."
+        return _user_facing_error(error)
 
 
 def ask_coach_stream(
@@ -245,7 +256,7 @@ def ask_coach_stream(
             except Exception:
                 logger.exception("Gemini Coach streaming fallback failed")
         logger.exception("AI Coach stream failed", extra={"provider": provider})
-        yield "Error communicating with AI."
+        yield _user_facing_error(error)
 
 
 def generate_briefing(context: str, model: str | None = None) -> str:

@@ -55,6 +55,7 @@ type WebSource = {
 type ToolCall = {
   name: string;
   arguments: Record<string, unknown>;
+  result?: Record<string, unknown>;
   display_arguments?: Record<string, unknown>;
   display_result?: {
     knowledge?: string[];
@@ -72,6 +73,11 @@ type CalendarChangeAction = {
 type CalendarChangeResult = {
   text: string;
   success: boolean;
+};
+
+type CalendarChangeToast = {
+  text: string;
+  status: "pending" | "success" | "error";
 };
 
 type CalendarChangeReview = {
@@ -1129,7 +1135,7 @@ export default function AiPage() {
   const [calendarChangeResults, setCalendarChangeResults] = useState<Record<string, CalendarChangeResult>>({});
   const [calendarChangePending, setCalendarChangePending] = useState<string | null>(null);
   const [calendarChangeReview, setCalendarChangeReview] = useState<CalendarChangeReview | null>(null);
-  const [calendarChangeToast, setCalendarChangeToast] = useState<string | null>(null);
+  const [calendarChangeToast, setCalendarChangeToast] = useState<CalendarChangeToast | null>(null);
   const inFlightStreamsRef = useRef<Map<string, Message[]>>(new Map());
   const [streamingSessionIds, setStreamingSessionIds] = useState<Set<string>>(new Set());
   const routeSessionIdRef = useRef<string | null>(routeSessionId);
@@ -1159,6 +1165,8 @@ export default function AiPage() {
         : { confirmed: true };
 
     setCalendarChangePending(key);
+    setCalendarChangeReview(null);
+    setCalendarChangeToast({ text: "Updating COROS calendar…", status: "pending" });
     try {
       const response = await fetch(`${API_BASE}${path}`, {
         method,
@@ -1171,25 +1179,27 @@ export default function AiPage() {
         ...current,
         [key]: { success: true, text: "Updated COROS calendar" },
       }));
-      setCalendarChangeToast(
-        change.action === "create" ? "Workout added to COROS calendar." : "COROS calendar updated."
-      );
-      setCalendarChangeReview(null);
+      setCalendarChangeToast({
+        text: change.action === "create" ? "Workout added to COROS calendar." : "COROS calendar updated.",
+        status: "success",
+      });
     } catch (cause) {
+      const text = cause instanceof Error ? cause.message : "Could not update COROS calendar.";
       setCalendarChangeResults((current) => ({
         ...current,
         [key]: {
           success: false,
-          text: cause instanceof Error ? cause.message : "Could not update COROS calendar.",
+          text,
         },
       }));
+      setCalendarChangeToast({ text, status: "error" });
     } finally {
       setCalendarChangePending(null);
     }
   }
 
   useEffect(() => {
-    if (!calendarChangeToast) return;
+    if (!calendarChangeToast || calendarChangeToast.status === "pending") return;
     const timeout = window.setTimeout(() => setCalendarChangeToast(null), 4000);
     return () => window.clearTimeout(timeout);
   }, [calendarChangeToast]);
@@ -1699,6 +1709,28 @@ export default function AiPage() {
     setPendingImages([]);
 
     let streamText = "";
+    const historyWindow = baseHistory.slice(-12);
+    const toolMessageIndices = historyWindow
+      .map((message, index) => ({ index, hasTools: message.role === "ai" && message.tools?.some((tool) => typeof tool !== "string") }))
+      .filter((item) => item.hasTools)
+      .map((item) => item.index);
+    const recentToolIndices = new Set(toolMessageIndices.slice(-3));
+    const olderToolIndices = new Set(toolMessageIndices.slice(-6, -3));
+    const historyForRequest = historyWindow.map((message, index) => {
+      const includeTools = recentToolIndices.has(index) || olderToolIndices.has(index);
+      const tools = includeTools
+        ? message.tools?.filter((tool): tool is ToolCall => typeof tool !== "string").map((tool) => ({
+            name: tool.name,
+            arguments: tool.arguments,
+            ...(recentToolIndices.has(index) && tool.result ? { result: tool.result } : {}),
+          }))
+        : undefined;
+      return {
+        role: message.role === "ai" ? "assistant" : "user",
+        content: message.content,
+        ...(tools?.length ? { tool_calls: tools } : {}),
+      };
+    });
 
     try {
       const res = await fetch(`${API_BASE}/api/ai/sessions/${sid}/ask/stream`, {
@@ -1711,10 +1743,7 @@ export default function AiPage() {
           force_web_search: searchMode === "web" || searchMode === "deep",
           is_deep_research: searchMode === "deep",
           force_coaching_knowledge: coachingKnowledgeEnabled,
-          history: baseHistory.slice(-12).map((m) => ({
-            role: m.role === "ai" ? "assistant" : "user",
-            content: m.content,
-          })),
+          history: historyForRequest,
           user_message_id: userMessageId,
           assistant_message_id: assistantMessageId,
         }),
@@ -2464,9 +2493,9 @@ export default function AiPage() {
   return (
     <div className="ai-link-layout print-block">
       {calendarChangeToast && (
-        <div className="plan-calendar-move-toast is-success" role="status" aria-live="polite">
+        <div className={`plan-calendar-move-toast is-${calendarChangeToast.status}`} role="status" aria-live="polite">
           <span />
-          {calendarChangeToast}
+          {calendarChangeToast.text}
         </div>
       )}
       <input
@@ -2668,6 +2697,7 @@ export default function AiPage() {
                           );
                         }
                         const { thinking, answer, isThinkingActive: hasOpenThinking } = parseThinkingAndAnswer(msg.content);
+                        const hasThinkingMarker = msg.content.includes("<think>") || msg.content.includes("<tool-thought>");
                         const isCurrentSessionStreaming =
                           (routeSessionId ? streamingSessionIds.has(routeSessionId) : false) ||
                           (isLoading && idx === messages.length - 1);
@@ -2677,8 +2707,8 @@ export default function AiPage() {
                         return (
                           <div key={msg.id} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
                             <div className="ai-text">
-                              {thinking && (
-                                <ThinkingAccordion thinking={thinking} isThinkingActive={hasOpenThinking || isAwaitingAnswer} />
+                              {(thinking || hasThinkingMarker) && (
+                                <ThinkingAccordion thinking={thinking ?? ""} isThinkingActive={hasOpenThinking || isAwaitingAnswer} />
                               )}
                               {msg.content === "" && isCurrentSessionStreaming ? (
                                 <WaveThinkingText text="thinking" />

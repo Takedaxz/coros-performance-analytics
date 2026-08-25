@@ -5,11 +5,12 @@ import datetime
 import json
 import logging
 from collections.abc import AsyncIterator, Iterator, Sequence
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -163,6 +164,34 @@ async def _display_tool_calls(
 class ChatMessage(BaseModel):
     role: str
     content: str
+    tool_calls: list["ChatToolCall"] = Field(default_factory=list)
+
+
+class ChatToolCall(BaseModel):
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] | None = None
+
+
+def _history_for_model(history: list[ChatMessage]) -> list[dict[str, str]]:
+    tool_message_indices = [
+        index for index, message in enumerate(history) if message.role == "assistant" and message.tool_calls
+    ]
+    recent_indices = set(tool_message_indices[-3:])
+    older_indices = set(tool_message_indices[-6:-3])
+    model_history: list[dict[str, str]] = []
+    for index, message in enumerate(history[-12:], start=max(0, len(history) - 12)):
+        content = message.content
+        if index in recent_indices or index in older_indices:
+            usage = []
+            for tool in message.tool_calls:
+                item: dict[str, Any] = {"name": tool.name, "arguments": tool.arguments}
+                if index in recent_indices and tool.result is not None:
+                    item["result"] = tool.result
+                usage.append(item)
+            content = f"{content}\n\n[Tool usage]\n{json.dumps(usage, separators=(',', ':'), default=str)}"
+        model_history.append({"role": message.role, "content": content})
+    return model_history
 
 
 class AskRequest(BaseModel):
@@ -204,7 +233,7 @@ async def ask_ai(
         include_activity_details=False,
     )
     # 2. Ask AI coach
-    history_dicts = [{"role": msg.role, "content": msg.content} for msg in req.history]
+    history_dicts = _history_for_model(req.history)
     tool_calls: list[ToolCallRecord] = []
     question_text = _format_question_with_search_flags(
         req.question, req.force_web_search, req.is_deep_research, req.force_coaching_knowledge
@@ -250,9 +279,7 @@ async def ask_ai_stream(
         include_activity_details=False,
     )
     # 2. Stream AI coach response
-    history_dicts: list[dict[str, str]] = [
-        {"role": msg.role, "content": msg.content} for msg in req.history
-    ]
+    history_dicts = _history_for_model(req.history)
 
     async def event_generator() -> AsyncIterator[str]:
         """Bridge the blocking SDK iterator into an async generator via a queue."""
@@ -1069,9 +1096,14 @@ async def session_ask_stream(
         .scalars()
         .all()
     )
-    history_dicts = [
-        {"role": message.role, "content": message.content} for message in history_rows[-12:]
-    ]
+    history_dicts = _history_for_model([
+        ChatMessage(
+            role=message.role,
+            content=message.content,
+            tool_calls=message.tool_calls or [],
+        )
+        for message in history_rows
+    ])
 
     # Persist user message
     user_msg = DBChatMessage(

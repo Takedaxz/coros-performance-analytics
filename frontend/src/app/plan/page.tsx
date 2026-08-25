@@ -92,8 +92,8 @@ function WorkoutIcon({ name, size = 16 }: { name: keyof typeof WORKOUT_ICON_PATH
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={WORKOUT_ICON_PATHS[name]} /></svg>;
 }
 
-function WorkoutDragHandle() {
-  return <span className="plan-workout-drag-handle" aria-hidden="true"><svg width="14" height="22" viewBox="0 0 14 22" fill="currentColor"><circle cx="4" cy="4" r="2" /><circle cx="10" cy="4" r="2" /><circle cx="4" cy="11" r="2" /><circle cx="10" cy="11" r="2" /><circle cx="4" cy="18" r="2" /><circle cx="10" cy="18" r="2" /></svg></span>;
+function WorkoutDragHandle({ onDragStart, onDragEnd }: { onDragStart: (event: DragEvent<HTMLSpanElement>) => void; onDragEnd: () => void }) {
+  return <span className="plan-workout-drag-handle" aria-hidden="true" draggable onDragStart={onDragStart} onDragEnd={onDragEnd}><svg width="14" height="22" viewBox="0 0 14 22" fill="currentColor"><circle cx="4" cy="4" r="2" /><circle cx="10" cy="4" r="2" /><circle cx="4" cy="11" r="2" /><circle cx="10" cy="11" r="2" /><circle cx="4" cy="18" r="2" /><circle cx="10" cy="18" r="2" /></svg></span>;
 }
 
 const SPORT_OPTIONS: Array<{ value: WorkoutSport; label: string }> = [
@@ -242,13 +242,21 @@ function structureValue(step: WorkoutStepForm): string {
 
 function intensityValue(step: WorkoutStepForm): string {
   const label = INTENSITY_OPTIONS.find((item) => item.value === step.intensity)?.label ?? "Open intensity";
-  if (step.intensity === "none" || !step.intensity_low) return label;
+  if (step.intensity === "none" || step.intensity_low === null || step.intensity_low === undefined) return label;
   if (step.intensity === "stroke") return STROKE_OPTIONS.find((item) => item.value === String(step.intensity_low))?.label ?? label;
   const isSingleValue = step.intensity_high === null || step.intensity_high === step.intensity_low;
   if (step.intensity === "pace" || step.intensity === "effort_pace") return `${label} ${formatDuration(step.intensity_low)}${isSingleValue ? "" : `\u2013${formatDuration(step.intensity_high!)}`} /km`;
   const value = isSingleValue ? step.intensity_low : `${step.intensity_low}\u2013${step.intensity_high}`;
   const unit = step.intensity === "heart_rate" ? " bpm" : step.intensity.endsWith("percent") ? "%" : step.intensity === "power" ? " W" : step.intensity === "cadence" ? " rpm" : step.intensity === "weight" ? " kg" : step.intensity === "speed" ? " km/h" : "";
   return `${label} ${value}${unit}`;
+}
+
+function stepSummary(step: WorkoutStepForm): string {
+  const summary = [step.target === "open" ? targetLabel(step.target) : `${targetLabel(step.target)} · ${structureValue(step)}`];
+  if (step.intensity !== "none" && step.intensity_low !== null && step.intensity_low !== undefined) summary.push(intensityValue(step));
+  if (step.kind === "training" && step.sets > 1) summary.push(`${step.sets} sets`);
+  if (step.kind === "training" && step.rest_seconds > 0) summary.push(`${formatDuration(step.rest_seconds)} rest`);
+  return summary.join(" · ");
 }
 
 function formatEventNote(event: TrainingEvent): string {
@@ -757,6 +765,11 @@ export default function TrainingPlanPage() {
     event.stopPropagation();
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", `${item.scope}:${item.index}`);
+    const card = event.currentTarget.closest(".plan-workout-step, .plan-workout-repeat");
+    if (card) {
+      const bounds = card.getBoundingClientRect();
+      event.dataTransfer.setDragImage(card, event.clientX - bounds.left, event.clientY - bounds.top);
+    }
     setDraggedWorkoutItem(item);
   };
   const allowWorkoutDrop = (event: DragEvent<HTMLElement>, item: WorkoutDragItem) => {
@@ -808,12 +821,14 @@ export default function TrainingPlanPage() {
     const isDragging = draggedWorkoutItem?.scope === dragItem.scope && draggedWorkoutItem.index === index;
     const isDropTarget = dropTargetWorkoutItem?.scope === dragItem.scope && dropTargetWorkoutItem.index === index;
     const isStrengthMovement = workoutDraft.sport === "strength" && step.kind === "training";
+    const hasCustomStepTitle = workoutDraft.sport !== "strength" && workoutDraft.sport !== "hyrox";
     const supportsSetRest = step.kind === "training" && (workoutDraft.sport === "strength" || workoutDraft.sport === "hyrox" && isHyroxFunctionalStation(step.name));
-    return <article className={`plan-workout-step${isActive ? " is-active" : " is-collapsed"}${isDragging ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`} data-step-kind={step.kind} key={`${index}-${step.name}`} draggable onDragStart={(event) => beginWorkoutDrag(event, dragItem)} onDragEnd={endWorkoutDrag} onDragOver={(event) => allowWorkoutDrop(event, dragItem)} onDrop={(event) => finishWorkoutDrop(event, dragItem)}>
-      <header className="plan-workout-step-title"><WorkoutDragHandle /><span className="plan-workout-step-index">{String(index + 1).padStart(2, "0")}</span><button className="plan-workout-step-toggle" type="button" aria-expanded={isActive} onClick={() => setActiveWorkoutStep(isActive ? null : index)}><small>Step {index + 1}</small><strong>{displayStepName(step)}</strong><em>{targetLabel(step.target)}{step.target !== "open" ? ` · ${structureValue(step)}` : ""}</em></button><div className="plan-workout-step-header-actions">{video && <button type="button" aria-label={`${isVideoOpen ? "Hide" : "Show"} ${displayStepName(step)} technique video`} title={`${isVideoOpen ? "Hide" : "Show"} technique video`} aria-pressed={isVideoOpen} onClick={() => setActiveExerciseVideoStep(isVideoOpen ? null : index)}><WorkoutIcon name="video" size={15} /></button>}<button type="button" aria-label="Duplicate step" title="Duplicate step" onClick={() => duplicateStep(index)}><WorkoutIcon name="copy" size={15} /></button><button type="button" aria-label="Delete step" title="Delete step" disabled={workoutDraft.steps.length === 1} onClick={() => setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.filter((_, position) => position !== index) })}><WorkoutIcon name="trash" size={15} /></button></div></header>
+    return <article className={`plan-workout-step${isActive ? " is-active" : " is-collapsed"}${isDragging ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`} data-step-kind={step.kind} key={`${index}-${step.name}`} onDragOver={(event) => allowWorkoutDrop(event, dragItem)} onDrop={(event) => finishWorkoutDrop(event, dragItem)}>
+      <header className="plan-workout-step-title"><WorkoutDragHandle onDragStart={(event) => beginWorkoutDrag(event, dragItem)} onDragEnd={endWorkoutDrag} /><span className="plan-workout-step-index">{String(index + 1).padStart(2, "0")}</span><button className="plan-workout-step-toggle" type="button" aria-expanded={isActive} onClick={() => setActiveWorkoutStep(isActive ? null : index)}><small>Step {index + 1}</small><strong>{displayStepName(step)}</strong><em>{stepSummary(step)}</em></button><div className="plan-workout-step-header-actions">{video && <button type="button" aria-label={`${isVideoOpen ? "Hide" : "Show"} ${displayStepName(step)} technique video`} title={`${isVideoOpen ? "Hide" : "Show"} technique video`} aria-pressed={isVideoOpen} onClick={() => setActiveExerciseVideoStep(isVideoOpen ? null : index)}><WorkoutIcon name="video" size={15} /></button>}<button type="button" aria-label="Duplicate step" title="Duplicate step" onClick={() => duplicateStep(index)}><WorkoutIcon name="copy" size={15} /></button><button type="button" aria-label="Delete step" title="Delete step" disabled={workoutDraft.steps.length === 1} onClick={() => setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.filter((_, position) => position !== index) })}><WorkoutIcon name="trash" size={15} /></button></div></header>
       {video && isVideoOpen && <aside className="plan-workout-exercise-video" aria-label={`${displayStepName(step)} technique preview`}><video src={video} controls loop muted playsInline preload="metadata" /></aside>}
        {isActive && <div className="plan-workout-step-fields">
          {isStrengthMovement && <label><span>Movement</span><ExerciseCombobox value={step.name} options={exerciseOptions} loading={exerciseOptionsLoading} onChange={(selectedName, option) => updateStep(index, { name: resolveExerciseName(selectedName, selectedName), exercise_code: selectedName, exercise_id: option?.id ?? null })} /></label>}
+         {hasCustomStepTitle && <label><span>Step title</span><input value={step.name} maxLength={80} placeholder={friendlyStepName(step.kind)} onChange={(event) => updateStep(index, { name: event.target.value })} /></label>}
          <label><span>Type</span><SingleSelect ariaLabel="Step type" value={step.kind} onChange={(value) => { const kind = value as WorkoutStepForm["kind"]; updateStep(index, { kind, target: targetsFor(workoutDraft.sport, kind, step.exercise_code ?? step.name)[0] }); }} options={[{ value: "warmup", label: "Warm-up" }, { value: "training", label: "Training" }, { value: "rest", label: "Rest" }, { value: "cooldown", label: "Cool-down" }]} /></label>
          <label><span>Finish target</span><SingleSelect ariaLabel="Finish target" value={step.target} onChange={(value) => { const nextTarget = value as WorkoutTarget; const nextValue = nextTarget === "distance" ? (step.target === "distance" ? step.value : 1000) : nextTarget === "time" ? (step.target === "time" ? step.value : 600) : step.value; updateStep(index, { target: nextTarget, value: nextValue }); }} options={targets.map((target) => ({ value: target, label: targetLabel(target) }))} /></label>
          {step.target !== "open" && <label><span>{targetValueLabel(step.target)}</span>{step.target === "time" ? <DurationInput key={step.value} seconds={step.value} onChange={(value) => updateStep(index, { value })} /> : step.target === "distance" ? <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0.001} step={0.1} value={Number((step.value / 1000).toFixed(3))} onChange={(value) => updateStep(index, { value: Math.round((Number(value) || 0) * 1000) })} /> : <NumberStepper ariaLabel={targetValueLabel(step.target)} min={0} value={step.value} onChange={(value) => updateStep(index, { value: Number(value) || 0 })} />}</label>}
@@ -1105,7 +1120,7 @@ export default function TrainingPlanPage() {
                           const groupSteps = workoutDraft.steps.map((item, position) => ({ item, position })).filter(({ item }) => item.repeat_group === step.repeat_group);
                           const dragItem: WorkoutDragItem = { scope: "block", index };
                           const dragClass = draggedWorkoutItem?.scope === "block" && draggedWorkoutItem.index === index ? " is-dragging" : dropTargetWorkoutItem?.scope === "block" && dropTargetWorkoutItem.index === index ? " is-drop-target" : "";
-                          return <section className={`plan-workout-repeat${dragClass}`} key={`repeat-${step.repeat_group}`} draggable onDragStart={(event) => beginWorkoutDrag(event, dragItem)} onDragEnd={endWorkoutDrag} onDragOver={(event) => allowWorkoutDrop(event, dragItem)} onDrop={(event) => finishWorkoutDrop(event, dragItem)}><header><WorkoutDragHandle /><div><span>Repeat block</span><h3>Repeat {step.repeat_count ?? 1} times</h3></div><label>Times<NumberStepper ariaLabel="Repeat times" min={1} max={99} value={step.repeat_count ?? 1} onChange={(value) => updateRepeatBlock(step.repeat_group!, Math.max(1, Number(value) || 1))} /></label></header><div className="plan-workout-repeat-children">{groupSteps.map(({ item, position }) => stepEditor(item, position, true))}</div></section>;
+                          return <section className={`plan-workout-repeat${dragClass}`} key={`repeat-${step.repeat_group}`} onDragOver={(event) => allowWorkoutDrop(event, dragItem)} onDrop={(event) => finishWorkoutDrop(event, dragItem)}><header><WorkoutDragHandle onDragStart={(event) => beginWorkoutDrag(event, dragItem)} onDragEnd={endWorkoutDrag} /><div><span>Repeat block</span><h3>Repeat {step.repeat_count ?? 1} times</h3></div><label>Times<NumberStepper ariaLabel="Repeat times" min={1} max={99} value={step.repeat_count ?? 1} onChange={(value) => updateRepeatBlock(step.repeat_group!, Math.max(1, Number(value) || 1))} /></label></header><div className="plan-workout-repeat-children">{groupSteps.map(({ item, position }) => stepEditor(item, position, true))}</div></section>;
                         })}
                         <div className="plan-workout-add-bar" role="group" aria-label="Add a workout block"><span><WorkoutIcon name="plus" size={12} />Add block</span><div>{(["warmup", "training", "rest", "cooldown"] as WorkoutStepForm["kind"][]).map((kind) => <button key={kind} type="button" data-kind={kind} onClick={() => addWorkoutStep(kind)}>{friendlyStepName(kind)}</button>)}<button type="button" data-kind="repeat" onClick={addRepeatBlock}>Repeat</button></div></div>
                       </div>

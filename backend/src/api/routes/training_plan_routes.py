@@ -352,6 +352,23 @@ def _exercise_options(value: object) -> list[dict[str, str]]:
     return sorted(options.values(), key=lambda item: item["name"].lower())
 
 
+def _exercise_name_map(value: object) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for row in _exercise_catalog_rows(value):
+        name = next(
+            (str(row[key]).strip() for key in ("displayName", "exerciseName", "nameText", "overview", "name")
+             if isinstance(row.get(key), str) and str(row[key]).strip() and not re.fullmatch(r"[TS]\d+", str(row[key]).strip(), re.IGNORECASE)),
+            None,
+        )
+        if not name:
+            continue
+        for key in ("id", "originId", "exerciseId", "name"):
+            value_key = row.get(key)
+            if value_key is not None and str(value_key).strip():
+                names[str(value_key).strip()] = name
+    return names
+
+
 class CorosWorkoutPreview(BaseModel):
     distance: float | None = None
     duration: float | None = None
@@ -1360,7 +1377,9 @@ def _draft_from_program(
                         and isinstance(exercise.get("restValue"), (int, float))
                         else 0
                     ),
-                    repeats=exercise_sets if isinstance(exercise_sets, int) else 1,
+                    # Strength sets are already represented by `sets`; `repeats` is
+                    # reserved for repeating a whole non-strength step.
+                    repeats=1,
                     intensity=intensity,
                     intensity_low=(float(raw_low) / percent_divisor if is_percent else float(raw_low) / divisor)
                     if isinstance(raw_low, (int, float)) and intensity != "none"

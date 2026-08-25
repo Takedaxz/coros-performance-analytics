@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { resolveExerciseName } from "@/lib/exerciseNames";
 
 export interface ExerciseOption {
@@ -17,6 +18,9 @@ interface ExerciseComboboxProps {
   disabled?: boolean;
   onChange: (selectedName: string, option?: ExerciseOption) => void;
 }
+
+type DropdownPosition = { bottom: number | "auto"; left: number; maxHeight: number; top: number | "auto"; width: number };
+type VideoPreview = { left: number; top: number; url: string };
 
 function SearchIcon() {
   return (
@@ -53,9 +57,13 @@ export default function ExerciseCombobox({
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [dropdownPosition, setDropdownPosition] = useState<DropdownPosition | null>(null);
+  const [videoPreview, setVideoPreview] = useState<VideoPreview | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resolvedValueName = useMemo(() => resolveExerciseName(value, value), [value]);
 
@@ -94,7 +102,7 @@ export default function ExerciseCombobox({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (!containerRef.current?.contains(event.target as Node) && !dropdownRef.current?.contains(event.target as Node)) {
         setIsOpen(false);
       }
     };
@@ -102,11 +110,15 @@ export default function ExerciseCombobox({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => () => {
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+  }, []);
+
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!isOpen) {
       if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        setIsOpen(true);
+        toggleDropdown();
       }
       return;
     }
@@ -130,6 +142,54 @@ export default function ExerciseCombobox({
     }
   };
 
+  const toggleDropdown = () => {
+    if (isOpen) {
+      setIsOpen(false);
+      return;
+    }
+    const bounds = containerRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const viewportPadding = 12;
+    const spaceBelow = window.innerHeight - bounds.bottom - viewportPadding;
+    const spaceAbove = bounds.top - viewportPadding;
+    const openUpward = spaceBelow < 220 && spaceAbove > spaceBelow;
+    const maxHeight = Math.min(340, Math.max(120, (openUpward ? spaceAbove : spaceBelow) - 4));
+    const width = Math.min(Math.max(bounds.width, 320), window.innerWidth - viewportPadding * 2);
+    setDropdownPosition({
+      bottom: openUpward ? window.innerHeight - bounds.top + 4 : "auto",
+      left: Math.max(viewportPadding, Math.min(bounds.left, window.innerWidth - width - viewportPadding)),
+      maxHeight,
+      top: openUpward ? "auto" : bounds.bottom + 4,
+      width,
+    });
+    setIsOpen(true);
+  };
+
+  const clearVideoPreview = () => {
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = null;
+    setVideoPreview(null);
+  };
+
+  const previewVideoAfterDelay = (event: ReactMouseEvent<HTMLButtonElement>, videoUrl?: string) => {
+    clearVideoPreview();
+    if (!videoUrl) return;
+    const optionButton = event.currentTarget;
+    previewTimerRef.current = setTimeout(() => {
+      previewTimerRef.current = null;
+      if (!document.body.contains(optionButton)) return;
+      const bounds = optionButton.getBoundingClientRect();
+      const width = 220;
+      const height = 124;
+      const padding = 12;
+      setVideoPreview({
+        left: bounds.right + width + padding <= window.innerWidth ? bounds.right + padding : Math.max(padding, bounds.left - width - padding),
+        top: Math.max(padding, Math.min(bounds.top - 40, window.innerHeight - height - padding)),
+        url: videoUrl,
+      });
+    }, 1000);
+  };
+
   return (
     <div className="exercise-combobox-container" ref={containerRef} onKeyDown={handleKeyDown}>
       <div className="exercise-combobox-trigger">
@@ -137,7 +197,7 @@ export default function ExerciseCombobox({
           type="button"
           className="exercise-combobox-button"
           disabled={disabled || loading}
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={toggleDropdown}
           aria-expanded={isOpen}
           aria-label="Select exercise movement"
         >
@@ -158,8 +218,9 @@ export default function ExerciseCombobox({
         </button>
       </div>
 
-      {isOpen && !disabled && !loading && (
-        <div className="exercise-combobox-dropdown" role="listbox">
+      {isOpen && !disabled && !loading && dropdownPosition && createPortal(
+        <>
+          <div className="exercise-combobox-dropdown" ref={dropdownRef} role="listbox" style={dropdownPosition}>
           <div className="exercise-search-wrap">
             <span className="exercise-search-icon"><SearchIcon /></span>
             <input
@@ -195,9 +256,14 @@ export default function ExerciseCombobox({
                       className={`exercise-option-btn${isSelected ? " is-selected" : ""}${isHighlighted ? " is-highlighted" : ""}`}
                       onClick={() => {
                         onChange(option.name, option);
+                        clearVideoPreview();
                         setIsOpen(false);
                       }}
-                      onMouseEnter={() => setHighlightedIndex(idx)}
+                      onMouseEnter={(event) => {
+                        setHighlightedIndex(idx);
+                        previewVideoAfterDelay(event, option.video_url);
+                      }}
+                      onMouseLeave={clearVideoPreview}
                     >
                       {option.thumbnail_url ? (
                         <img
@@ -214,7 +280,10 @@ export default function ExerciseCombobox({
               })
             )}
           </ul>
-        </div>
+          </div>
+          {videoPreview && <aside className="exercise-option-video-preview" style={{ left: videoPreview.left, top: videoPreview.top }} aria-hidden="true"><video src={videoPreview.url} autoPlay loop muted playsInline preload="metadata" /></aside>}
+        </>,
+        document.body,
       )}
     </div>
   );
