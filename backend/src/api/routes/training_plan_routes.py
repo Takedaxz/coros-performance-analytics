@@ -181,15 +181,28 @@ class CorosWorkoutStep(BaseModel):
     exercise_code: str | None = Field(default=None, max_length=80)
     exercise_id: str | None = Field(default=None, max_length=80)
     sets: int = Field(default=1, ge=1, le=99)
-    rest_seconds: int = Field(default=0, ge=0, le=3_600)
+    rest_seconds: int = Field(
+        default=0,
+        ge=0,
+        le=3_600,
+        description="Recovery after a non-repeated step; intervals need a separate rest step.",
+    )
     repeats: int = Field(default=1, ge=1, le=99)
     intensity: WorkoutIntensity = "none"
     intensity_low: float | None = Field(default=None, ge=-8, le=1_000_000)
     intensity_high: float | None = Field(default=None, ge=-8, le=1_000_000)
     intensity_basis: WorkoutIntensityBasis = "max_hr"
     intensity_zone: int | None = Field(default=None, ge=1, le=7)
-    repeat_group: int | None = None
-    repeat_count: int | None = Field(default=None, ge=1, le=99)
+    repeat_group: int | None = Field(
+        default=None,
+        description="Shared group number on both the interval training and rest steps.",
+    )
+    repeat_count: int | None = Field(
+        default=None,
+        ge=1,
+        le=99,
+        description="Shared repetition count on every step in the repeat group.",
+    )
     repeat_name: str | None = Field(default=None, max_length=80)
 
 

@@ -3,7 +3,38 @@ import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
-import { parseThinkingAndAnswer, removeLegacyEvidenceUsed } from "./answer-display.ts";
+import {
+  formatSelectedResponseQuestion,
+  MAX_SELECTED_RESPONSE_EXCERPT_LENGTH,
+  parseSelectedResponseQuestion,
+  parseThinkingAndAnswer,
+  removeLegacyEvidenceUsed,
+} from "./answer-display.ts";
+
+test("makes a selected response the primary reference for the next request", () => {
+  assert.equal(
+    formatSelectedResponseQuestion("Translate this to Thai.", "Use InBody export first."),
+    "Selected response (primary reference):\n\nUse InBody export first.\n\nUser instruction:\n\nTranslate this to Thai.",
+  );
+  assert.match(
+    formatSelectedResponseQuestion("", "Use this."),
+    /Respond directly to the selected response/,
+  );
+  assert.equal(
+    formatSelectedResponseQuestion("Keep this short.", "x".repeat(MAX_SELECTED_RESPONSE_EXCERPT_LENGTH + 1)).length,
+    "Selected response (primary reference):\n\n\n\nUser instruction:\n\nKeep this short.".length + MAX_SELECTED_RESPONSE_EXCERPT_LENGTH,
+  );
+});
+
+test("parses selected-response messages for clean chat rendering", () => {
+  assert.deepEqual(
+    parseSelectedResponseQuestion(
+      formatSelectedResponseQuestion("Make it shorter.", "Start with InBody export."),
+    ),
+    { excerpt: "Start with InBody export.", instruction: "Make it shorter." },
+  );
+  assert.equal(parseSelectedResponseQuestion("Normal message"), null);
+});
 
 test("removes legacy evidence paragraphs without hiding the coaching answer", () => {
   assert.equal(

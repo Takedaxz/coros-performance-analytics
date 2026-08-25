@@ -20,7 +20,7 @@ from src.ai.coach_tools import (
 )
 from src.api.routes import training_plan_routes
 from src.api.routes.activity_routes import ActivityNoteUpdate, update_activity_note
-from src.api.routes.training_plan_routes import CorosWorkoutStep, TrainingEvent
+from src.api.routes.training_plan_routes import CorosWorkoutDraft, CorosWorkoutStep, TrainingEvent
 from src.db.models import SportType
 
 
@@ -333,10 +333,45 @@ def test_scheduled_workout_details_tool_is_exposed() -> None:
     assert "web_search" in names
     assert {
         "propose_create_calendar_workout",
+        "propose_create_calendar_workouts",
         "propose_update_calendar_workout",
         "propose_move_calendar_workout",
         "propose_delete_calendar_workout",
     } <= names
+
+
+def test_multiple_calendar_workouts_are_validated_in_one_proposal() -> None:
+    loop = asyncio.new_event_loop()
+    try:
+        tools = {tool.__name__: tool for tool in coach_tool_functions("owner", loop)}
+        result = tools["propose_create_calendar_workouts"](
+            [
+                CorosWorkoutDraft.model_validate({
+                    "date": "2026-08-27",
+                    "name": "Easy Run",
+                    "sport": "run",
+                    "steps": [{"kind": "training", "target": "time", "value": 1800}],
+                }),
+                CorosWorkoutDraft.model_validate({
+                    "date": "2026-08-28",
+                    "name": "Pool Swim",
+                    "sport": "swim",
+                    "pool_length_m": 20,
+                    "steps": [{"kind": "training", "target": "distance", "value": 1600}],
+                }),
+            ]
+        )
+    finally:
+        loop.close()
+
+    assert result == {
+        "pending_confirmation": True,
+        "action": "create_batch",
+        "summary": "Create 2 workouts",
+    }
+    assert tools["propose_create_calendar_workouts"]([]) == {
+        "error": "drafts must contain 2 to 14 workouts"
+    }
 
 
 @pytest.mark.asyncio

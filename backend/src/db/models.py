@@ -565,6 +565,8 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String(10), nullable=False)  # "user" | "assistant"
     content: Mapped[str] = mapped_column(Text, nullable=False)
     images: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    csv_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    csv_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     tool_calls: Mapped[list[dict[str, Any] | str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

@@ -1,3 +1,30 @@
+export const MAX_SELECTED_RESPONSE_EXCERPT_LENGTH = 4_000;
+const SELECTED_RESPONSE_PREFIX = "Selected response (primary reference):";
+const USER_INSTRUCTION_PREFIX = "User instruction:";
+
+export function parseSelectedResponseQuestion(
+  content: string,
+): { excerpt: string; instruction: string } | null {
+  if (!content.startsWith(SELECTED_RESPONSE_PREFIX)) return null;
+  const sections = content.slice(SELECTED_RESPONSE_PREFIX.length).split(`\n\n${USER_INSTRUCTION_PREFIX}\n\n`);
+  if (sections.length !== 2) return null;
+  const excerpt = sections[0].trim();
+  const instruction = sections[1].trim();
+  return excerpt && instruction ? { excerpt, instruction } : null;
+}
+
+export function formatSelectedResponseQuestion(instruction: string, excerpt: string | null): string {
+  const selectedResponse = excerpt?.trim().slice(0, MAX_SELECTED_RESPONSE_EXCERPT_LENGTH);
+  if (!selectedResponse) return instruction.trim();
+
+  return [
+    SELECTED_RESPONSE_PREFIX,
+    selectedResponse,
+    USER_INSTRUCTION_PREFIX,
+    instruction.trim() || "Respond directly to the selected response.",
+  ].join("\n\n");
+}
+
 export function removeLegacyEvidenceUsed(content: string): string {
   let cleaned = content
     .split(/\n\s*\n/)

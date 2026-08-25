@@ -34,7 +34,7 @@ from src.sync.api_client import CorosApiClientError
 
 _TREND_DAYS = frozenset({7, 14, 28, 56})
 _FITNESS_DAYS = frozenset({28, 56, 90, 180})
-MAX_TOOL_CALLS = 4
+MAX_TOOL_CALLS = 5
 _USER_TZ = ZoneInfo("Asia/Bangkok")
 _SPORT_ALIASES: dict[str, SportType] = {
     "running": SportType.RUN,
@@ -126,8 +126,24 @@ def coach_tool_functions(
     from src.api.routes.training_plan_routes import CorosWorkoutDraft
 
     def propose_create_calendar_workout(draft: CorosWorkoutDraft) -> dict[str, Any]:
-        """Prepare a new COROS workout (keep description concise, max 200 chars, only a few words)."""
+        """Prepare exactly one new COROS workout. Use the plural tool for two or more."""
         return _calendar_change_proposal("create", draft=draft.model_dump())
+
+    def propose_create_calendar_workouts(
+        drafts: list[CorosWorkoutDraft],
+    ) -> dict[str, Any]:
+        """Prepare every draft in one call when creating 2 to 14 COROS workouts."""
+        if not 2 <= len(drafts) <= 14:
+            return {"error": "drafts must contain 2 to 14 workouts"}
+        for index, draft in enumerate(drafts):
+            result = _calendar_change_proposal("create", draft=draft.model_dump())
+            if "error" in result:
+                return {"error": f"workout {index + 1}: {result['error']}"}
+        return {
+            "pending_confirmation": True,
+            "action": "create_batch",
+            "summary": f"Create {len(drafts)} workouts",
+        }
 
     def propose_update_calendar_workout(
         uid: str, draft: CorosWorkoutDraft
@@ -156,6 +172,7 @@ def coach_tool_functions(
         search_coaching_knowledge,
         web_search,
         propose_create_calendar_workout,
+        propose_create_calendar_workouts,
         propose_update_calendar_workout,
         propose_move_calendar_workout,
         propose_delete_calendar_workout,

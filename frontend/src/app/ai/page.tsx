@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, type DragEvent } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import ReactMarkdown from "react-markdown";
@@ -11,7 +11,13 @@ import { WaveThinkingText } from "@/components/WaveThinkingText";
 import AIModelIcon from "@/components/AIModelIcon";
 import { SPORT_ICON_URLS, SportIcon } from "@/components/SportActivityIcon";
 import { resolveExerciseName } from "@/lib/exerciseNames";
-import { parseThinkingAndAnswer, removeLegacyEvidenceUsed } from "./answer-display";
+import {
+  formatSelectedResponseQuestion,
+  MAX_SELECTED_RESPONSE_EXCERPT_LENGTH,
+  parseThinkingAndAnswer,
+  parseSelectedResponseQuestion,
+  removeLegacyEvidenceUsed,
+} from "./answer-display";
 import { usePathname, useRouter } from "next/navigation";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -26,6 +32,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_scheduled_workout_details: "Workout details",
   get_training_plan: "Training plan",
   propose_create_calendar_workout: "Create calendar workout",
+  propose_create_calendar_workouts: "Create calendar workouts",
   propose_update_calendar_workout: "Update calendar workout",
   propose_move_calendar_workout: "Move calendar workout",
   propose_delete_calendar_workout: "Delete calendar workout",
@@ -81,11 +88,20 @@ type CalendarChangeToast = {
 };
 
 type CalendarChangeReview = {
-  change: CalendarChangeAction;
+  changes: CalendarChangeAction[];
   key: string;
 };
 
-function calendarChangeAction(tool: ToolCall): CalendarChangeAction | null {
+function calendarChangeActions(tool: ToolCall): CalendarChangeAction[] {
+  if (tool.name === "propose_create_calendar_workouts") {
+    const drafts = tool.arguments.drafts;
+    if (!Array.isArray(drafts) || drafts.length < 2 || drafts.length > 14) return [];
+    if (!drafts.every((draft) => draft && typeof draft === "object" && !Array.isArray(draft))) return [];
+    return drafts.map((draft) => ({
+      action: "create" as const,
+      draft: draft as Record<string, unknown>,
+    }));
+  }
   const actionByTool = {
     propose_create_calendar_workout: "create",
     propose_update_calendar_workout: "update",
@@ -93,19 +109,19 @@ function calendarChangeAction(tool: ToolCall): CalendarChangeAction | null {
     propose_delete_calendar_workout: "delete",
   } as const;
   const action = actionByTool[tool.name as keyof typeof actionByTool];
-  if (!action) return null;
+  if (!action) return [];
   const draft = tool.arguments.draft;
   const uid = tool.arguments.uid;
   const date = tool.arguments.date;
-  if ((action === "create" || action === "update") && (!draft || typeof draft !== "object" || Array.isArray(draft))) return null;
-  if ((action === "update" || action === "move" || action === "delete") && typeof uid !== "string") return null;
-  if (action === "move" && typeof date !== "string") return null;
-  return {
+  if ((action === "create" || action === "update") && (!draft || typeof draft !== "object" || Array.isArray(draft))) return [];
+  if ((action === "update" || action === "move" || action === "delete") && typeof uid !== "string") return [];
+  if (action === "move" && typeof date !== "string") return [];
+  return [{
     action,
     draft: draft && typeof draft === "object" && !Array.isArray(draft) ? draft as Record<string, unknown> : undefined,
     uid: typeof uid === "string" ? uid : undefined,
     date: typeof date === "string" ? date : undefined,
-  };
+  }];
 }
 
 function calendarChangeSummary(change: CalendarChangeAction): string {
@@ -224,8 +240,8 @@ function formatToolArguments(arguments_: Record<string, unknown>): string {
 }
 
 function formatToolTooltip(tool: ToolCall): string {
-  const calendarChange = calendarChangeAction(tool);
-  if (calendarChange) return calendarChangeSummary(calendarChange);
+  const calendarChanges = calendarChangeActions(tool);
+  if (calendarChanges.length) return calendarChanges.map(calendarChangeSummary).join("\n");
   const knowledge = tool.display_result?.knowledge;
   if (tool.name === "search_coaching_knowledge" && knowledge?.length) {
     return `Query: ${String(tool.arguments.query ?? "")}\n\n${knowledge.join("\n\n")}`;
@@ -241,7 +257,8 @@ function uniqueToolCalls(tools: (ToolCall | string)[]): ToolCall[] {
     const key = `${tool.name}:${JSON.stringify(tool.arguments)}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const change = calendarChangeAction(tool);
+    const changes = calendarChangeActions(tool);
+    const change = changes.length === 1 ? changes[0] : null;
     const changeKey = change && `${change.action}:${change.uid ?? change.date ?? ""}`;
     const previousIndex = changeKey === null ? undefined : calendarChanges.get(changeKey);
     if (previousIndex !== undefined) {
@@ -523,6 +540,76 @@ function AttachmentPopover({
           </div>
           <div className="ai-attachment-subtitle">Multi-step iterative scientific research</div>
         </div>
+      </button>
+    </div>
+  );
+}
+
+function downloadCsv(name: string, content: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name || "attachment.csv";
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function PaperclipIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />
+    </svg>
+  );
+}
+
+function CsvAttachmentChip({
+  name,
+  content,
+  onRemove,
+}: {
+  name: string;
+  content?: string;
+  onRemove?: () => void;
+}) {
+  return (
+    <div className="web-search-active-chip csv-attachment-chip" title={name}>
+      <button
+        type="button"
+        className="csv-download-button"
+        onClick={() => content !== undefined && downloadCsv(name, content)}
+        disabled={content === undefined}
+        title={content !== undefined ? "Download CSV" : name}
+      >
+        <PaperclipIcon />
+        <span aria-hidden="true">CSV</span>
+        <span>{name}</span>
+      </button>
+      {onRemove && (
+        <button type="button" onClick={onRemove} title="Remove CSV" aria-label="Remove CSV">
+          <XIcon />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SelectedResponseChip({ excerpt, onRemove }: { excerpt: string; onRemove: () => void }) {
+  return (
+    <div className="selected-response-chip">
+      <span className="selected-response-chip-label">From response</span>
+      <span className="selected-response-chip-text">{excerpt}</span>
+      <button type="button" onClick={onRemove} title="Remove selected response" aria-label="Remove selected response">
+        <XIcon />
       </button>
     </div>
   );
@@ -955,6 +1042,8 @@ type Message = {
   role: "user" | "ai";
   content: string;
   images?: string[];
+  csvName?: string;
+  csvContent?: string;
   tools?: (ToolCall | string)[];
   createdAt?: string;
 };
@@ -964,6 +1053,8 @@ type DBMessage = {
   role: "user" | "assistant";
   content: string;
   images?: string[];
+  csv_filename?: string;
+  csv_content?: string;
   tool_calls?: (ToolCall | string)[];
   created_at: string;
 };
@@ -1095,6 +1186,12 @@ export default function AiPage() {
   const [messagesLoading, setMessagesLoading] = useState(routeSessionId !== null);
   const [goals, setGoals] = useState<any[]>([]);
   const [input, setInput] = useState("");
+  const [selectedResponseExcerpt, setSelectedResponseExcerpt] = useState<string | null>(null);
+  const [responseSelection, setResponseSelection] = useState<{
+    excerpt: string;
+    left: number;
+    top: number;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(() => cachedSessions === null);
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
@@ -1124,6 +1221,7 @@ export default function AiPage() {
   const [defaultModel, setDefaultModel] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [pendingCsv, setPendingCsv] = useState<{ name: string; content: string } | null>(null);
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
   const [activeAttachmentMenu, setActiveAttachmentMenu] = useState<"landing" | "chat" | null>(null);
   const [searchMode, setSearchMode] = useState<SearchMode>("none");
@@ -1140,6 +1238,7 @@ export default function AiPage() {
   const [streamingSessionIds, setStreamingSessionIds] = useState<Set<string>>(new Set());
   const routeSessionIdRef = useRef<string | null>(routeSessionId);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const chatHistoryRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const projectEditDialogRef = useRef<HTMLDialogElement>(null);
@@ -1149,7 +1248,40 @@ export default function AiPage() {
     routeSessionIdRef.current = routeSessionId;
   }, [routeSessionId]);
 
-  async function confirmCalendarChange(change: CalendarChangeAction, key: string) {
+  function handleResponseSelection(event: ReactMouseEvent<HTMLDivElement>) {
+    const selection = window.getSelection();
+    if (
+      !selection
+      || selection.rangeCount === 0
+      || selection.isCollapsed
+      || !event.currentTarget.contains(selection.anchorNode)
+      || !event.currentTarget.contains(selection.focusNode)
+    ) {
+      setResponseSelection(null);
+      return;
+    }
+    const excerpt = selection.toString().trim().slice(0, MAX_SELECTED_RESPONSE_EXCERPT_LENGTH);
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    if (!excerpt || (!rect.width && !rect.height)) {
+      setResponseSelection(null);
+      return;
+    }
+    setResponseSelection({
+      excerpt,
+      left: Math.min(window.innerWidth - 116, Math.max(8, rect.left + rect.width / 2)),
+      top: Math.min(window.innerHeight - 44, rect.bottom + 8),
+    });
+  }
+
+  function addSelectedResponseToChat() {
+    if (!responseSelection) return;
+    setSelectedResponseExcerpt(responseSelection.excerpt);
+    setResponseSelection(null);
+    window.getSelection()?.removeAllRanges();
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  async function confirmCalendarChange(change: CalendarChangeAction, key: string, closeReview = true) {
     const path = change.action === "create"
       ? "/api/training-plan/coros/workouts"
       : change.action === "update"
@@ -1165,7 +1297,7 @@ export default function AiPage() {
         : { confirmed: true };
 
     setCalendarChangePending(key);
-    setCalendarChangeReview(null);
+    if (closeReview) setCalendarChangeReview(null);
     setCalendarChangeToast({ text: "Updating COROS calendar…", status: "pending" });
     try {
       const response = await fetch(`${API_BASE}${path}`, {
@@ -1259,9 +1391,24 @@ export default function AiPage() {
     });
   }, []);
 
-  const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      processImageFiles(e.target.files);
+      const imageFiles = Array.from(e.target.files).filter((file) => file.type.startsWith("image/"));
+      processImageFiles(imageFiles);
+      const csvFile = Array.from(e.target.files).find((file) =>
+        file.type === "text/csv" || file.name.toLowerCase().endsWith(".csv"),
+      );
+      if (csvFile) {
+        if (csvFile.size > 1_000_000) {
+          window.alert("CSV files must be 1 MB or smaller.");
+        } else {
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (typeof reader.result === "string") setPendingCsv({ name: csvFile.name, content: reader.result });
+          };
+          reader.readAsText(csvFile);
+        }
+      }
       e.target.value = "";
     }
   };
@@ -1424,6 +1571,8 @@ export default function AiPage() {
           role: m.role === "assistant" ? "ai" : "user",
           content: m.content,
           images: m.images,
+          csvName: m.csv_filename,
+          csvContent: m.csv_content,
           tools: m.tool_calls,
           createdAt: m.created_at,
         })));
@@ -1465,6 +1614,7 @@ export default function AiPage() {
     setDraftProjectId(project.id);
     setMessages([]);
     setInput("");
+    setSelectedResponseExcerpt(null);
     setSelectedModel(defaultModel);
     router.push("/ai");
   };
@@ -1473,6 +1623,7 @@ export default function AiPage() {
     if (isLoading) return;
     setMessages([]);
     setInput("");
+    setSelectedResponseExcerpt(null);
     setDraftProjectId(null);
     setSelectedModel(defaultModel);
     router.push("/ai");
@@ -1669,15 +1820,17 @@ export default function AiPage() {
   }
 
   async function handleSend(forcedInput?: string, sessionId?: string, overrideHistory?: Message[]) {
-    const userMsg = (forcedInput ?? input).trim();
+    const typedMessage = (forcedInput ?? input).trim();
+    const userMsg = formatSelectedResponseQuestion(typedMessage, selectedResponseExcerpt);
     const currentImages = [...pendingImages];
+    const currentCsv = pendingCsv;
     const sid = sessionId ?? routeSessionId;
-    if ((!userMsg && currentImages.length === 0) || !sid) return;
+    if ((!userMsg && currentImages.length === 0 && !currentCsv) || !sid) return;
 
     if (inFlightStreamsRef.current.has(sid)) return;
     setIsLoading(true);
 
-    const displayQuestion = userMsg || (currentImages.length > 0 ? "[Attached Image]" : "");
+    const displayQuestion = typedMessage || (currentImages.length > 0 ? "[Attached Image]" : currentCsv ? `[Attached CSV: ${currentCsv.name}]` : "");
     const baseHistory = overrideHistory ?? messages;
 
     setSessions((prev) =>
@@ -1695,6 +1848,8 @@ export default function AiPage() {
       role: "user",
       content: userMsg,
       images: currentImages.length > 0 ? currentImages : undefined,
+      csvName: currentCsv?.name,
+      csvContent: currentCsv?.content,
       createdAt: new Date().toISOString(),
     };
     const initialAiMsg: Message = { id: assistantMessageId, role: "ai", content: "" };
@@ -1706,7 +1861,9 @@ export default function AiPage() {
     routeSessionIdRef.current = sid;
     setMessages(initialStreamMsgs);
     setInput("");
+    setSelectedResponseExcerpt(null);
     setPendingImages([]);
+    setPendingCsv(null);
 
     let streamText = "";
     const historyWindow = baseHistory.slice(-12);
@@ -1737,9 +1894,11 @@ export default function AiPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question: userMsg || "Please analyze the attached image.",
+          question: userMsg || (currentCsv ? "Please analyze the attached CSV file." : "Please analyze the attached image."),
           context_days: 14,
           images: currentImages,
+          csv_content: currentCsv?.content,
+          csv_filename: currentCsv?.name,
           force_web_search: searchMode === "web" || searchMode === "deep",
           is_deep_research: searchMode === "deep",
           force_coaching_knowledge: coachingKnowledgeEnabled,
@@ -1845,6 +2004,8 @@ export default function AiPage() {
               role: m.role === "assistant" ? "ai" : "user",
               content: m.content,
               images: m.images,
+              csvName: m.csv_filename,
+              csvContent: m.csv_content,
               tools: m.tool_calls,
               createdAt: m.created_at,
             })));
@@ -1904,6 +2065,11 @@ export default function AiPage() {
     setMessages(cleanHistory);
     const retryImages = userMessage.images ?? [];
     setPendingImages(retryImages);
+    setPendingCsv(
+      userMessage.csvName && userMessage.csvContent !== undefined
+        ? { name: userMessage.csvName, content: userMessage.csvContent }
+        : null,
+    );
     await handleSend(userMessage.content, routeSessionId, cleanHistory);
   }
 
@@ -2050,6 +2216,8 @@ export default function AiPage() {
                 ))}
               </div>
             )}
+            {pendingCsv && <CsvAttachmentChip name={pendingCsv.name} onRemove={() => setPendingCsv(null)} />}
+            {selectedResponseExcerpt && <SelectedResponseChip excerpt={selectedResponseExcerpt} onRemove={() => setSelectedResponseExcerpt(null)} />}
             <button
               type="button"
               className="cmd-bar-attach-btn"
@@ -2074,6 +2242,7 @@ export default function AiPage() {
               className="cmd-bar"
               placeholder="Ask AI Coach"
               value={input}
+              ref={composerRef}
               onChange={(e) => {
                 setInput(e.target.value);
               }}
@@ -2081,7 +2250,7 @@ export default function AiPage() {
               onKeyDown={async (e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  if (!input.trim() && pendingImages.length === 0) return;
+                  if (!input.trim() && !selectedResponseExcerpt && pendingImages.length === 0 && !pendingCsv) return;
                   const msg = input.trim();
                   if (!sessionId) {
                     const s = await createRealSession();
@@ -2112,7 +2281,7 @@ export default function AiPage() {
                 id={sessionId ? "new-session-send-btn" : "empty-state-send-btn"}
                 className="cmd-bar-send"
                 onClick={async () => {
-                  if (!input.trim() && pendingImages.length === 0) return;
+                  if (!input.trim() && !selectedResponseExcerpt && pendingImages.length === 0 && !pendingCsv) return;
                   const msg = input.trim();
                   if (!sessionId) {
                     const s = await createRealSession();
@@ -2121,7 +2290,7 @@ export default function AiPage() {
                     await handleSend(msg, sessionId);
                   }
                 }}
-                disabled={isLoading || (!input.trim() && pendingImages.length === 0)}
+                disabled={isLoading || (!input.trim() && !selectedResponseExcerpt && pendingImages.length === 0 && !pendingCsv)}
                 aria-label="Send message"
               >
                 <SendIcon />
@@ -2501,10 +2670,10 @@ export default function AiPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.csv,text/csv"
         multiple
         style={{ display: "none" }}
-        onChange={handleImageFileSelect}
+        onChange={handleFileSelect}
       />
       <Sidebar />
       <main className="ai-link-main print-block">
@@ -2657,6 +2826,7 @@ export default function AiPage() {
                     <div className="ai-link-thread print-block">
                       {messages.map((msg, idx) => {
                         if (msg.role === "user") {
+                          const selectedResponseQuestion = parseSelectedResponseQuestion(msg.content);
                           return (
                             <div key={msg.id} className="msg-row user-row msg-enter" style={{ animationDelay: "0ms" }}>
                               <div className="user-message-content">
@@ -2673,7 +2843,34 @@ export default function AiPage() {
                                     ))}
                                   </div>
                                 )}
-                                {msg.content && <div className="user-pill">{msg.content}</div>}
+                                {(msg.csvName || msg.content) && (
+                                  <div className="user-pill">
+                                    {msg.csvName && (
+                                      <div className="user-csv-attachment">
+                                        <button
+                                          type="button"
+                                          className="csv-download-button"
+                                          onClick={() => msg.csvContent !== undefined && downloadCsv(msg.csvName!, msg.csvContent)}
+                                          title="Download CSV"
+                                        >
+                                          <span aria-hidden="true">CSV</span>
+                                          <span>{msg.csvName}</span>
+                                        </button>
+                                      </div>
+                                    )}
+                                    {selectedResponseQuestion ? (
+                                      <div className="user-selected-response">
+                                        <div className="user-selected-response-source">
+                                          <span className="user-selected-response-label">Selected response</span>
+                                          <div>{selectedResponseQuestion.excerpt}</div>
+                                        </div>
+                                        <div className="user-selected-response-instruction">
+                                          {selectedResponseQuestion.instruction}
+                                        </div>
+                                      </div>
+                                    ) : msg.content ? <div>{msg.content}</div> : null}
+                                  </div>
+                                )}
                                 <div className="message-copy-actions">
                                   <CopyMessageButton content={msg.content} label="your message" />
                                   <button
@@ -2713,7 +2910,7 @@ export default function AiPage() {
                               {msg.content === "" && isCurrentSessionStreaming ? (
                                 <WaveThinkingText text="thinking" />
                               ) : displayAnswer ? (
-                                <div className="markdown-body">
+                                <div className="markdown-body" onMouseUp={handleResponseSelection}>
                                   <ReactMarkdown 
                                     remarkPlugins={[remarkGfm, remarkMath]} 
                                     rehypePlugins={[rehypeKatex]}
@@ -2733,8 +2930,10 @@ export default function AiPage() {
                                     const argumentsText = formatToolTooltip(tool);
                                     const toolKey = `${msg.id}-${tool.name}-${toolIndex}`;
                                     const isPinned = activeToolTooltip === toolKey;
-                                    const calendarChange = calendarChangeAction(tool);
-                                    const calendarChangeResult = calendarChangeResults[toolKey];
+                                    const calendarChanges = calendarChangeActions(tool);
+                                    const calendarChangeKeys = calendarChanges.map((_, index) => calendarChanges.length === 1 ? toolKey : `${toolKey}:${index}`);
+                                    const allCalendarChangesSucceeded = calendarChangeKeys.length > 0 && calendarChangeKeys.every((key) => calendarChangeResults[key]?.success);
+                                    const calendarChangeError = calendarChangeKeys.map((key) => calendarChangeResults[key]).find((result) => result && !result.success);
                                     return (
                                       <span className="ai-calendar-change" key={toolKey}>
                                         <span
@@ -2783,19 +2982,19 @@ export default function AiPage() {
                                             )}
                                           </span>
                                         </span>
-                                        {calendarChange && !calendarChangeResult?.success && (
+                                        {calendarChanges.length > 0 && !allCalendarChangesSucceeded && (
                                           <button
                                             type="button"
                                             className="calendar-change-confirm"
-                                            disabled={calendarChangePending === toolKey}
-                                            onClick={() => setCalendarChangeReview({ change: calendarChange, key: toolKey })}
+                                            disabled={calendarChangeKeys.includes(calendarChangePending ?? "")}
+                                            onClick={() => setCalendarChangeReview({ changes: calendarChanges, key: toolKey })}
                                           >
                                             Review
                                           </button>
                                         )}
-                                        {calendarChangeResult && !calendarChangeResult.success && (
-                                          <span className={`calendar-change-status${calendarChangeResult.success ? " is-success" : " is-error"}`}>
-                                            {calendarChangeResult.text}
+                                        {calendarChangeError && (
+                                          <span className="calendar-change-status is-error">
+                                            {calendarChangeError.text}
                                           </span>
                                         )}
                                       </span>
@@ -2815,7 +3014,10 @@ export default function AiPage() {
                                     onClick={() => setMessagePendingAction({
                                       action: "retry",
                                       messageId: msg.id,
-                                      preview: displayAnswer,
+                                      preview: messages[idx - 1]?.content
+                                        || (messages[idx - 1]?.csvName
+                                          ? `[Attached CSV: ${messages[idx - 1].csvName}]`
+                                          : "[Attached image]"),
                                     })}
                                   >
                                     <RetryIcon />
@@ -2888,6 +3090,8 @@ export default function AiPage() {
                             ))}
                           </div>
                         )}
+                        {pendingCsv && <CsvAttachmentChip name={pendingCsv.name} onRemove={() => setPendingCsv(null)} />}
+                        {selectedResponseExcerpt && <SelectedResponseChip excerpt={selectedResponseExcerpt} onRemove={() => setSelectedResponseExcerpt(null)} />}
                         <button
                           type="button"
                           className="cmd-bar-attach-btn"
@@ -2912,6 +3116,7 @@ export default function AiPage() {
                           className="cmd-bar"
                           placeholder="Ask your coach anything..."
                           value={input}
+                          ref={composerRef}
                           onChange={(e) => {
                             setInput(e.target.value);
                           }}
@@ -2919,7 +3124,7 @@ export default function AiPage() {
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.shiftKey) {
                               e.preventDefault();
-                              if (!input.trim() && pendingImages.length === 0) return;
+                              if (!input.trim() && !selectedResponseExcerpt && pendingImages.length === 0 && !pendingCsv) return;
                               handleSend();
                             }
                           }}
@@ -2945,10 +3150,10 @@ export default function AiPage() {
                             id="chat-send-btn"
                             className="cmd-bar-send"
                             onClick={() => {
-                              if (!input.trim() && pendingImages.length === 0) return;
+                              if (!input.trim() && !selectedResponseExcerpt && pendingImages.length === 0 && !pendingCsv) return;
                               handleSend();
                             }}
-                            disabled={isLoading || (!input.trim() && pendingImages.length === 0)}
+                            disabled={isLoading || (!input.trim() && !selectedResponseExcerpt && pendingImages.length === 0 && !pendingCsv)}
                             aria-label="Send message"
                           >
                             <SendIcon />
@@ -2963,6 +3168,18 @@ export default function AiPage() {
             </div>
           </div>
         </div>
+
+        {responseSelection && (
+          <button
+            type="button"
+            className="response-selection-action"
+            style={{ left: responseSelection.left, top: responseSelection.top }}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={addSelectedResponseToChat}
+          >
+            Add to chat
+          </button>
+        )}
 
         {editingProject && (
           <dialog
@@ -3129,60 +3346,90 @@ export default function AiPage() {
           }}
         >
           {calendarChangeReview && (() => {
-            const { change, key } = calendarChangeReview;
-            const draft = change.draft;
-            const steps = calendarChangeSteps(change);
-            const result = calendarChangeResults[key];
-            const name = typeof draft?.name === "string" ? draft.name : "Workout";
-            const date = typeof draft?.date === "string" ? draft.date : change.date;
-            const sport = typeof draft?.sport === "string" ? draft.sport.replaceAll("_", " ") : "";
-            const poolLength = typeof draft?.pool_length_m === "number" ? draft.pool_length_m : null;
-            const description = typeof draft?.description === "string" ? draft.description : "";
+            const { changes, key } = calendarChangeReview;
+            const isBatch = changes.length > 1;
+            const singleChange = changes[0];
+            if (!singleChange) return null;
             return (
               <div className="calendar-change-dialog-content">
                 <span className="calendar-change-dialog-label">COROS calendar</span>
-                <h2 id="calendar-change-title">{change.action[0].toUpperCase() + change.action.slice(1)} workout?</h2>
-                <dl className="calendar-change-summary">
-                  <div><dt>Workout</dt><dd>{name}</dd></div>
-                  {date && <div><dt>Date</dt><dd>{date}</dd></div>}
-                  {sport && <div><dt>Sport</dt><dd>{sport}</dd></div>}
-                  {poolLength !== null && <div><dt>Pool</dt><dd>{poolLength} m</dd></div>}
-                </dl>
-                {description && <p className="calendar-change-description">{description}</p>}
-                {steps.length > 0 && (
-                  <ol className="calendar-change-steps">
-                    {steps.map((step, index) => {
-                      const stepName = resolveExerciseName(
-                        typeof step.exercise_code === "string" ? step.exercise_code : null,
-                        typeof step.name === "string" ? step.name : "Step",
-                      );
-                      const target = calendarStepTarget(step);
-                      const repeats = typeof step.repeat_count === "number" ? step.repeat_count : step.repeats;
-                      const intensity = calendarStepIntensity(step);
-                      return (
-                        <li key={`${stepName}-${index}`}>
-                          <strong>{stepName}</strong>
-                          {target && <span>{target}</span>}
-                          {intensity && <span>{intensity}</span>}
-                          {typeof repeats === "number" && repeats > 1 && <span>Repeat {repeats}×</span>}
-                        </li>
-                      );
-                    })}
-                  </ol>
-                )}
-                {result && !result.success && <p className="calendar-change-dialog-error" role="alert">{result.text}</p>}
+                <h2 id="calendar-change-title">{isBatch ? `Review ${changes.length} workouts` : `${singleChange.action[0].toUpperCase() + singleChange.action.slice(1)} workout?`}</h2>
+                <div className={isBatch ? "calendar-change-workouts" : undefined}>
+                  {changes.map((change, changeIndex) => {
+                    const itemKey = isBatch ? `${key}:${changeIndex}` : key;
+                    const draft = change.draft;
+                    const steps = calendarChangeSteps(change);
+                    const result = calendarChangeResults[itemKey];
+                    const name = typeof draft?.name === "string" ? draft.name : "Workout";
+                    const date = typeof draft?.date === "string" ? draft.date : change.date;
+                    const sport = typeof draft?.sport === "string" ? draft.sport.replaceAll("_", " ") : "";
+                    const poolLength = typeof draft?.pool_length_m === "number" ? draft.pool_length_m : null;
+                    const description = typeof draft?.description === "string" ? draft.description : "";
+                    return (
+                      <section className={isBatch ? "calendar-change-workout" : undefined} key={itemKey}>
+                        <dl className="calendar-change-summary">
+                          <div><dt>Workout</dt><dd>{name}</dd></div>
+                          {date && <div><dt>Date</dt><dd>{date}</dd></div>}
+                          {sport && <div><dt>Sport</dt><dd>{sport}</dd></div>}
+                          {poolLength !== null && <div><dt>Pool</dt><dd>{poolLength} m</dd></div>}
+                        </dl>
+                        {description && <p className="calendar-change-description">{description}</p>}
+                        {steps.length > 0 && (
+                          <ol className="calendar-change-steps">
+                            {steps.map((step, index) => {
+                              const stepName = resolveExerciseName(
+                                typeof step.exercise_code === "string" ? step.exercise_code : null,
+                                typeof step.name === "string" ? step.name : "Step",
+                              );
+                              const target = calendarStepTarget(step);
+                              const repeats = typeof step.repeat_count === "number" ? step.repeat_count : step.repeats;
+                              const intensity = calendarStepIntensity(step);
+                              return (
+                                <li key={`${stepName}-${index}`}>
+                                  <strong>{stepName}</strong>
+                                  {target && <span>{target}</span>}
+                                  {intensity && <span>{intensity}</span>}
+                                  {typeof repeats === "number" && repeats > 1 && <span>Repeat {repeats}×</span>}
+                                </li>
+                              );
+                            })}
+                          </ol>
+                        )}
+                        {result && !result.success && <p className="calendar-change-dialog-error" role="alert">{result.text}</p>}
+                        {isBatch && (
+                          <div className="calendar-change-workout-actions">
+                            {result?.success ? (
+                              <span className="calendar-change-status is-success">Added to calendar</span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn calendar-change-dialog-confirm"
+                                onClick={() => void confirmCalendarChange(change, itemKey, false)}
+                                disabled={calendarChangePending !== null}
+                              >
+                                {calendarChangePending === itemKey ? "Saving…" : "Confirm"}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })}
+                </div>
                 <div className="ai-delete-dialog-actions">
-                  <button type="button" className="btn btn-secondary" onClick={() => setCalendarChangeReview(null)} disabled={calendarChangePending === key}>
-                    Cancel
+                  <button type="button" className="btn btn-secondary" onClick={() => setCalendarChangeReview(null)} disabled={calendarChangePending !== null}>
+                    {isBatch ? "Close" : "Cancel"}
                   </button>
-                  <button
-                    type="button"
-                    className="btn calendar-change-dialog-confirm"
-                    onClick={() => void confirmCalendarChange(change, key)}
-                    disabled={calendarChangePending === key}
-                  >
-                    {calendarChangePending === key ? "Saving…" : "Confirm"}
-                  </button>
+                  {!isBatch && (
+                    <button
+                      type="button"
+                      className="btn calendar-change-dialog-confirm"
+                      onClick={() => void confirmCalendarChange(singleChange, key)}
+                      disabled={calendarChangePending === key}
+                    >
+                      {calendarChangePending === key ? "Saving…" : "Confirm"}
+                    </button>
+                  )}
                 </div>
               </div>
             );
