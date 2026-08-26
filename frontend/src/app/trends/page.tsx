@@ -198,10 +198,11 @@ function dateInputValue(value: Date): string {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
-function trainingVolumeDateRange(): { start: string; end: string } {
+function trainingVolumeDateRange(months = 12, alignStartToMonth = false): { start: string; end: string } {
   const end = new Date();
   const start = new Date(end);
-  start.setFullYear(start.getFullYear() - 1);
+  start.setMonth(start.getMonth() - months);
+  if (alignStartToMonth) start.setDate(1);
   return { start: dateInputValue(start), end: dateInputValue(end) };
 }
 
@@ -216,6 +217,34 @@ function formatTrainingVolumePeriod(periodStart: string, groupBy: TrainingVolume
   if (groupBy === "year") return String(date.getFullYear());
   if (groupBy === "month") return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatTrainingVolumeTooltipLabel(periodStart: string, groupBy: TrainingVolumeGroup): string {
+  const start = new Date(`${periodStart}T00:00:00`);
+  if (groupBy === "year") {
+    return String(start.getFullYear());
+  }
+  if (groupBy === "month") {
+    return start.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+  }
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+
+  const startMonth = start.toLocaleDateString("en-US", { month: "short" });
+  const startDay = start.getDate();
+  const startYear = start.getFullYear();
+
+  const endMonth = end.toLocaleDateString("en-US", { month: "short" });
+  const endDay = end.getDate();
+  const endYear = end.getFullYear();
+
+  if (startYear !== endYear) {
+    return `${startMonth} ${startDay}, ${startYear} – ${endMonth} ${endDay}, ${endYear}`;
+  }
+  if (startMonth !== endMonth) {
+    return `${startMonth} ${startDay} – ${endMonth} ${endDay}, ${startYear}`;
+  }
+  return `${startMonth} ${startDay} – ${endDay}, ${startYear}`;
 }
 
 function isCurrentTrainingVolumePeriod(periodStart: string, groupBy: TrainingVolumeGroup): boolean {
@@ -314,7 +343,7 @@ function DistributionPanel({
   const primary = [...segments].sort((left, right) => right.percent - left.percent)[0];
 
   return (
-    <section className="card" style={{ minWidth: 0 }}>
+    <section className="card distribution-panel" style={{ minWidth: 0 }}>
       <div className="card-header" style={{ minHeight: "78px", alignItems: "flex-start", gap: "var(--space-3)" }}>
         <div>
           <span style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
@@ -345,7 +374,7 @@ function DistributionPanel({
               </PieChart>
             </ResponsiveContainer>
             {primary && (
-              <div style={{ marginTop: "-8px", textAlign: "center" }}>
+              <div className="distribution-primary" style={{ marginTop: "-8px", textAlign: "center" }}>
                 <span style={{ display: "block", fontSize: "11px", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Primary</span>
                 <strong style={{ display: "block", marginTop: "3px", fontSize: "17px" }}>{primary.label}</strong>
                 <strong style={{ display: "block", marginTop: "3px", color: primary.color, fontSize: "24px", fontVariantNumeric: "tabular-nums" }}>{primary.percent.toFixed(1)}%</strong>
@@ -353,7 +382,7 @@ function DistributionPanel({
               </div>
             )}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: 0 }}>
+          <div className="distribution-zone-list" style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: 0 }}>
             {segments.map((segment) => (
               <div key={segment.label} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "8px", alignItems: "center" }}>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "12px", color: "var(--color-text-secondary)" }}>{segment.label}</span>
@@ -398,6 +427,13 @@ export default function TrendsPage() {
   const invalidTrainingVolumeRange = trainingVolumeRange.start > trainingVolumeRange.end;
   const trendHistoryDays = visibleTrendDays + 6;
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 700px)").matches) {
+      const mobileRangeTimer = window.setTimeout(() => setTrainingVolumeRange(trainingVolumeDateRange(6, true)), 0);
+      return () => window.clearTimeout(mobileRangeTimer);
+    }
+  }, []);
 
   useEffect(() => {
     async function fetchTrendData() {
@@ -520,6 +556,7 @@ export default function TrendsPage() {
     return {
       ...bucket,
       label: formatTrainingVolumePeriod(bucket.period_start, trainingVolumeGroupBy),
+      tooltipLabel: formatTrainingVolumeTooltipLabel(bucket.period_start, trainingVolumeGroupBy),
       toDate: isCurrentTrainingVolumePeriod(bucket.period_start, trainingVolumeGroupBy),
       distance,
       duration,
@@ -605,14 +642,14 @@ export default function TrendsPage() {
             ) : (
               <div className="training-volume-chart">
                 <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 300 }}>
-                  <BarChart data={trainingVolumeChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={2}>
+                  <BarChart data={trainingVolumeChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={1}>
                     <CartesianGrid strokeDasharray="2 6" stroke="var(--color-chart-grid)" />
                     <XAxis dataKey="label" tick={{ fill: "var(--color-text-muted)", fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} dy={4} interval="equidistantPreserveStart" />
                     <YAxis domain={trainingVolumeIsRelative ? [0, 100] : [0, "auto"]} tick={trainingVolumeIsRelative ? false : { fill: "var(--color-text-muted)", fontSize: 10 }} tickFormatter={(value: number) => trainingVolumeMetrics[0] === "distance" ? value.toFixed(value >= 10 ? 0 : 1) : trainingVolumeMetrics[0] === "duration" ? `${value.toFixed(1)}h` : `${Math.round(value)}`} axisLine={false} tickLine={false} width={trainingVolumeIsRelative ? 8 : 40} />
                     <Tooltip cursor={false} content={({ active, payload }) => {
                       const bucket = payload?.[0]?.payload as (typeof trainingVolumeChartData)[number] | undefined;
                       if (!active || !bucket) return null;
-                      return <div className="training-volume-tooltip"><strong>{bucket.label}{bucket.toDate ? " · To date" : ""}</strong>{trainingVolumeMetrics.map((metric) => <span key={metric}><i style={{ background: TRAINING_VOLUME_CONFIG[metric].color }} />{TRAINING_VOLUME_CONFIG[metric].label}<b>{formatTrainingVolumeMetric(metric, bucket[metric])}</b></span>)}</div>;
+                      return <div className="training-volume-tooltip"><strong>{bucket.tooltipLabel}{bucket.toDate ? " · To date" : ""}</strong>{trainingVolumeMetrics.map((metric) => <span key={metric}><i style={{ background: TRAINING_VOLUME_CONFIG[metric].color }} />{TRAINING_VOLUME_CONFIG[metric].label}<b>{formatTrainingVolumeMetric(metric, bucket[metric])}</b></span>)}</div>;
                     }} />
                     {trainingVolumeMetrics.map((metric) => (
                       <Bar
@@ -620,14 +657,14 @@ export default function TrendsPage() {
                         dataKey={trainingVolumeIsRelative ? `${metric}Relative` : metric}
                         name={TRAINING_VOLUME_CONFIG[metric].label}
                         radius={[4, 4, 0, 0]}
-                        barSize={trainingVolumeMetrics.length === 1 ? 30 : 14}
+                        barSize={trainingVolumeMetrics.length === 1 ? 30 : 8}
                         isAnimationActive={false}
                       >
                         {trainingVolumeChartData.map((bucket) => (
                           <Cell
                             key={`${metric}-${bucket.period_start}`}
                             fill={TRAINING_VOLUME_CONFIG[metric].color}
-                            fillOpacity={bucket.toDate ? 0.6 : 0.4}
+                            fillOpacity={0.4}
                             stroke={TRAINING_VOLUME_CONFIG[metric].color}
                             strokeWidth={1.5}
                           />
@@ -753,15 +790,15 @@ export default function TrendsPage() {
                 </div>
               )}
             </div>
-            <div style={{ marginTop: "var(--space-3)" }}>
+            <div className="trend-chart-container" style={{ marginTop: "var(--space-3)", height: "300px" }}>
               {isLoading ? (
-                <div className="skeleton" style={{ width: "100%", height: 300, borderRadius: 12 }} />
+                <div className="skeleton" style={{ width: "100%", height: "100%", borderRadius: 12 }} />
               ) : (
-                <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={loadChartData}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={loadChartData} margin={{ top: 8, right: 40, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                     <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
-                    <YAxis stroke="var(--color-text-muted)" fontSize={11} axisLine={false} />
+                    <YAxis stroke="var(--color-text-muted)" fontSize={11} width={40} axisLine={false} />
                     <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip />} />
                     <Area type="monotone" dataKey="total_load" name="Training Load" stroke="var(--color-accent-exertion)" fill="var(--color-accent-exertion)" fillOpacity={0.4} strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-exertion)" }} />
                     <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
@@ -780,17 +817,17 @@ export default function TrendsPage() {
                 <div className="card-header">
                   <span className="card-title">Daily Steps</span>
                 </div>
-                <div style={{ marginTop: "var(--space-4)" }}>
+                <div className="trend-chart-container" style={{ marginTop: "var(--space-4)", height: "260px" }}>
                   {isHealthLoading ? (
-                    <div className="skeleton" style={{ width: "100%", height: 260, borderRadius: 12 }} />
+                    <div className="skeleton" style={{ width: "100%", height: "100%", borderRadius: 12 }} />
                   ) : dailyHealthData.length === 0 ? (
                     <div style={{ color: "var(--color-text-muted)", padding: "2rem", textAlign: "center" }}>No steps recorded yet.</div>
                   ) : (
-                    <ResponsiveContainer width="100%" height={260}>
-                      <AreaChart data={stepsChartData}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={stepsChartData} margin={{ top: 8, right: 40, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                         <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
-                        <YAxis stroke="#4fc3f3" fontSize={11} axisLine={false} tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`} />
+                        <YAxis stroke="#4fc3f3" fontSize={11} width={40} axisLine={false} tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`} />
                         <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="steps" />} />
                         <Area type="monotone" dataKey="steps" name="Daily Steps" stroke="#4fc3f3" fill="#4fc3f3" fillOpacity={0.4} strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#4fc3f3" }} />
                         <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
@@ -805,17 +842,17 @@ export default function TrendsPage() {
                 <div className="card-header">
                   <span className="card-title">Active Calories</span>
                 </div>
-                <div style={{ marginTop: "var(--space-4)" }}>
+                <div className="trend-chart-container" style={{ marginTop: "var(--space-4)", height: "260px" }}>
                   {isHealthLoading ? (
-                    <div className="skeleton" style={{ width: "100%", height: 260, borderRadius: 12 }} />
+                    <div className="skeleton" style={{ width: "100%", height: "100%", borderRadius: 12 }} />
                   ) : dailyHealthData.length === 0 ? (
                     <div style={{ color: "var(--color-text-muted)", padding: "2rem", textAlign: "center" }}>No active calories recorded yet.</div>
                   ) : (
-                    <ResponsiveContainer width="100%" height={260}>
-                      <AreaChart data={caloriesChartData}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={caloriesChartData} margin={{ top: 8, right: 40, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                         <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
-                        <YAxis stroke="#ff9800" fontSize={11} axisLine={false} />
+                        <YAxis stroke="#ff9800" fontSize={11} width={40} axisLine={false} />
                         <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="kcal" />} />
                         <Area type="monotone" dataKey="active_calories_kcal" name="Active Calories" stroke="#ff9800" fill="#ff9800" fillOpacity={0.4} strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#ff9800" }} />
                         <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />

@@ -54,12 +54,6 @@ const PERIOD_INPUT_LABELS: Record<Exclude<DatePeriod, "">, string> = {
   year: "Year",
 };
 
-const PERIOD_INPUT_HINTS: Record<Exclude<DatePeriod, "">, string> = {
-  day: "Choose the exact activity date.",
-  week: "Example: Week 31, 2026",
-  month: "Example: July 2026",
-  year: "Enter four digits, for example 2026",
-};
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -200,9 +194,6 @@ export default function ActivitiesPage() {
   const periodInputLabel = draftFilters.period
     ? PERIOD_INPUT_LABELS[draftFilters.period]
     : "Choose a period first";
-  const periodInputHint = draftFilters.period
-    ? PERIOD_INPUT_HINTS[draftFilters.period]
-    : "Choose Exact date, week, month, or year.";
 
   const setDraftFilter = (key: keyof ActivityFilters, value: string) => {
     setDraftFilters((current) => ({ ...current, [key]: value }));
@@ -233,16 +224,22 @@ export default function ActivitiesPage() {
                   event.currentTarget.closest("details")?.removeAttribute("open");
                 }}
               >
-                <label className="activity-filter-sport-select">
+                <div className="activity-filter-sport-select">
                   <span>Sport</span>
-                  <select id="sport-filter" aria-label="Sport filter" value={sportFilter} onChange={(event) => setSportFilter(event.target.value)}>
-                    <option value="">All Sports</option>
-                    {Object.entries(SPORT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
-                </label>
-                <div className="activity-name-search">
-                  <input aria-label="Search activities by name" placeholder="Search by activity name" value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} />
-                  <button type="submit" aria-label="Search activities" title="Search activities"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" /><path d="m16 16 4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
+                  <SingleSelect
+                    ariaLabel="Sport filter"
+                    value={sportFilter}
+                    onChange={(value) => setSportFilter(value)}
+                    id="sport-filter"
+                    options={[{ value: "", label: "All Sports" }, ...Object.entries(SPORT_LABELS).map(([value, label]) => ({ value, label }))]}
+                  />
+                </div>
+                <div className="activity-name-filter">
+                  <span>Activity name</span>
+                  <div className="activity-name-search">
+                    <input aria-label="Search activities by name" placeholder="Search by activity name" value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} />
+                    <button type="submit" aria-label="Search activities" title="Search activities"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" /><path d="m16 16 4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
+                  </div>
                 </div>
                 <div className="activity-filter-grid">
                   <div className="activity-filter-field">
@@ -284,7 +281,6 @@ export default function ActivitiesPage() {
                       value={draftFilters.periodValue}
                       onChange={(val) => setDraftFilter("periodValue", val)}
                     />
-                    <small className="activity-filter-hint">{periodInputHint}</small>
                   </div>
 
                   <div className="activity-filter-field">
@@ -465,7 +461,7 @@ export default function ActivitiesPage() {
                         >
                           <span style={{ display: "flex", transform: "scale(0.8)" }}><SportIcon sport={activity.sport} title={activity.title} subsport={activity.subsport} /></span>
                         </div>
-                        <div className="activity-card-content" style={{ minWidth: 0 }}>
+                        <div className="activity-card-content dashboard-activity-content" style={{ minWidth: 0 }}>
                           <div className="activity-card-title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "14px", fontWeight: 750 }}>
                             {activity.title || sportVisual.label}
                           </div>
@@ -478,7 +474,7 @@ export default function ActivitiesPage() {
                             ))}
                           </div>
                         </div>
-                        <div className="activity-card-date" style={{ textAlign: "right", color: "var(--color-text-secondary)", fontSize: "11px", fontVariantNumeric: "tabular-nums" }}>
+                        <div className="activity-card-date dashboard-activity-date" style={{ textAlign: "right", color: "var(--color-text-secondary)", fontSize: "11px", fontVariantNumeric: "tabular-nums" }}>
                           <strong style={{ display: "block", color: "var(--color-text-primary)", fontSize: "12px" }}>
                             {startedAt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
                           </strong>

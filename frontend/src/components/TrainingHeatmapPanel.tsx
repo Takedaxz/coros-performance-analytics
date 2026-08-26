@@ -96,6 +96,7 @@ interface TooltipPos {
 
 export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatmapPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const heatmapScrollRef = useRef<HTMLDivElement>(null);
   const [hoveredDay, setHoveredDay] = useState<HeatmapDay | null>(null);
   const [tooltipPos, setTooltipPos] = useState<TooltipPos | null>(null);
   const [yearlyLoadData, setYearlyLoadData] = useState<BackendLoadItem[]>([]);
@@ -263,6 +264,12 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
     }
     return labels;
   }, []);
+
+  useEffect(() => {
+    if (heatmapScrollRef.current) {
+      heatmapScrollRef.current.scrollLeft = heatmapScrollRef.current.scrollWidth;
+    }
+  }, [heatmapData, months]);
 
   // Compute peak (maximum) daily load independently for each sport category
   const maxLoadPerSport = useMemo(() => {
@@ -463,51 +470,57 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
         </div>
       </div>
 
-      {/* Month Labels Row */}
-      <div style={{ display: "flex", marginLeft: "28px", justifyContent: "space-between", marginBottom: "6px", fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)" }}>
-        {months.map((m, idx) => (
-          <span key={idx}>{m}</span>
-        ))}
-      </div>
-
-      {/* Heatmap 7x52 Grid Container */}
-      <div style={{ display: "flex", gap: "6px", overflowX: "auto", padding: "8px 0" }}>
-        {/* Weekday Labels Column */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "3px", justifyContent: "space-around", fontSize: "10px", fontWeight: 700, color: "var(--color-text-muted)", width: "16px", flexShrink: 0 }}>
-          {WEEKDAYS.map((w, idx) => (
-            <span key={idx} style={{ height: "11px", lineHeight: "11px" }}>{w}</span>
-          ))}
-        </div>
-
-        {/* 52 Week Columns */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(52, 1fr)", gap: "3px", flex: 1 }}>
-          {Array.from({ length: 52 }, (_, wIdx) => (
-            <div key={wIdx} style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
-              {Array.from({ length: 7 }, (_, dIdx) => {
-                const item = heatmapData.find((d) => d.weekIndex === wIdx && d.dayOfWeek === dIdx);
-                if (!item) return <span key={dIdx} style={{ width: "11px", height: "11px", borderRadius: "2px", background: "transparent" }} />;
-
-                return (
-                  <span
-                    key={dIdx}
-                    onMouseEnter={(e) => handleCellHover(item, e)}
-                    onMouseLeave={handleCellLeave}
-                    style={{
-                      width: "11px",
-                      height: "11px",
-                      borderRadius: "3px",
-                      background: getCellBackground(item),
-                      cursor: "pointer",
-                      transition: "transform 150ms ease, box-shadow 150ms ease",
-                      transform: hoveredDay?.dateStr === item.dateStr ? "scale(1.35)" : "scale(1)",
-                      boxShadow: hoveredDay?.dateStr === item.dateStr ? "0 0 8px rgba(33, 230, 165, 0.9)" : "none",
-                      zIndex: hoveredDay?.dateStr === item.dateStr ? 10 : 1,
-                    }}
-                  />
-                );
-              })}
+      {/* One timeline keeps month labels and cells aligned during drag/swipe. */}
+      <div ref={heatmapScrollRef} style={{ overflowX: "auto", overflowY: "hidden", padding: "8px 0", scrollbarGutter: "stable" }}>
+        <div style={{ minWidth: "725px", width: "100%" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0, 1fr)", gap: "6px", marginBottom: "6px", fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)" }}>
+            <span aria-hidden="true" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(13, minmax(0, 1fr))", gap: "3px" }}>
+              {months.map((m, idx) => (
+                <span key={idx}>{m}</span>
+              ))}
             </div>
-          ))}
+          </div>
+
+          <div style={{ display: "flex", gap: "6px" }}>
+            {/* Weekday Labels Column */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "3px", justifyContent: "space-around", fontSize: "10px", fontWeight: 700, color: "var(--color-text-muted)", width: "16px", flexShrink: 0 }}>
+              {WEEKDAYS.map((w, idx) => (
+                <span key={idx} style={{ height: "11px", lineHeight: "11px" }}>{w}</span>
+              ))}
+            </div>
+
+            {/* 52 Week Columns */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(52, minmax(11px, 1fr))", gap: "3px", flex: 1 }}>
+              {Array.from({ length: 52 }, (_, wIdx) => (
+                <div key={wIdx} style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                  {Array.from({ length: 7 }, (_, dIdx) => {
+                    const item = heatmapData.find((d) => d.weekIndex === wIdx && d.dayOfWeek === dIdx);
+                    if (!item) return <span key={dIdx} style={{ width: "11px", height: "11px", borderRadius: "2px", background: "transparent" }} />;
+
+                    return (
+                      <span
+                        key={dIdx}
+                        onMouseEnter={(e) => handleCellHover(item, e)}
+                        onMouseLeave={handleCellLeave}
+                        style={{
+                          width: "11px",
+                          height: "11px",
+                          borderRadius: "3px",
+                          background: getCellBackground(item),
+                          cursor: "pointer",
+                          transition: "transform 150ms ease, box-shadow 150ms ease",
+                          transform: hoveredDay?.dateStr === item.dateStr ? "scale(1.35)" : "scale(1)",
+                          boxShadow: hoveredDay?.dateStr === item.dateStr ? "0 0 8px rgba(33, 230, 165, 0.9)" : "none",
+                          zIndex: hoveredDay?.dateStr === item.dateStr ? 10 : 1,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -533,14 +546,14 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
         </div>
 
         {/* Stats Summary Pills */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ background: "var(--color-surface-secondary)", border: "1px solid var(--border-color)", borderRadius: "var(--radius-full)", padding: "4px 12px", fontSize: "12px", fontWeight: 700, color: "var(--color-text-primary)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "4px", flexWrap: "nowrap", maxWidth: "100%", whiteSpace: "nowrap" }}>
+          <span style={{ background: "var(--color-surface-secondary)", border: "1px solid var(--border-color)", borderRadius: "var(--radius-full)", padding: "4px 6px", fontSize: "10px", fontWeight: 700, color: "var(--color-text-primary)", whiteSpace: "nowrap" }}>
             {activeDays} active days
           </span>
-          <span style={{ background: "var(--color-surface-secondary)", border: "1px solid var(--border-color)", borderRadius: "var(--radius-full)", padding: "4px 12px", fontSize: "12px", fontWeight: 700, color: "var(--color-accent-primary)" }}>
+          <span style={{ background: "var(--color-surface-secondary)", border: "1px solid var(--border-color)", borderRadius: "var(--radius-full)", padding: "4px 6px", fontSize: "10px", fontWeight: 700, color: "var(--color-accent-primary)", whiteSpace: "nowrap" }}>
             {activeDays > 0 ? "Active streak" : "Rest day"}
           </span>
-          <span style={{ background: "var(--color-surface-secondary)", border: "1px solid var(--border-color)", borderRadius: "var(--radius-full)", padding: "4px 12px", fontSize: "12px", fontWeight: 700, color: "var(--color-text-primary)" }}>
+          <span style={{ background: "var(--color-surface-secondary)", border: "1px solid var(--border-color)", borderRadius: "var(--radius-full)", padding: "4px 6px", fontSize: "10px", fontWeight: 700, color: "var(--color-text-primary)", whiteSpace: "nowrap" }}>
             {totalLoad.toLocaleString()} total load
           </span>
         </div>

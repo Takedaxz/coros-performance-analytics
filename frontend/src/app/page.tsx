@@ -703,7 +703,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="dashboard-activity-content" style={{ minWidth: 0 }}>
                         <div style={{ minWidth: 0 }}>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "14px", fontWeight: 750 }}>
+                          <span style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "14px", fontWeight: 750 }}>
                             {activity.title || activity.sport}
                           </span>
                         </div>

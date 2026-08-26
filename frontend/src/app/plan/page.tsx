@@ -320,8 +320,13 @@ function normalizeLoadedDraft(draft: WorkoutEditorData): WorkoutDraftForm {
   const loadedSets = draft.sport === "strength";
   return {
     ...draft,
-    steps: draft.steps.map((step) => ({
+    steps: draft.steps.map((step) => {
+      const percentIntensity = step.intensity.endsWith("percent");
+      const normalizePercent = (value: number | null) => percentIntensity && value != null && Math.abs(value) > 500 ? value / 1000 : value;
+      return {
       ...step,
+      intensity_low: normalizePercent(step.intensity_low),
+      intensity_high: normalizePercent(step.intensity_high),
       name: step.exercise_code ? resolveExerciseName(step.exercise_code, step.name) : /^[TS]\d+$/i.test(step.name.trim()) ? friendlyStepName(step.kind) : step.name,
       exercise_code: step.exercise_code ?? null,
       exercise_id: step.exercise_id ?? null,
@@ -329,7 +334,8 @@ function normalizeLoadedDraft(draft: WorkoutEditorData): WorkoutDraftForm {
       rest_seconds: step.rest_seconds ?? 0,
       intensity_basis: step.intensity_basis ?? "max_hr",
       intensity_zone: step.intensity_zone ?? null,
-    })),
+      };
+    }),
   };
 }
 

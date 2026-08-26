@@ -964,22 +964,33 @@ export default function ActivityDetailPage() {
   const paceZones = isRun && activity.threshold_pace_s_per_km
     ? buildPaceZones(activity.threshold_pace_s_per_km)
     : [];
-  const paceValues = records.flatMap((record) =>
-    record.speed_mps != null && record.speed_mps > 0
-      ? [1000 / record.speed_mps]
-      : [],
-  );
-  const heartRateZoneSummary = summarizeTrainingZones(heartRateValues, heartRateZones);
-  const paceZoneSummary = summarizeTrainingZones(paceValues, paceZones);
   const paceChartCeiling = paceZones[0]?.min
     ? paceZones[0].min * 1.45
     : 720;
+  const paceValues = records.flatMap((record) =>
+    record.speed_mps != null && record.speed_mps > 0 && 1000 / record.speed_mps <= paceChartCeiling
+      ? [1000 / record.speed_mps]
+      : [],
+  );
+  const sortedPaceValues = [...paceValues].sort((a, b) => a - b);
+  const paceChartDomain: [number, number] = sortedPaceValues.length > 4
+    ? (() => {
+      const lower = sortedPaceValues[Math.floor((sortedPaceValues.length - 1) * 0.05)];
+      const upper = sortedPaceValues[Math.ceil((sortedPaceValues.length - 1) * 0.95)];
+      const padding = Math.max(10, (upper - lower) * 0.2);
+      return [Math.max(0, lower - padding), upper + padding];
+    })()
+    : [0, paceChartCeiling];
+  const heartRateZoneSummary = summarizeTrainingZones(heartRateValues, heartRateZones);
+  const paceZoneSummary = summarizeTrainingZones(paceValues, paceZones);
   const sampleRate = Math.max(1, Math.floor(records.length / 300));
   const chartData = records
     .filter((_, i) => i % sampleRate === 0 || i === records.length - 1)
     .map((record) => {
       const pace = record.speed_mps != null && record.speed_mps > 0
-        ? Math.min(1000 / record.speed_mps, paceChartCeiling)
+        && 1000 / record.speed_mps >= paceChartDomain[0]
+        && 1000 / record.speed_mps <= paceChartDomain[1]
+        ? 1000 / record.speed_mps
         : undefined;
       const point: Record<string, number | undefined> = {
         time: record.elapsed_s ? record.elapsed_s / 60 : 0,
@@ -1229,10 +1240,10 @@ export default function ActivityDetailPage() {
       </div>
       <div className="telemetry-chart">
         <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 360 }}>
-          <LineChart data={chartData} margin={{ top: 16, right: 12, bottom: 16, left: 8 }}>
+          <LineChart data={chartData} margin={{ top: 16, right: 44, bottom: 16, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
             <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
-            {hasHeartRateData && <YAxis yAxisId="hr" width={72} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} bpm`} axisLine={false} domain={["dataMin - 10", "dataMax + 10"]} />}
+            {hasHeartRateData && <YAxis yAxisId="hr" width={44} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} bpm`} axisLine={false} domain={["dataMin - 10", "dataMax + 10"]} />}
             {hasSpeedData && <YAxis yAxisId="speed" orientation="right" width={68} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-primary)", fontSize: 11, fontWeight: 700 }} tickFormatter={(value: number) => `${Math.round(value)} km/h`} axisLine={false} />}
             <Tooltip labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`} />
             {hasHeartRateData && activity.avg_hr_bpm != null && (
@@ -1285,7 +1296,7 @@ export default function ActivityDetailPage() {
                   <LineChart data={chartData} margin={{ top: 16, right: 12, bottom: 8, left: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                     <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
-                    <YAxis width={56} reversed domain={["dataMin - 10", paceChartCeiling]} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => formatPaceSeconds(value)} axisLine={false} />
+                    <YAxis width={56} reversed domain={paceChartDomain} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => formatPaceSeconds(value)} axisLine={false} />
                     <Tooltip formatter={(value) => [formatPaceSeconds(Number(value)), "Pace"]} labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`} />
                     {activity.avg_speed_mps != null && activity.avg_speed_mps > 0 && (
                       <ReferenceLine y={1000 / activity.avg_speed_mps} stroke="var(--color-status-critical)" strokeDasharray="4 4" />

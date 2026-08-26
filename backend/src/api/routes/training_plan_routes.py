@@ -1343,7 +1343,15 @@ def _draft_from_program(
                 offset = exercise.get("onsightGradeOffset")
                 raw_low = float(offset) - 32 if isinstance(offset, (int, float)) else 0
                 raw_high = raw_low
-            percent_divisor = 1000 if is_percent and isinstance(raw_low, (int, float)) and abs(raw_low) > 500 else 1
+            percent_divisor = (
+                1000
+                if is_percent
+                and any(
+                    isinstance(raw_value, (int, float)) and abs(raw_value) > 500
+                    for raw_value in (raw_low, raw_high)
+                )
+                else 1
+            )
             basis_by_hr_type: dict[int, WorkoutIntensityBasis] = {1: "max_hr", 2: "reserve", 3: "lthr"}
             hr_type = exercise.get("hrType")
             raw_group_id = str(exercise.get("groupId", "0"))
@@ -1797,7 +1805,7 @@ async def edit_coros_workout(
     try:
         entity, previous, happen_day = await _scheduled_match(client, uid)
         if _coros_day(request.draft.date) != happen_day:
-            moved = await _schedule_new_workout(client, request.draft)
+            moved = await _schedule_new_workout(client, request.draft, request.save_to_library)
             await client.post_training_hub(
                 "/training/schedule/update",
                 {
@@ -1820,6 +1828,10 @@ async def edit_coros_workout(
         calculated = _apply_calculation(
             program, await client.post_training_hub("/training/program/calculate", program)
         )
+        if request.save_to_library:
+            program_id = await client.post_training_hub("/training/program/add", calculated)
+            if program_id is not None:
+                calculated["id"] = str(program_id)
         await client.post_training_hub(
             "/training/schedule/update",
             {

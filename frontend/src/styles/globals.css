@@ -273,6 +273,7 @@ body {
   color: var(--color-text-primary);
   background-color: var(--color-bg-primary);
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   overscroll-behavior: none;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
@@ -332,6 +333,7 @@ a:hover {
 .app-layout {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
   background-color: var(--color-bg-primary);
@@ -593,6 +595,7 @@ a:hover {
   flex: 1;
   min-width: 0;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -800,7 +803,7 @@ a:hover {
 
 @media (max-width: 700px) {
   :root {
-    --mobile-nav-height: 72px;
+    --mobile-nav-height: 64px;
   }
 
   body {
@@ -818,7 +821,9 @@ a:hover {
   }
 
   .sidebar {
-    background: color-mix(in srgb, var(--color-sidebar-bg) 94%, transparent);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    background: color-mix(in srgb, var(--color-sidebar-bg) 96%, transparent);
     border-right: 0;
     border-top: 1px solid var(--border-color);
     bottom: 0;
@@ -828,6 +833,7 @@ a:hover {
     padding-bottom: env(safe-area-inset-bottom);
     position: fixed;
     right: 0;
+    box-shadow: 0 -8px 24px color-mix(in srgb, var(--color-text-primary) 8%, transparent);
     top: auto;
     width: 100%;
     z-index: 1000;
@@ -840,12 +846,18 @@ a:hover {
   }
 
   .sidebar-nav {
+    /* Retain every destination; 320px phones scroll instead of shrinking touch targets below 44px. */
     align-items: stretch;
     display: grid;
-    gap: 2px;
-    grid-template-columns: repeat(8, minmax(0, 1fr));
-    overflow: hidden;
-    padding: var(--space-2) 4px;
+    gap: 0;
+    grid-auto-columns: minmax(44px, 1fr);
+    grid-auto-flow: column;
+    grid-template-columns: repeat(8, minmax(44px, 1fr));
+    justify-items: center;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding: 4px 8px;
+    scroll-snap-type: x proximity;
     scrollbar-width: none;
   }
 
@@ -860,12 +872,28 @@ a:hover {
 
   .nav-link,
   .nav-link+.nav-link {
+    border-color: transparent;
+    border-radius: 0;
     flex-direction: column;
     gap: 3px;
     justify-content: center;
     margin: 0;
     min-height: 54px;
     padding: 5px 4px;
+    scroll-snap-align: start;
+    width: 100%;
+  }
+
+  .nav-link.active {
+    background: transparent;
+    border-color: transparent;
+    color: var(--color-text-primary);
+  }
+
+  .nav-link > span[aria-hidden="true"] {
+    height: 16px !important;
+    width: 16px !important;
+    opacity: 1 !important;
   }
 
   .nav-link span {
@@ -957,10 +985,27 @@ a:hover {
     grid-column: auto;
   }
 
+  .dashboard-activity-content > div > span {
+    font-size: 13px !important;
+  }
+
+  .dashboard-activity-content > span {
+    font-size: 10px !important;
+    margin-top: 3px !important;
+  }
+
   .dashboard-activity-date {
     grid-column: auto;
     line-height: 1.25;
     text-align: right !important;
+  }
+
+  .dashboard-activity-date strong {
+    font-size: 10px !important;
+  }
+
+  .dashboard-activity-date span {
+    font-size: 9px !important;
   }
 
   .activities-log-card {
@@ -1025,11 +1070,104 @@ a:hover {
   .ai-link-workspace {
     min-height: 0;
   }
+
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1rem);
+  }
+
+  #chart-trends .trend-chart-container,
+  #chart-daily-steps .trend-chart-container,
+  #chart-active-calories .trend-chart-container {
+    height: 220px !important;
+  }
+
+  #chart-trends .trend-chart-container .recharts-responsive-container,
+  #chart-daily-steps .trend-chart-container .recharts-responsive-container,
+  #chart-active-calories .trend-chart-container .recharts-responsive-container {
+    height: 220px !important;
+  }
+
+  #chart-trends .recharts-dot,
+  #chart-daily-steps .recharts-dot,
+  #chart-active-calories .recharts-dot {
+    display: none;
+  }
+
+  .distribution-panel {
+    padding: 12px;
+  }
+
+  .distribution-panel > .card-header {
+    min-height: 0 !important;
+    margin-bottom: 8px;
+  }
+
+  .distribution-panel .single-select-trigger {
+    min-height: 36px;
+    height: 36px;
+    padding-inline: 9px;
+    font-size: 12px;
+  }
+
+  .distribution-panel-grid {
+    gap: 8px !important;
+    margin-top: 8px !important;
+  }
+
+  .distribution-panel-grid > div:first-child .recharts-responsive-container {
+    height: 130px !important;
+  }
+
+  .distribution-primary {
+    margin-top: 28px !important;
+  }
+
+  .distribution-primary strong:nth-of-type(1) {
+    font-size: 15px !important;
+  }
+
+  .distribution-primary strong:nth-of-type(2) {
+    font-size: 21px !important;
+  }
+
+  .distribution-zone-list {
+    gap: 5px !important;
+  }
+
+  .distribution-zone-list > div {
+    row-gap: 3px;
+  }
+
+  .training-volume-chart {
+    height: 220px;
+  }
+
+  .training-volume-card > .skeleton {
+    height: 220px !important;
+  }
+
+  .acwr-popup-card {
+    position: fixed;
+    top: calc(var(--header-height) + 8px);
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-width: none;
+    transform: translateY(6px);
+  }
+
+  .acwr-badge-container:hover .acwr-popup-card {
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 420px) {
-  .nav-link span {
-    display: none;
+  .nav-link span:not([aria-hidden="true"]) {
+    display: block !important;
+    font-size: 7px;
+    max-width: 44px;
   }
 
   .page-header {
@@ -1043,27 +1181,93 @@ a:hover {
   }
 
   .dashboard-activity-card {
-    grid-template-columns: 40px minmax(0, 1fr) !important;
+    column-gap: 8px !important;
+    grid-template-columns: 36px minmax(0, 1fr) auto !important;
+    padding: 6px 8px !important;
   }
 
   .dashboard-activity-card .activity-sport-badge {
-    height: 40px !important;
-    width: 40px;
+    height: 36px !important;
+    width: 36px;
   }
 
   .dashboard-activity-date {
+    grid-column: auto;
+    text-align: right !important;
+  }
+
+  .activities-log-card {
+    align-items: center !important;
+    grid-template-columns: 36px minmax(0, 1fr) auto !important;
+    column-gap: 8px !important;
+    row-gap: 3px !important;
+    padding: 6px 8px !important;
+  }
+
+  .activities-log-card .activity-sport-badge {
+    height: 36px !important;
+    width: 36px;
+  }
+
+  .activities-log-card .activity-card-title {
+    min-width: 0;
+    overflow: hidden !important;
+    font-size: 13px !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .activities-log-card .activity-card-content {
     grid-column: 2;
-    text-align: left !important;
+    grid-row: 1;
+  }
+
+  .activities-log-card .activity-card-date {
+    align-self: start;
+    grid-column: 3;
+    grid-row: 1;
+    line-height: 1.2;
+    text-align: right !important;
+    white-space: nowrap;
+  }
+
+  .activities-log-card .activity-card-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    column-gap: 8px !important;
+    row-gap: 3px !important;
+    margin-top: 2px !important;
+  }
+
+  .activities-log-card .activity-card-metrics > span:nth-child(n + 3) {
+    display: none !important;
+  }
+
+  .activities-log-card .activity-card-metrics span span:first-child {
+    font-size: 7px !important;
+  }
+
+  .activities-log-card .activity-card-metrics span span:last-child {
+    font-size: 8px !important;
+  }
+
+  .activities-log-card .activity-card-date strong {
+    font-size: 10px !important;
+  }
+
+  .activities-log-card .activity-card-date {
+    font-size: 9px !important;
+  }
+
+  .activities-log-card .activity-card-date span {
+    display: block !important;
+    margin-top: 3px !important;
+    font-size: 9px !important;
   }
 
   .dashboard-activity-date strong,
   .dashboard-activity-date span {
-    display: inline !important;
-    margin-top: 0 !important;
-  }
-
-  .dashboard-activity-date span::before {
-    content: " · ";
+    display: block !important;
+    margin-top: 3px !important;
   }
 }
 
@@ -2906,8 +3110,8 @@ a:hover {
 
 .breakdown-table tbody tr.breakdown-total-row td,
 .breakdown-table tbody tr.breakdown-total-row:hover td {
-  background: rgba(33, 230, 165, 0.04);
-  border-top-color: rgba(33, 230, 165, 0.18);
+  background: var(--color-bg-card);
+  border-top-color: var(--border-color);
   color: var(--color-text-primary);
   font-weight: var(--weight-semibold);
 }
@@ -3039,7 +3243,7 @@ a:hover {
 }
 
 .lap-split-row td {
-  background: var(--color-surface-secondary);
+  background: var(--color-bg-card);
   padding: var(--space-4);
 }
 
@@ -5237,11 +5441,11 @@ table.data-table .lap-split-table tr:hover td {
 /* ── Single Select — iOS contextual menu style ── */
 .single-select {
   position: relative;
-  z-index: 5;
+  z-index: 1;
 }
 
 .single-select[open] {
-  z-index: 6;
+  z-index: 50;
 }
 
 .single-select-trigger {
@@ -5316,7 +5520,7 @@ table.data-table .lap-split-table tr:hover td {
   right: 0;
   top: calc(100% + 4px);
   width: max-content;
-  z-index: 10;
+  z-index: 50;
 }
 
 .single-select-option {
@@ -5415,10 +5619,26 @@ table.data-table .lap-split-table tr:hover td {
   width: 100%;
 }
 
+.activity-filter-menu > .activity-filter-sport-select .single-select,
+.activity-filter-menu > .activity-filter-sport-select .single-select-trigger {
+  width: 100%;
+}
+
+.activity-filter-menu > .activity-filter-sport-select .single-select-menu {
+  left: 0;
+  right: auto;
+  width: 100%;
+}
+
 .activity-filter-sport-select {
   display: grid;
   gap: 6px;
   margin-bottom: 8px;
+  position: relative;
+}
+
+.activity-filter-sport-select:has(.single-select[open]) {
+  z-index: 50;
 }
 
 .activity-filter-sport-select span {
@@ -5429,17 +5649,21 @@ table.data-table .lap-split-table tr:hover td {
   text-transform: uppercase;
 }
 
-.activity-filter-sport-select select {
-  appearance: auto;
-  background: var(--color-surface-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-primary);
-  font: inherit;
-  font-size: 13px;
-  min-height: 40px;
-  padding: 0 12px;
-  width: 100%;
+.activity-filter-sport-select .single-select-trigger { background: var(--color-surface-secondary); }
+
+.activity-name-filter {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.activity-name-filter > span,
+.activity-filter-sport-select > span {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .activity-name-search:focus-within {
@@ -5708,6 +5932,15 @@ table.data-table .lap-split-table tr:hover td {
   display: grid;
   gap: 6px;
   min-width: 0;
+  position: relative;
+}
+
+.activity-filter-field:has(.single-select[open]) {
+  z-index: 50;
+}
+
+.activity-filter-field:has(.custom-datepicker-container.is-open) {
+  z-index: 99999;
 }
 
 .activity-filter-field>span,
@@ -10287,6 +10520,10 @@ details[open] > .ai-session-group-summary {
     padding: var(--space-3);
   }
 
+  .breakdown-table>tbody>tr.is-expanded:not(.lap-split-row) {
+    border-radius: 10px 10px 0 0;
+  }
+
   .breakdown-table>tbody>tr:not(.lap-split-row)>td,
   .breakdown-nested-table>tbody>tr>td {
     align-items: flex-end;
@@ -10344,10 +10581,11 @@ details[open] > .ai-session-group-summary {
     margin: calc(-1 * var(--space-2)) 0 var(--space-3);
   }
 
-  .lap-split-row>td {
+  .breakdown-table .lap-split-row>td {
     border: 1px solid var(--border-color);
     border-radius: 0 0 10px 10px;
     display: block;
+    height: auto;
     padding: var(--space-3);
     width: 100%;
   }
@@ -10384,9 +10622,249 @@ details[open] > .ai-session-group-summary {
 /* Final narrow-screen overrides intentionally follow feature-specific media rules. */
 @media (max-width: 700px) {
 
-  .metrics-grid,
+  .breakdown-table tbody tr.is-expanded td,
+  .lap-summary-row.is-expanded td,
+  .breakdown-table tbody tr.lap-summary-row:hover td {
+    background: transparent;
+  }
+
+  .breakdown-identity-button[aria-expanded="true"] .breakdown-row-label {
+    color: var(--color-text-primary);
+  }
+
+  .breakdown-table-wrap {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+  }
+
+  .breakdown-table {
+    display: table;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .breakdown-table th {
+    font-size: 7px;
+    padding: 8px 4px;
+  }
+
+  .breakdown-table>thead {
+    display: table-header-group;
+  }
+
+  .breakdown-table>tbody {
+    display: table-row-group;
+  }
+
+  .breakdown-table>tbody>tr:not(.lap-split-row) {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    display: table-row;
+    margin: 0;
+    padding: 0;
+  }
+
+  .breakdown-table>tbody>tr:not(.lap-split-row)>td,
+  .breakdown-table>tbody>tr:not(.lap-split-row)>td:first-child {
+    display: table-cell;
+    height: 52px;
+    padding: 8px 4px;
+    text-align: left;
+    width: auto;
+  }
+
+  .breakdown-table>tbody>tr:not(.lap-split-row)>td {
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .breakdown-table .breakdown-row-identity {
+    gap: 5px;
+  }
+
+  .breakdown-table .breakdown-index {
+    font-size: 9px;
+    height: 24px;
+    min-width: 24px;
+    padding: 0 4px;
+  }
+
+  .breakdown-table .breakdown-row-label {
+    font-size: 10px;
+  }
+
+  .breakdown-table .breakdown-total-label {
+    font-size: 10px;
+    margin-left: 29px;
+  }
+
+  .breakdown-table .breakdown-identity-button {
+    margin: -4px;
+    padding: 4px;
+    width: calc(100% + 8px);
+  }
+
+  .breakdown-table .breakdown-phase,
+  .breakdown-table .breakdown-phase-identity,
+  .breakdown-table .breakdown-phase-metrics {
+    gap: 4px;
+  }
+
+  .breakdown-table .breakdown-phase-copy span,
+  .breakdown-table .breakdown-phase-stat>span {
+    display: none;
+  }
+
+  .breakdown-table .breakdown-phase-copy strong,
+  .breakdown-table .breakdown-phase-stat strong {
+    font-size: 10px;
+  }
+
+  .breakdown-table .breakdown-phase-stat {
+    min-width: 0;
+  }
+
+  .breakdown-table td[data-label]::before {
+    display: none;
+  }
+
+  .breakdown-table>tbody>.lap-split-row {
+    display: table-row;
+    margin: 0;
+  }
+
+  .breakdown-table .lap-split-row>td {
+    border: 0;
+    border-radius: 0;
+    display: table-cell;
+    padding: var(--space-4);
+    width: auto;
+  }
+
+  .breakdown-nested-table {
+    display: table;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .breakdown-nested-table th {
+    font-size: 7px;
+    padding: 8px 4px;
+  }
+
+  .breakdown-nested-table>thead {
+    display: table-header-group;
+  }
+
+  .breakdown-nested-table>tbody {
+    display: table-row-group;
+  }
+
+  .breakdown-nested-table>tbody>tr {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    display: table-row;
+    margin: 0;
+    padding: 0;
+  }
+
+  .breakdown-nested-table>tbody>tr>td,
+  .breakdown-nested-table>tbody>tr>td:first-child {
+    display: table-cell;
+    font-size: 10px;
+    height: 52px;
+    padding: 8px 4px;
+    text-align: left;
+    white-space: nowrap;
+    width: auto;
+  }
+
+  .breakdown-nested-table td[data-label]::before {
+    display: none;
+  }
+
+  .breakdown-nested-table .lap-split-index {
+    font-size: 9px;
+    height: 24px;
+    min-width: 24px;
+  }
+
   .activity-summary-grid {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .activity-summary-grid > .card {
+    padding: 12px;
+  }
+
+  .activity-summary-grid .card-value {
+    font-size: clamp(20px, 7vw, 26px);
+  }
+
+  .activity-summary-grid .card-title {
+    font-size: 10px;
+  }
+
+  .activity-summary-grid .card-value-unit {
+    font-size: 10px;
+  }
+
+  .activity-summary-grid > .card > span:last-child {
+    font-size: 10px !important;
+  }
+
+  .activity-detail-identity h1 {
+    font-size: clamp(18px, 5vw, 20px);
+    line-height: 1.15;
+  }
+
+  .activity-metric-strip {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, max-content));
+  }
+
+  #chart-hr-speed .training-zone-row,
+  #chart-pace-hr .training-zone-row {
+    grid-template-columns: minmax(0, 1fr) 64px 36px 42px;
+    row-gap: 4px;
+  }
+
+  #chart-hr-speed .training-zone-name,
+  #chart-pace-hr .training-zone-name { grid-column: 1; grid-row: 1; }
+  #chart-hr-speed .training-zone-range,
+  #chart-pace-hr .training-zone-range { grid-column: 2; grid-row: 1; }
+  #chart-hr-speed .training-zone-row > strong,
+  #chart-pace-hr .training-zone-row > strong { grid-column: 3; grid-row: 1; }
+  #chart-hr-speed .training-zone-time,
+  #chart-pace-hr .training-zone-time { grid-column: 4; grid-row: 1; }
+  #chart-hr-speed .training-zone-track,
+  #chart-pace-hr .training-zone-track {
+    display: block;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: 4px;
+  }
+
+  #chart-hr-speed .telemetry-chart {
+    height: 240px;
+  }
+
+  .breakdown-table > tbody > tr:not(.lap-split-row) {
+    gap: 6px 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 8px;
+  }
+
+  .breakdown-table > tbody > tr:not(.lap-split-row) > td {
+    gap: 2px;
+  }
+
+  .breakdown-table td[data-label]::before {
+    font-size: 8px;
   }
 
   .training-pace-zone-grid {
@@ -10434,7 +10912,7 @@ details[open] > .ai-session-group-summary {
 .custom-datepicker-container {
   position: relative;
   width: 100%;
-  z-index: 10;
+  z-index: 1;
 }
 
 .custom-datepicker-container.is-open {
@@ -10758,6 +11236,58 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ============================================================
    Print / Export PDF Styles (Executive Report Styling)
    ============================================================ */
+@media (max-width: 420px) {
+  .page-header:has(.activity-header-controls) {
+    align-items: center;
+    flex-wrap: nowrap;
+    height: var(--header-height);
+    min-height: var(--header-height);
+    padding-block: 0;
+  }
+
+  .page-header:has(.activity-header-controls) .page-title-group {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .page-header:has(.activity-header-controls) .activity-header-controls {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    width: auto;
+  }
+
+  .page-header:has(.activity-header-controls) .single-select,
+  .page-header:has(.activity-header-controls) .single-select-trigger {
+    max-width: 84px;
+  }
+
+  .page-header:has(.activity-header-controls) .single-select-trigger {
+    font-size: 11px;
+    height: 36px;
+    min-height: 36px;
+    padding-inline: 8px;
+  }
+
+  .training-volume-controls {
+    gap: 6px;
+  }
+
+  .training-volume-controls label {
+    flex: 1 1 calc(50% - 3px);
+    font-size: 9px;
+    min-width: 0;
+  }
+
+  .training-volume-controls .single-select-trigger,
+  .training-volume-controls .custom-datepicker-trigger {
+    font-size: 11px;
+    height: 36px;
+    min-height: 36px;
+    padding-inline: 8px;
+  }
+}
+
 @media print {
   @page {
     size: portrait;

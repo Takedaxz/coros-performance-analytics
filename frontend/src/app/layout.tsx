@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono, Outfit } from "next/font/google";
 import "../styles/globals.css";
 import "katex/dist/katex.min.css";
@@ -23,6 +23,11 @@ export const metadata: Metadata = {
     shortcut: "/icon.svg?v=2",
     apple: "/apple-icon.png",
   },
+};
+
+export const viewport: Viewport = {
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({
