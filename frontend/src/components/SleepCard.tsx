@@ -53,8 +53,8 @@ export default function SleepCard({
   const awakePct = Math.max(0, 100 - deepPct - remPct - lightPct);
   const stages: SleepStage[] = [
     { label: "Deep", seconds: deepSeconds, percentage: deepPct, color: "var(--color-accent-primary)" },
-    { label: "Light", seconds: lightSeconds, percentage: lightPct, color: "var(--color-text-secondary)" },
     { label: "REM", seconds: remSeconds, percentage: remPct, color: "var(--color-accent-sleep)" },
+    { label: "Light", seconds: lightSeconds, percentage: lightPct, color: "var(--color-text-secondary)" },
     { label: "Awake", seconds: awakeSeconds, percentage: awakePct, color: "var(--color-text-disabled)" },
   ];
   return (

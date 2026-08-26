@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   AreaChart,
   Area,
@@ -17,6 +17,7 @@ import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import MetricCard from "@/components/MetricCard";
 import SingleSelect from "@/components/SingleSelect";
+import { FEELING_OPTIONS, type DailyFeeling, type FeelingLevel } from "@/components/DailyFeelingCheckIn";
 import type { HealthDay, SleepSummary } from "@/lib/types";
 
 interface SleepTooltipEntry {
@@ -43,6 +44,75 @@ const STAGE_COLORS: Record<string, string> = {
   Nap: "#8B7CC0",
 };
 
+const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+
+const FEELING_COLORS: Record<FeelingLevel, string> = {
+  very_low: "#d96c78",
+  low: "#db9a56",
+  okay: "#c8b35e",
+  good: "#72b98a",
+  great: "#6bb7cf",
+};
+
+const FEELING_NAMES: Record<FeelingLevel, string> = {
+  very_low: "Very Low",
+  low: "Low",
+  okay: "Okay",
+  good: "Good",
+  great: "Great",
+};
+
+interface HeatmapFeelingDay {
+  dateStr: string;
+  dayOfWeek: number; // 0=Mon, 6=Sun
+  weekIndex: number; // 0..51
+  isFuture: boolean;
+  entry?: DailyFeeling;
+}
+
+interface TooltipPos {
+  x: number;
+  y: number;
+  isLeftEdge: boolean;
+  isRightEdge: boolean;
+  isTopEdge: boolean;
+  containerWidth: number;
+}
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatChartAxisDate(dateStr?: string | number): string {
+  if (!dateStr) return "";
+  const parts = String(dateStr).split("-");
+  if (parts.length === 3) {
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+    if (!isNaN(month) && !isNaN(day) && month >= 1 && month <= 12) {
+      return `${day} ${SHORT_MONTHS[month - 1]}`;
+    }
+  } else if (parts.length === 2) {
+    const month = parseInt(parts[0], 10);
+    const day = parseInt(parts[1], 10);
+    if (!isNaN(month) && !isNaN(day) && month >= 1 && month <= 12) {
+      return `${day} ${SHORT_MONTHS[month - 1]}`;
+    }
+  }
+  return String(dateStr);
+}
+
+function formatDateNice(dateStr: string): string {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dateObj = new Date(y, m - 1, d);
+  return dateObj.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+
 function formatHoursMinutes(hours: number): string {
   const totalMinutes = Math.round(hours * 60);
   const wholeHours = Math.floor(totalMinutes / 60);
@@ -64,7 +134,7 @@ function SleepStageTooltip({
 
   return (
     <div style={{ padding: "12px 14px", borderRadius: "16px", background: "var(--color-popover)", border: "1px solid var(--border-color)", color: "var(--color-text-primary)", boxShadow: "var(--shadow-md)" }}>
-      <strong style={{ display: "block", marginBottom: "8px", color: "var(--color-text-secondary)", fontSize: "12px" }}>{label}</strong>
+      <strong style={{ display: "block", marginBottom: "8px", color: "var(--color-text-secondary)", fontSize: "12px" }}>{label ? formatChartAxisDate(label) : ""}</strong>
       {payload.map((entry) => {
         const stageColor = entry.color || entry.fill || STAGE_COLORS[entry.name ?? ""] || "var(--color-accent-primary)";
         return (
@@ -120,7 +190,7 @@ function ChartLegendTooltip({
       }}
     >
       <strong style={{ display: "block", marginBottom: "8px", color: "var(--color-text-secondary)", fontSize: "12px" }}>
-        {label}
+        {label ? formatChartAxisDate(label) : ""}
       </strong>
       {payload.map((entry, idx) => {
         const itemColor = entry.stroke || entry.color || entry.fill || "var(--color-accent-primary)";
@@ -163,6 +233,16 @@ function ChartLegendTooltip({
 export default function SleepPage() {
   const [health, setHealth] = useState<HealthDay[]>([]);
   const [sleep, setSleep] = useState<SleepSummary[]>([]);
+  const [feelings, setFeelings] = useState<DailyFeeling[]>([]);
+  const [editingFeelingDate, setEditingFeelingDate] = useState<string | null>(null);
+  const [draftFeeling, setDraftFeeling] = useState<FeelingLevel>("okay");
+  const [draftNote, setDraftNote] = useState<string>("");
+  const [isSavingFeeling, setIsSavingFeeling] = useState(false);
+  const [feelingEditError, setFeelingEditError] = useState<string | null>(null);
+  const feelingEditDialogRef = useRef<HTMLDialogElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hoveredDay, setHoveredDay] = useState<HeatmapFeelingDay | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<TooltipPos | null>(null);
   const [, setIsLoading] = useState(true);
   const [days, setDays] = useState(30);
 
@@ -170,7 +250,10 @@ export default function SleepPage() {
     async function fetchData() {
       try {
         const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const res = await fetch(`${apiBase}/api/dashboard/summary?days=${days}`);
+        const [res, feelingsRes] = await Promise.all([
+          fetch(`${apiBase}/api/dashboard/summary?days=${days}`),
+          fetch(`${apiBase}/api/feelings?days=365`),
+        ]);
         if (res.ok) {
           const data = await res.json();
           setHealth(data.health);
@@ -208,6 +291,7 @@ export default function SleepPage() {
             })
           );
         }
+        if (feelingsRes.ok) setFeelings(await feelingsRes.json());
       } catch {
         // fallback
       }
@@ -215,6 +299,92 @@ export default function SleepPage() {
     }
     fetchData();
   }, [days]);
+
+  useEffect(() => {
+    const dialog = feelingEditDialogRef.current;
+    if (!dialog) return;
+    if (editingFeelingDate && !dialog.open) dialog.showModal();
+    if (!editingFeelingDate && dialog.open) dialog.close();
+  }, [editingFeelingDate]);
+
+  const months = useMemo(() => {
+    const list: string[] = [];
+    const today = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      list.push(d.toLocaleDateString("en-US", { month: "short" }));
+    }
+    return list;
+  }, []);
+
+  const heatmapDays = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const dayOfWeekToday = today.getDay(); // 0=Sun, 6=Sat
+    const totalDaysToDisplay = 51 * 7 + (dayOfWeekToday + 1);
+
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - (totalDaysToDisplay - 1));
+
+    const feelingsMap = new Map(feelings.map((f) => [f.date, f]));
+    const daysList: HeatmapFeelingDay[] = [];
+
+    for (let wIdx = 0; wIdx < 52; wIdx++) {
+      for (let dIdx = 0; dIdx < 7; dIdx++) {
+        const d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + (wIdx * 7 + dIdx));
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const dayNum = String(d.getDate()).padStart(2, "0");
+        const dateStr = `${year}-${month}-${dayNum}`;
+
+        const isFuture = d.getTime() > today.getTime();
+        const entry = feelingsMap.get(dateStr);
+
+        daysList.push({
+          dateStr,
+          dayOfWeek: dIdx,
+          weekIndex: wIdx,
+          isFuture,
+          entry,
+        });
+      }
+    }
+
+    return daysList;
+  }, [feelings]);
+
+  const handleCellHover = (item: HeatmapFeelingDay, e: React.MouseEvent<HTMLSpanElement>) => {
+    if (item.isFuture) return;
+    setHoveredDay(item);
+    if (containerRef.current) {
+      const squareRect = e.currentTarget.getBoundingClientRect();
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const containerWidth = containerRect.width;
+
+      const cellCenterX = squareRect.left - containerRect.left + squareRect.width / 2;
+      const cellTopY = squareRect.top - containerRect.top;
+      const cellBottomY = squareRect.bottom - containerRect.top;
+
+      const isLeftEdge = cellCenterX < 130;
+      const isRightEdge = cellCenterX > containerWidth - 130;
+      const isTopEdge = cellTopY < 80;
+
+      setTooltipPos({
+        x: cellCenterX,
+        y: isTopEdge ? cellBottomY + 8 : cellTopY - 8,
+        isLeftEdge,
+        isRightEdge,
+        isTopEdge,
+        containerWidth,
+      });
+    }
+  };
+
+  const handleCellLeave = () => {
+    setHoveredDay(null);
+    setTooltipPos(null);
+  };
 
   const hrvData = [...health].reverse().map((h) => ({
     date: h.date.slice(5),
@@ -263,24 +433,32 @@ export default function SleepPage() {
   const average = (values: number[]): number | null => (
     values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
   );
-  const comparison = (value: number, baseline: number | null, unit: string, decimals = 0): string => {
-    if (baseline === null) return "No prior data";
+  const comparison = (value: number | null | undefined, baseline: number | null, unit: string, decimals = 0): string | undefined => {
+    if (value === null || value === undefined || baseline === null) return undefined;
     const delta = value - baseline;
     return `${delta >= 0 ? "+" : ""}${delta.toFixed(decimals)} ${unit} vs prior 7-day avg`;
   };
   const latestHealth = health[0];
-  const latestMainSleep = mainSleep[0];
+  const latestMainSleep = sleep.find((s) => !s.is_nap);
   const priorHealth = health.slice(1, 8);
-  const priorMainSleep = mainSleep.slice(1, 8);
-  const latestHrv = latestHealth?.overnight_hrv_avg_ms ?? 0;
-  const latestRhr = latestHealth?.resting_hr_bpm ?? 0;
-  const latestSleepHours = (latestMainSleep?.duration_s ?? 0) / 3600;
+  const priorMainSleep = sleep.filter((s) => !s.is_nap).slice(1, 8);
+  const latestHrv = latestHealth?.overnight_hrv_avg_ms && latestHealth.overnight_hrv_avg_ms > 0
+    ? latestHealth.overnight_hrv_avg_ms
+    : null;
+  const latestRhr = latestHealth?.resting_hr_bpm && latestHealth.resting_hr_bpm > 0
+    ? latestHealth.resting_hr_bpm
+    : null;
+  const latestSleepHours = latestMainSleep && latestMainSleep.duration_s > 0
+    ? latestMainSleep.duration_s / 3600
+    : null;
   const restorativeRatio = (sleep: SleepSummary | undefined): number => (
     sleep && sleep.duration_s > 0
       ? ((sleep.stage_deep_s || 0) + (sleep.stage_rem_s || 0)) / sleep.duration_s * 100
       : 0
   );
-  const latestRestorativeRatio = restorativeRatio(latestMainSleep);
+  const latestRestorativeRatio = latestMainSleep && latestMainSleep.duration_s > 0
+    ? restorativeRatio(latestMainSleep)
+    : null;
   const hrvBaseline = average(priorHealth.flatMap((health) => (
     health.overnight_hrv_avg_ms == null ? [] : [health.overnight_hrv_avg_ms]
   )));
@@ -289,7 +467,36 @@ export default function SleepPage() {
   )));
   const sleepBaseline = average(priorMainSleep.map((sleep) => sleep.duration_s / 3600));
   const restorativeBaseline = average(priorMainSleep.map(restorativeRatio));
-  const sleepDelta = sleepBaseline === null ? null : latestSleepHours - sleepBaseline;
+  const sleepDelta = latestSleepHours === null || sleepBaseline === null ? null : latestSleepHours - sleepBaseline;
+
+  function beginFeelingEdit(date: string, entry: DailyFeeling | undefined) {
+    setEditingFeelingDate(date);
+    setDraftFeeling(entry?.feeling ?? "okay");
+    setDraftNote(entry?.note ?? "");
+    setFeelingEditError(null);
+  }
+
+  async function saveFeelingEdit() {
+    if (!editingFeelingDate) return;
+    setIsSavingFeeling(true);
+    setFeelingEditError(null);
+    try {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const response = await fetch(`${apiBase}/api/feelings/${editingFeelingDate}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feeling: draftFeeling, note: draftNote.trim() || null }),
+      });
+      if (!response.ok) throw new Error("Could not save feeling");
+      const saved: DailyFeeling = await response.json();
+      setFeelings((current) => [saved, ...current.filter((feeling) => feeling.date !== saved.date)]);
+      setEditingFeelingDate(null);
+    } catch {
+      setFeelingEditError("Could not save this feeling. Please try again.");
+    } finally {
+      setIsSavingFeeling(false);
+    }
+  }
 
   return (
     <div className="app-layout">
@@ -311,8 +518,8 @@ export default function SleepPage() {
           <div className="metrics-grid">
             <MetricCard
               label="Overnight HRV"
-              value={latestHrv}
-              unit="ms"
+              value={latestHrv ?? "--"}
+              unit={latestHrv !== null ? "ms" : undefined}
               accentColor="var(--color-accent-primary)"
               baselineDelta={comparison(latestHrv, hrvBaseline, "ms")}
               icon={(
@@ -323,8 +530,8 @@ export default function SleepPage() {
             />
             <MetricCard
               label="Resting HR"
-              value={latestRhr}
-              unit="bpm"
+              value={latestRhr ?? "--"}
+              unit={latestRhr !== null ? "bpm" : undefined}
               baselineDelta={comparison(latestRhr, rhrBaseline, "bpm")}
               icon={(
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -334,10 +541,10 @@ export default function SleepPage() {
             />
             <MetricCard
               label="Sleep Duration"
-              value={formatHoursMinutes(latestSleepHours)}
+              value={latestSleepHours !== null ? formatHoursMinutes(latestSleepHours) : "--"}
               accentColor="var(--color-accent-sleep)"
               baselineDelta={sleepDelta === null
-                ? "No prior data"
+                ? undefined
                 : `${sleepDelta >= 0 ? "+" : "-"}${formatHoursMinutes(Math.abs(sleepDelta))} vs prior 7-day avg`}
               icon={(
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -347,10 +554,230 @@ export default function SleepPage() {
             />
             <MetricCard
               label="Restorative Sleep Ratio"
-              value={`${Math.round(latestRestorativeRatio)}%`}
+              value={latestRestorativeRatio !== null ? `${Math.round(latestRestorativeRatio)}%` : "--"}
               baselineDelta={comparison(latestRestorativeRatio, restorativeBaseline, "%")}
             />
           </div>
+
+          {/* 1-Year Annual Feeling Heatmap */}
+          <section
+            className="hover-card"
+            aria-labelledby="sleep-feeling-title"
+            ref={containerRef}
+            style={{
+              position: "relative",
+              background: "var(--color-bg-card)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "var(--radius-md)",
+              padding: "var(--space-6)",
+              marginBottom: "var(--space-6)",
+            }}
+          >
+            {/* Custom Popup Tooltip */}
+            {hoveredDay && tooltipPos && (() => {
+              let transformX = "-50%";
+              let leftPos = `${tooltipPos.x}px`;
+
+              if (tooltipPos.isRightEdge) {
+                transformX = "-100%";
+                leftPos = `${Math.min(tooltipPos.containerWidth - 16, tooltipPos.x + 12)}px`;
+              } else if (tooltipPos.isLeftEdge) {
+                transformX = "0%";
+                leftPos = `${Math.max(16, tooltipPos.x - 12)}px`;
+              }
+
+              const transformY = tooltipPos.isTopEdge ? "0%" : "-100%";
+
+              return (
+                <div
+                  key={hoveredDay.dateStr}
+                  style={{
+                    position: "absolute",
+                    left: leftPos,
+                    top: `${tooltipPos.y}px`,
+                    transform: `translate(${transformX}, ${transformY})`,
+                    pointerEvents: "none",
+                    zIndex: 50,
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "var(--color-surface-elevated, #181B22)",
+                      border: "1px solid var(--border-color, rgba(255, 255, 255, 0.15))",
+                      borderRadius: "10px",
+                      padding: "10px 14px",
+                      boxShadow: "0 12px 32px rgba(0, 0, 0, 0.5), 0 0 16px rgba(33, 230, 165, 0.15)",
+                      minWidth: "180px",
+                      maxWidth: "240px",
+                      whiteSpace: "nowrap",
+                      backdropFilter: "blur(12px)",
+                      animation: "tooltip-pop-in 120ms cubic-bezier(0.16, 1, 0.3, 1)",
+                      transformOrigin: tooltipPos.isRightEdge
+                        ? "bottom right"
+                        : tooltipPos.isLeftEdge
+                        ? "bottom left"
+                        : "bottom center",
+                    }}
+                  >
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)", letterSpacing: "0.02em", marginBottom: "4px" }}>
+                      {formatDateNice(hoveredDay.dateStr)}
+                    </div>
+
+                    {hoveredDay.entry ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
+                          <span style={{ fontSize: "18px", fontWeight: 800, color: FEELING_COLORS[hoveredDay.entry.feeling], lineHeight: 1 }}>
+                            {FEELING_NAMES[hoveredDay.entry.feeling] || hoveredDay.entry.feeling}
+                          </span>
+                          <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                            Check-in
+                          </span>
+                        </div>
+
+                        {hoveredDay.entry.note && (
+                          <div style={{ fontSize: "11px", color: "var(--color-text-secondary)", maxWidth: "210px", whiteSpace: "normal", borderTop: "1px solid var(--border-color)", paddingTop: "4px" }}>
+                            {hoveredDay.entry.note}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: "12px", color: "var(--color-text-muted)", fontWeight: 500 }}>
+                        No check-in (Click to log)
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Header Row */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)", flexWrap: "wrap", gap: "12px" }}>
+              <div>
+                <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                  ATHLETE FEELING
+                </span>
+                <h3 style={{ fontSize: "20px", fontWeight: 800, color: "var(--color-text-primary)", marginTop: "2px" }}>
+                  Feeling log
+                </h3>
+              </div>
+            </div>
+
+            {/* Month Labels Row */}
+            <div style={{ display: "flex", marginLeft: "28px", justifyContent: "space-between", marginBottom: "6px", fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)" }}>
+              {months.map((m, idx) => (
+                <span key={idx}>{m}</span>
+              ))}
+            </div>
+
+            {/* Heatmap 7x52 Grid Container */}
+            <div style={{ display: "flex", gap: "6px", overflowX: "auto", padding: "8px 0" }}>
+              {/* Weekday Labels Column */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "3px", justifyContent: "space-around", fontSize: "10px", fontWeight: 700, color: "var(--color-text-muted)", width: "16px", flexShrink: 0 }}>
+                {WEEKDAYS.map((w, idx) => (
+                  <span key={idx} style={{ height: "11px", lineHeight: "11px" }}>{w}</span>
+                ))}
+              </div>
+
+              {/* 52 Week Columns */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(52, 1fr)", gap: "3px", flex: 1 }}>
+                {Array.from({ length: 52 }, (_, wIdx) => (
+                  <div key={wIdx} style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                    {Array.from({ length: 7 }, (_, dIdx) => {
+                      const item = heatmapDays.find((d) => d.weekIndex === wIdx && d.dayOfWeek === dIdx);
+                      if (!item) return <span key={dIdx} style={{ width: "11px", height: "11px", borderRadius: "2px", background: "transparent" }} />;
+
+                      return (
+                        <span
+                          key={dIdx}
+                          onClick={() => !item.isFuture && beginFeelingEdit(item.dateStr, item.entry)}
+                          onMouseEnter={(e) => handleCellHover(item, e)}
+                          onMouseLeave={handleCellLeave}
+                          style={{
+                            width: "11px",
+                            height: "11px",
+                            borderRadius: "3px",
+                            background: item.isFuture ? "transparent" : !item.entry ? "var(--color-overlay-subtle)" : FEELING_COLORS[item.entry.feeling],
+                            cursor: item.isFuture ? "default" : "pointer",
+                            transition: "transform 150ms ease, box-shadow 150ms ease",
+                            transform: hoveredDay?.dateStr === item.dateStr ? "scale(1.35)" : "scale(1)",
+                            boxShadow: hoveredDay?.dateStr === item.dateStr && item.entry ? `0 0 8px ${FEELING_COLORS[item.entry.feeling]}` : hoveredDay?.dateStr === item.dateStr ? "0 0 6px rgba(100, 100, 100, 0.4)" : "none",
+                            zIndex: hoveredDay?.dateStr === item.dateStr ? 10 : 1,
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Legend & Summary Statistics Row */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "var(--space-4)", flexWrap: "wrap", gap: "12px", borderTop: "1px solid var(--border-color)", paddingTop: "var(--space-4)" }}>
+              {/* Feeling Categories Legend */}
+              <div style={{ display: "flex", alignItems: "center", gap: "14px", fontSize: "11px", color: "var(--color-text-secondary)", flexWrap: "wrap" }}>
+                {(Object.keys(FEELING_COLORS) as FeelingLevel[]).map((level) => (
+                  <span key={level} style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: FEELING_COLORS[level] }} />
+                    {FEELING_NAMES[level]}
+                  </span>
+                ))}
+              </div>
+
+              {/* Stats Summary Pills */}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ background: "var(--color-surface-secondary)", border: "1px solid var(--border-color)", borderRadius: "var(--radius-full)", padding: "4px 12px", fontSize: "12px", fontWeight: 700, color: "var(--color-text-primary)" }}>
+                  {feelings.length} logged days
+                </span>
+                <span style={{ background: "var(--color-surface-secondary)", border: "1px solid var(--border-color)", borderRadius: "var(--radius-full)", padding: "4px 12px", fontSize: "12px", fontWeight: 700, color: "var(--color-accent-primary)" }}>
+                  {Math.round((feelings.length / 365) * 100)}% year coverage
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <dialog
+            aria-labelledby="sleep-feeling-edit-title"
+            className="daily-feeling-dialog sleep-feeling-edit-dialog"
+            onCancel={() => setEditingFeelingDate(null)}
+            onClose={() => setEditingFeelingDate(null)}
+            ref={feelingEditDialogRef}
+          >
+            <div className="daily-feeling-dialog-content">
+              <span className="daily-feeling-kicker">Edit check-in</span>
+              <h2 id="sleep-feeling-edit-title">{editingFeelingDate}</h2>
+              <p>Choose the feeling that best matches this day.</p>
+              <div className="daily-feeling-options" role="radiogroup" aria-label="Choose feeling">
+                {FEELING_OPTIONS.map((option) => (
+                  <button
+                    aria-checked={draftFeeling === option.value}
+                    aria-label={option.label}
+                    className={`daily-feeling-choice daily-feeling-choice--${option.value}`}
+                    key={option.value}
+                    onClick={() => setDraftFeeling(option.value)}
+                    role="radio"
+                    title={option.label}
+                    type="button"
+                  >
+                    <img alt={option.label} aria-hidden="true" className="daily-feeling-choice-icon" src={option.icon} />
+                  </button>
+                ))}
+              </div>
+              <label className="daily-feeling-note">
+                <span>Anything affecting this day? <em>Optional</em></span>
+                <textarea
+                  maxLength={280}
+                  onChange={(event) => setDraftNote(event.target.value)}
+                  placeholder="Travel, soreness, stress, illness…"
+                  value={draftNote}
+                />
+              </label>
+              {feelingEditError && <p className="daily-feeling-error" role="alert">{feelingEditError}</p>}
+              <div className="sleep-feeling-editor-actions">
+                <button className="btn btn-ghost btn-sm" onClick={() => setEditingFeelingDate(null)} type="button">Cancel</button>
+                <button className="btn btn-primary btn-sm" disabled={isSavingFeeling} onClick={() => void saveFeelingEdit()} type="button">{isSavingFeeling ? "Saving…" : "Save"}</button>
+              </div>
+            </div>
+          </dialog>
 
           {/* HRV Trend */}
           <div className="card" style={{ marginBottom: "var(--space-6)" }} id="chart-hrv-trend">
@@ -366,7 +793,7 @@ export default function SleepPage() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
-                <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
+                <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                 <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="ms" />
                 <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="ms" />} />
                 <Area type="monotone" dataKey="hrv" name="Overnight HRV" stroke="var(--color-accent-primary)" fill="url(#sleepHrvGrad)" strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-primary)" }} />
@@ -384,7 +811,7 @@ export default function SleepPage() {
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={sleepData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
-                  <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
+                  <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                   <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} unit="h" />
                   <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<SleepStageTooltip />} />
                   <Bar dataKey="deep" name="Deep" stackId="s" fill="#21E6A5" />
@@ -414,7 +841,7 @@ export default function SleepPage() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
-                  <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
+                  <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                   <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={[0, 100]} unit="%" />
                   <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="%" />} />
                   <Area type="monotone" dataKey="readiness" name="Readiness" stroke="var(--color-accent-exertion)" fill="url(#recGrad)" strokeWidth={2} dot={{ r: 3 }} />
@@ -431,7 +858,7 @@ export default function SleepPage() {
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={rhrData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
-                <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} interval="equidistantPreserveStart" />
+                <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                 <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={["dataMin - 3", "dataMax + 3"]} unit="bpm" />
                 <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="bpm" />} />
                 <Area type="monotone" dataKey="rhr" name="Resting HR" stroke="var(--color-status-critical)" fill="rgba(255, 77, 98, 0.08)" strokeWidth={2} dot={{ r: 3 }} />

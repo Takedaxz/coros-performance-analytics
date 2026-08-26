@@ -1717,7 +1717,7 @@ export default function ActivityDetailPage() {
                                         <td data-label="Distance">{lap.distance_m ? leg.sport === "swim" ? `${Math.round(lap.distance_m)} m` : `${(lap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
                                         <td data-label="Duration">{formatSplitDuration(lap.elapsed_s)}</td>
                                         <td data-label="Avg HR">{lap.avg_hr_bpm ? `${lap.avg_hr_bpm} bpm` : "--"}</td>
-                                        <td data-label="Pace / Speed" className="lap-split-pace">{lap.avg_speed_mps ? leg.sport === "swim" ? formatSwimPace(lap.avg_speed_mps) : leg.sport === "run" ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : "--"}</td>
+                                        <td data-label="Pace / Speed" className="lap-split-pace">{lap.avg_speed_mps ? leg.sport === "swim" ? formatSwimPace(lap.avg_speed_mps) : leg.sport === "run" ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : leg.sport === "run" && lap.distance_m && lap.elapsed_s > 0 ? formatPace(lap.distance_m / lap.elapsed_s) : "--"}</td>
                                         <td data-label="Power / Cadence">{leg.sport === "swim" ? lap.avg_cadence ? `${lap.avg_cadence} spm` : "--" : lap.avg_power_w ? `${lap.avg_power_w} W` : "--"}</td>
                                       </tr>
                                     ))}</tbody>
@@ -1864,7 +1864,7 @@ export default function ActivityDetailPage() {
                             <td data-label={isHyrox ? "Load" : "Distance"} className="mono">{lap.distance_m ? lap.load_unit === "reps" ? `${Math.round(lap.distance_m)} reps` : lap.lap_type === "functional" || isLapSwim ? `${Math.round(lap.distance_m)} m` : `${(lap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
                             <td data-label="Duration" className="mono">{isLapSwim ? formatSwimLapDuration(lap.elapsed_s) : `${Math.floor(lap.elapsed_s / 60)}:${String(Math.round(lap.elapsed_s % 60)).padStart(2, "0")}`}</td>
                             <td data-label="Avg HR" className="mono">{lap.avg_hr_bpm ? `${lap.avg_hr_bpm} bpm` : "--"}</td>
-                            <td data-label={isSwim ? "Pace /100m" : "Pace"} className="mono breakdown-primary-metric">{lap.avg_speed_mps ? isLapSwim ? formatSwimPace(lap.avg_speed_mps) : isLapPaceSport ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : "--"}</td>
+                            <td data-label={isSwim ? "Pace /100m" : "Pace"} className="mono breakdown-primary-metric">{lap.avg_speed_mps ? isLapSwim ? formatSwimPace(lap.avg_speed_mps) : isLapPaceSport ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : isLapPaceSport && lap.distance_m && lap.elapsed_s > 0 ? formatPace(lap.distance_m / lap.elapsed_s) : "--"}</td>
                             <td data-label={isRest && heartRateRecovery ? "HRR" : isHyrox ? "Cadence" : isSwim ? "Stroke rate" : "Power"} className="mono">{isRest && heartRateRecovery ? heartRateRecovery : isHyrox || isLapSwim ? lap.avg_cadence ? `${lap.avg_cadence} spm` : "--" : lap.avg_power_w ? `${lap.avg_power_w} W` : "--"}</td>
                           </tr>
                           {isExpanded && (
@@ -1891,7 +1891,7 @@ export default function ActivityDetailPage() {
                                           <td data-label="Lap"><span className="lap-split-index">{sourceLap.lap_index}</span></td>
                                           <td data-label="Distance">{sourceLap.distance_m ? `${(sourceLap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
                                           <td data-label="Duration">{formatSplitDuration(sourceLap.elapsed_s)}</td>
-                                          <td data-label="Pace" className="lap-split-pace">{sourceLap.avg_speed_mps ? `${formatPace(sourceLap.avg_speed_mps)}/km` : "--"}</td>
+                                          <td data-label="Pace" className="lap-split-pace">{sourceLap.avg_speed_mps ? `${formatPace(sourceLap.avg_speed_mps)}/km` : sourceLap.distance_m && sourceLap.elapsed_s > 0 ? `${formatPace(sourceLap.distance_m / sourceLap.elapsed_s)}/km` : "--"}</td>
                                           <td data-label="Avg HR">{sourceLap.avg_hr_bpm ? `${sourceLap.avg_hr_bpm} bpm` : "--"}</td>
                                           <td data-label="Power">{sourceLap.avg_power_w ? `${sourceLap.avg_power_w} W` : "--"}</td>
                                         </tr>
@@ -1914,7 +1914,7 @@ export default function ActivityDetailPage() {
                                           <td data-label={isSwim ? "Length" : "Km"}><span className="lap-split-index">{index + 1}</span></td>
                                           <td data-label="Distance">{split.distance_m ? isSwim ? `${Math.round(split.distance_m)} m` : `${(split.distance_m / 1000).toFixed(2)} km` : "--"}</td>
                                           <td data-label="Duration">{formatSplitDuration(split.elapsed_s)}</td>
-                                          <td data-label={isSwim ? "Pace /100m" : "Pace"} className="lap-split-pace">{split.avg_speed_mps ? isSwim ? formatSwimPace(split.avg_speed_mps) : `${formatPace(split.avg_speed_mps)}/km` : "--"}</td>
+                                          <td data-label={isSwim ? "Pace /100m" : "Pace"} className="lap-split-pace">{split.avg_speed_mps ? isSwim ? formatSwimPace(split.avg_speed_mps) : `${formatPace(split.avg_speed_mps)}/km` : split.distance_m && split.elapsed_s > 0 && !isSwim ? `${formatPace(split.distance_m / split.elapsed_s)}/km` : "--"}</td>
                                           <td data-label="Avg HR">{split.avg_hr_bpm ? `${split.avg_hr_bpm} bpm` : "--"}</td>
                                           <td data-label="Max HR">{split.max_hr_bpm ? `${split.max_hr_bpm} bpm` : "--"}</td>
                                         </tr>
@@ -1966,7 +1966,6 @@ export default function ActivityDetailPage() {
             <div className="card-header">
               <div>
                 <span className="card-title">Athlete note</span>
-                <p className="ai-analysis-meta">Context for AI Coach.</p>
               </div>
             </div>
             <div className="settings-field">
@@ -1989,7 +1988,7 @@ export default function ActivityDetailPage() {
             {noteSaveError && <p role="alert" style={{ color: "var(--color-error, #dc2626)", marginTop: "var(--space-2)" }}>{noteSaveError}</p>}
           </section>
 
-          {/* AI Performance Coach Analysis */}
+          {/* AI Performance Analysis */}
           <div className="card ai-analysis-card" id="ai-analysis-card">
             <div className="ai-analysis-header">
               <div className="ai-analysis-heading">
@@ -1997,7 +1996,7 @@ export default function ActivityDetailPage() {
                   <AiGlyph />
                 </span>
                 <div>
-                  <span className="card-title">AI Performance Coach Analysis</span>
+                  <span className="card-title">AI Performance Analysis</span>
                   {!postmortem && (
                     <span className="ai-analysis-meta">
                       Workout execution, load & recovery
@@ -2018,7 +2017,6 @@ export default function ActivityDetailPage() {
             </div>
             {isGenerating && !postmortem && (
               <div className="msg-row ai-row ai-analysis-thinking">
-                <div className="avatar-sq ai" aria-label="AI Coach is analyzing"><AiGlyph /></div>
                 <div className="ai-text">
                   <WaveThinkingText text="evaluating session data & recovery" />
                 </div>

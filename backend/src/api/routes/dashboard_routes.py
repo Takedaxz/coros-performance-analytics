@@ -274,6 +274,7 @@ async def fitness_trend(
                 "running_fitness": row.running_fitness_score,
                 "ftp": row.ftp_vendor,
                 "threshold_pace": row.lactate_threshold_pace_s_per_km,
+                "lthr": row.lactate_threshold_hr,
                 "cardio_fitness_age": cardio_fitness_age,
             }
         )

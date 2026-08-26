@@ -52,6 +52,27 @@ interface GenericTooltipEntry {
   stroke?: string;
 }
 
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatChartAxisDate(dateStr?: string | number): string {
+  if (!dateStr) return "";
+  const parts = String(dateStr).split("-");
+  if (parts.length === 3) {
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+    if (!isNaN(month) && !isNaN(day) && month >= 1 && month <= 12) {
+      return `${day} ${SHORT_MONTHS[month - 1]}`;
+    }
+  } else if (parts.length === 2) {
+    const month = parseInt(parts[0], 10);
+    const day = parseInt(parts[1], 10);
+    if (!isNaN(month) && !isNaN(day) && month >= 1 && month <= 12) {
+      return `${day} ${SHORT_MONTHS[month - 1]}`;
+    }
+  }
+  return String(dateStr);
+}
+
 function ChartLegendTooltip({
   active,
   label,
@@ -78,7 +99,7 @@ function ChartLegendTooltip({
       }}
     >
       <strong style={{ display: "block", marginBottom: "8px", color: "var(--color-text-secondary)", fontSize: "12px" }}>
-        {label}
+        {label ? formatChartAxisDate(label) : ""}
       </strong>
       {payload.map((entry, idx) => {
         const itemColor = entry.stroke || entry.color || entry.fill || "var(--color-accent-primary)";
@@ -588,12 +609,31 @@ export default function TrendsPage() {
                     <CartesianGrid strokeDasharray="2 6" stroke="var(--color-chart-grid)" />
                     <XAxis dataKey="label" tick={{ fill: "var(--color-text-muted)", fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} dy={4} interval="equidistantPreserveStart" />
                     <YAxis domain={trainingVolumeIsRelative ? [0, 100] : [0, "auto"]} tick={trainingVolumeIsRelative ? false : { fill: "var(--color-text-muted)", fontSize: 10 }} tickFormatter={(value: number) => trainingVolumeMetrics[0] === "distance" ? value.toFixed(value >= 10 ? 0 : 1) : trainingVolumeMetrics[0] === "duration" ? `${value.toFixed(1)}h` : `${Math.round(value)}`} axisLine={false} tickLine={false} width={trainingVolumeIsRelative ? 8 : 40} />
-                    <Tooltip cursor={{ fill: "var(--color-chart-cursor)", radius: 10 }} content={({ active, payload }) => {
+                    <Tooltip cursor={false} content={({ active, payload }) => {
                       const bucket = payload?.[0]?.payload as (typeof trainingVolumeChartData)[number] | undefined;
                       if (!active || !bucket) return null;
                       return <div className="training-volume-tooltip"><strong>{bucket.label}{bucket.toDate ? " · To date" : ""}</strong>{trainingVolumeMetrics.map((metric) => <span key={metric}><i style={{ background: TRAINING_VOLUME_CONFIG[metric].color }} />{TRAINING_VOLUME_CONFIG[metric].label}<b>{formatTrainingVolumeMetric(metric, bucket[metric])}</b></span>)}</div>;
                     }} />
-                    {trainingVolumeMetrics.map((metric) => <Bar key={metric} dataKey={trainingVolumeIsRelative ? `${metric}Relative` : metric} name={TRAINING_VOLUME_CONFIG[metric].label} radius={[4, 4, 0, 0]} barSize={trainingVolumeMetrics.length === 1 ? 30 : 14} isAnimationActive={false}>{trainingVolumeChartData.map((bucket) => <Cell key={`${metric}-${bucket.period_start}`} fill={TRAINING_VOLUME_CONFIG[metric].color} fillOpacity={bucket.toDate ? 1 : 0.78} />)}</Bar>)}
+                    {trainingVolumeMetrics.map((metric) => (
+                      <Bar
+                        key={metric}
+                        dataKey={trainingVolumeIsRelative ? `${metric}Relative` : metric}
+                        name={TRAINING_VOLUME_CONFIG[metric].label}
+                        radius={[4, 4, 0, 0]}
+                        barSize={trainingVolumeMetrics.length === 1 ? 30 : 14}
+                        isAnimationActive={false}
+                      >
+                        {trainingVolumeChartData.map((bucket) => (
+                          <Cell
+                            key={`${metric}-${bucket.period_start}`}
+                            fill={TRAINING_VOLUME_CONFIG[metric].color}
+                            fillOpacity={bucket.toDate ? 0.6 : 0.4}
+                            stroke={TRAINING_VOLUME_CONFIG[metric].color}
+                            strokeWidth={1.5}
+                          />
+                        ))}
+                      </Bar>
+                    ))}
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -719,12 +759,11 @@ export default function TrendsPage() {
               ) : (
                 <ResponsiveContainer width="100%" height={300}>
                   <AreaChart data={loadChartData}>
-                    <defs><linearGradient id="loadGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--color-accent-exertion)" stopOpacity={0.3} /><stop offset="95%" stopColor="var(--color-accent-exertion)" stopOpacity={0} /></linearGradient></defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
-                    <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
+                    <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                     <YAxis stroke="var(--color-text-muted)" fontSize={11} axisLine={false} />
                     <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip />} />
-                    <Area type="monotone" dataKey="total_load" name="Training Load" stroke="var(--color-accent-exertion)" fill="url(#loadGrad)" strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-exertion)" }} />
+                    <Area type="monotone" dataKey="total_load" name="Training Load" stroke="var(--color-accent-exertion)" fill="var(--color-accent-exertion)" fillOpacity={0.4} strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-exertion)" }} />
                     <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -749,17 +788,11 @@ export default function TrendsPage() {
                   ) : (
                     <ResponsiveContainer width="100%" height={260}>
                       <AreaChart data={stepsChartData}>
-                        <defs>
-                          <linearGradient id="stepsGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#4fc3f3" stopOpacity={0.4} />
-                            <stop offset="95%" stopColor="#4fc3f3" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
-                        <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
+                        <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                         <YAxis stroke="#4fc3f3" fontSize={11} axisLine={false} tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`} />
                         <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="steps" />} />
-                        <Area type="monotone" dataKey="steps" name="Daily Steps" stroke="#4fc3f3" fill="url(#stepsGrad)" strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#4fc3f3" }} />
+                        <Area type="monotone" dataKey="steps" name="Daily Steps" stroke="#4fc3f3" fill="#4fc3f3" fillOpacity={0.4} strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#4fc3f3" }} />
                         <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
                       </AreaChart>
                     </ResponsiveContainer>
@@ -780,17 +813,11 @@ export default function TrendsPage() {
                   ) : (
                     <ResponsiveContainer width="100%" height={260}>
                       <AreaChart data={caloriesChartData}>
-                        <defs>
-                          <linearGradient id="calGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#ff9800" stopOpacity={0.4} />
-                            <stop offset="95%" stopColor="#ff9800" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
-                        <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => value.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
+                        <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                         <YAxis stroke="#ff9800" fontSize={11} axisLine={false} />
                         <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="kcal" />} />
-                        <Area type="monotone" dataKey="active_calories_kcal" name="Active Calories" stroke="#ff9800" fill="url(#calGrad)" strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#ff9800" }} />
+                        <Area type="monotone" dataKey="active_calories_kcal" name="Active Calories" stroke="#ff9800" fill="#ff9800" fillOpacity={0.4} strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#ff9800" }} />
                         <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
                       </AreaChart>
                     </ResponsiveContainer>

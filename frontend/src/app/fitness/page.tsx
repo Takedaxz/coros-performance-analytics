@@ -5,13 +5,14 @@ import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import MetricCard from "@/components/MetricCard";
 import FitnessScoresPanel from "@/components/FitnessScoresPanel";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
 interface FitnessTrendDay {
   date: string;
   vo2max: number | null;
   running_fitness: number | null;
   threshold_pace: number | null;
+  lthr: number | null;
   cardio_fitness_age: number | null;
 }
 
@@ -42,6 +43,27 @@ function formatRaceTime(seconds: number): string {
     return `${hrs}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   }
   return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatChartAxisDate(dateStr?: string | number): string {
+  if (!dateStr) return "";
+  const parts = String(dateStr).split("-");
+  if (parts.length === 3) {
+    const month = parseInt(parts[1], 10);
+    const day = parseInt(parts[2], 10);
+    if (!isNaN(month) && !isNaN(day) && month >= 1 && month <= 12) {
+      return `${day} ${SHORT_MONTHS[month - 1]}`;
+    }
+  } else if (parts.length === 2) {
+    const month = parseInt(parts[0], 10);
+    const day = parseInt(parts[1], 10);
+    if (!isNaN(month) && !isNaN(day) && month >= 1 && month <= 12) {
+      return `${day} ${SHORT_MONTHS[month - 1]}`;
+    }
+  }
+  return String(dateStr);
 }
 
 interface GenericTooltipEntry {
@@ -78,7 +100,7 @@ function ChartLegendTooltip({
       }}
     >
       <strong style={{ display: "block", marginBottom: "8px", color: "var(--color-text-secondary)", fontSize: "12px" }}>
-        {label}
+        {label ? formatChartAxisDate(label) : ""}
       </strong>
       {payload.map((entry, idx) => {
         const itemColor = entry.stroke || entry.color || entry.fill || "var(--color-accent-primary)";
@@ -120,6 +142,7 @@ function ChartLegendTooltip({
 export default function FitnessPage() {
   const [data, setData] = useState<FitnessTrendDay[]>([]);
   const [runningFitness, setRunningFitness] = useState<RunningFitness | null>(null);
+  const [trendMetrics, setTrendMetrics] = useState<Array<"running_fitness" | "lthr" | "threshold_pace">>(["running_fitness"]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -132,7 +155,7 @@ export default function FitnessPage() {
         ]);
         if (trendResponse.ok) {
           const json = await trendResponse.json();
-          const valid = json.filter((d: FitnessTrendDay) => d.vo2max != null || d.running_fitness != null);
+          const valid = json.filter((d: FitnessTrendDay) => d.vo2max != null || d.running_fitness != null || d.lthr != null || d.threshold_pace != null);
           setData(valid);
         }
         if (scoresResponse.ok) setRunningFitness(await scoresResponse.json());
@@ -153,6 +176,16 @@ export default function FitnessPage() {
     .find((day) => day.cardio_fitness_age != null)?.cardio_fitness_age ?? null;
   const vo2Readings = data.filter((d): d is FitnessTrendDay & { vo2max: number } => d.vo2max !== null);
   const vo2Change = vo2Readings.length > 1 ? latestVo2 - vo2Readings[0].vo2max : null;
+  const trendOptions = [
+    { key: "running_fitness" as const, label: "Running fitness", unit: "", color: "var(--color-accent-primary)", format: (value: number) => value.toFixed(1) },
+    { key: "lthr" as const, label: "LTHR", unit: "bpm", color: "var(--color-accent-exertion)", format: (value: number) => `${Math.round(value)} bpm` },
+    { key: "threshold_pace" as const, label: "LT pace", unit: "/km", color: "var(--color-accent-sleep)", format: (value: number) => formatPace(1000 / value) },
+  ];
+  const selectedTrends = trendOptions.filter((option) => trendMetrics.includes(option.key));
+  const trendReadings = data.filter((day) => trendMetrics.some((metric) => day[metric] != null));
+  const toggleTrendMetric = (metric: (typeof trendOptions)[number]["key"]) => {
+    setTrendMetrics((current) => current.includes(metric) ? (current.length > 1 ? current.filter((item) => item !== metric) : current) : [...current, metric]);
+  };
 
   const t1k = latestThreshold ? latestThreshold * 0.82 : (4.0 * 60 * (50 / latestVo2));
   const t3k = latestThreshold ? latestThreshold * 0.91 * 3 : (12.0 * 60 * (50 / latestVo2));
@@ -233,6 +266,107 @@ export default function FitnessPage() {
 
           <FitnessScoresPanel fitness={runningFitness} />
 
+          <section className="card activity-zone-card running-dynamics-card" style={{ marginBottom: "var(--space-6)" }}>
+            <div className="activity-zone-header">
+              <div>
+                <span className="card-title">Running Fitness Trend</span>
+              </div>
+            </div>
+            <div className="running-dynamics-tabs" role="group" aria-label="Running fitness trend metrics">
+                {trendOptions.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    aria-pressed={trendMetrics.includes(option.key)}
+                    onClick={() => toggleTrendMetric(option.key)}
+                    className={trendMetrics.includes(option.key) ? "active" : ""}
+                    style={trendMetrics.includes(option.key) ? { borderColor: option.color, color: option.color, backgroundColor: `${option.color}18` } : undefined}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+            </div>
+            <div className="running-dynamics-legend" aria-label="Selected metric values">
+              {selectedTrends.map((trend) => {
+                const latest = [...trendReadings].reverse().find((day) => day[trend.key] != null)?.[trend.key];
+                return <span key={trend.key}><i style={{ background: trend.color }} />{trend.label}<strong className="mono">{latest != null ? trend.format(latest) : "No data"}</strong></span>;
+              })}
+            </div>
+            {isLoading ? (
+              <div className="skeleton" style={{ width: "100%", height: 260, borderRadius: 12 }} />
+            ) : trendReadings.length === 0 ? (
+              <div style={{ color: "var(--color-text-muted)", padding: "2rem", textAlign: "center" }}>No historical data for the selected metrics yet.</div>
+            ) : (
+              <div className="activity-zone-chart running-dynamics-chart">
+                <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 260 }}>
+                  <LineChart data={trendReadings} margin={{ top: 16, right: 12, bottom: 8, left: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
+                    <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
+                    {selectedTrends.map((trend) => <YAxis key={trend.key} yAxisId={trend.key} hide domain={["dataMin - 1", "dataMax + 1"]} />)}
+                    <Tooltip
+                      cursor={{ stroke: "var(--color-chart-grid)" }}
+                      content={({ active, label, payload }) => {
+                        if (!active || !payload?.length) return null;
+                        return (
+                          <div
+                            style={{
+                              padding: "12px 14px",
+                              borderRadius: "14px",
+                              background: "var(--color-popover)",
+                              border: "1px solid var(--border-color)",
+                              color: "var(--color-text-primary)",
+                              boxShadow: "var(--shadow-md)",
+                              minWidth: "175px",
+                            }}
+                          >
+                            <strong style={{ display: "block", marginBottom: "8px", color: "var(--color-text-secondary)", fontSize: "12px" }}>
+                              {label ? formatChartAxisDate(String(label)) : ""}
+                            </strong>
+                            {payload.map((entry, idx) => {
+                              const trend = trendOptions.find((option) => option.label === entry.name || option.key === entry.dataKey);
+                              const itemColor = trend?.color || entry.stroke || entry.color || "var(--color-accent-primary)";
+                              const rawVal = entry.value;
+                              const valStr = rawVal == null || rawVal === "" ? "No data" : (trend ? trend.format(Number(rawVal)) : String(rawVal));
+                              return (
+                                <div
+                                  key={entry.name || idx}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    gap: "16px",
+                                    marginTop: idx === 0 ? 0 : "6px",
+                                    fontSize: "13px",
+                                  }}
+                                >
+                                  <span style={{ display: "inline-flex", alignItems: "center", gap: "7px", color: "var(--color-text-secondary)" }}>
+                                    <i
+                                      style={{
+                                        width: "8px",
+                                        height: "8px",
+                                        borderRadius: "50%",
+                                        backgroundColor: itemColor,
+                                        display: "inline-block",
+                                        flexShrink: 0,
+                                      }}
+                                    />
+                                    {entry.name}
+                                  </span>
+                                  <strong className="mono" style={{ color: "var(--color-text-primary)" }}>{valStr}</strong>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      }}
+                    />
+                    {selectedTrends.map((trend) => <Line key={trend.key} yAxisId={trend.key} type="monotone" dataKey={trend.key} name={trend.label} stroke={trend.color} strokeWidth={2.5} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} connectNulls={false} />)}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </section>
+
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "var(--space-6)", marginBottom: "var(--space-6)" }}>
             {/* Chart: VO2 Max Trend */}
             <div className="card" id="chart-vo2max">
@@ -256,7 +390,7 @@ export default function FitnessPage() {
                   <ResponsiveContainer width="100%" height={210}>
                     <AreaChart data={vo2Readings}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" vertical={false} />
-                      <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(val) => val.substring(5)} axisLine={false} interval="equidistantPreserveStart" />
+                      <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(val) => formatChartAxisDate(val)} axisLine={false} interval="equidistantPreserveStart" />
                       <YAxis stroke="var(--color-text-muted)" fontSize={11} domain={['dataMin - 0.5', 'dataMax + 0.5']} axisLine={false} />
                       <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="ml/kg/min" />} />
                       <Area type="monotone" dataKey="vo2max" name="VO2 Max" stroke="var(--color-accent-primary)" fill="none" strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />

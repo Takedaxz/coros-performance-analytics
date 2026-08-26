@@ -24,6 +24,7 @@ from src.db.models import (
     Activity,
     ActivityLap,
     ActivityRecord,
+    DailyFeeling,
     DailyHealth,
     FitnessEstimate,
     Goal,
@@ -64,26 +65,35 @@ def coach_tool_functions(
 ) -> list[Callable[..., dict[str, Any]]]:
     """Return SDK-callable functions bound to one authenticated user."""
 
-    def run(name: str, timeout_seconds: float = 15.0, **arguments: Any) -> dict[str, Any]:
+    def run(tool_name: str, timeout_seconds: float = 15.0, **arguments: Any) -> dict[str, Any]:
         future = asyncio.run_coroutine_threadsafe(
-            _execute_tool(name, user_id, arguments), event_loop
+            _execute_tool(tool_name, user_id, arguments), event_loop
         )
         try:
             return future.result(timeout=timeout_seconds)
         except FutureTimeoutError:
             future.cancel()
-            return {"error": f"{name} timed out."}
+            return {"error": f"{tool_name} timed out."}
 
     def get_health_trend(days: int) -> dict[str, Any]:
         """Get health, sleep, readiness, and recovery trends for 7, 14, 28, or 56 days."""
         return run("get_health_trend", days=days)
 
     def get_activities(
-        start_date: str, end_date: str, sport: str | None = None, limit: int = 20
+        start_date: str,
+        end_date: str,
+        sport: str | None = None,
+        name: str | None = None,
+        limit: int = 20,
     ) -> dict[str, Any]:
-        """Find activities in a date range with an optional canonical sport filter."""
+        """Find stored activities across any date range with optional sport and name filters."""
         return run(
-            "get_activities", start_date=start_date, end_date=end_date, sport=sport, limit=limit
+            "get_activities",
+            start_date=start_date,
+            end_date=end_date,
+            sport=sport,
+            name=name,
+            limit=limit,
         )
 
     def get_activity_detail(activity_id: str) -> dict[str, Any]:
@@ -194,6 +204,14 @@ def _sport_type(value: str | None) -> SportType | None:
 
 def _pace_s_km(speed_mps: float | None) -> int | None:
     return round(1_000 / speed_mps) if speed_mps and speed_mps > 0 else None
+
+
+def _lap_pace_s_km(speed_mps: float | None, distance_m: float | None, elapsed_s: float | None) -> int | None:
+    return _pace_s_km(speed_mps) or (
+        round(elapsed_s * 1_000 / distance_m)
+        if distance_m and distance_m > 0 and elapsed_s and elapsed_s > 0
+        else None
+    )
 
 
 def _activity_uuid(value: object) -> str | None:
@@ -386,6 +404,17 @@ async def _health_trend(db: Any, user_id: str, days: int) -> dict[str, Any]:
         .scalars()
         .all()
     )
+    feelings = (
+        (
+            await db.execute(
+                select(DailyFeeling)
+                .where(DailyFeeling.user_id == user_id, DailyFeeling.date >= start_date)
+                .order_by(DailyFeeling.date)
+            )
+        )
+        .scalars()
+        .all()
+    )
     activities = (
         (
             await db.execute(
@@ -472,6 +501,16 @@ async def _health_trend(db: Any, user_id: str, days: int) -> dict[str, Any]:
                 }
             )
             for item in sleep
+        ],
+        "athlete_feelings": [
+            _without_nulls(
+                {
+                    "date": item.date.isoformat(),
+                    "feeling": item.feeling,
+                    "note": item.note,
+                }
+            )
+            for item in feelings
         ],
         "activities": [
             _without_nulls(
@@ -633,8 +672,11 @@ async def _strength_exercise_matches(db: Any, names: list[str]) -> dict[str, Any
 async def _activities(db: Any, user_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
     start, end = _date(arguments["start_date"]), _date(arguments["end_date"])
     limit = arguments.get("limit", 20)
-    if end < start or (end - start).days > 90 or not 1 <= limit <= 50:
-        return {"error": "date range must be 0-90 days and limit must be 1-50"}
+    name = arguments.get("name")
+    if name is not None and (not isinstance(name, str) or not 1 <= len(name.strip()) <= 100):
+        return {"error": "name filter must be 1-100 characters"}
+    if end < start or not 1 <= limit <= 50:
+        return {"error": "end date must be on or after start date; limit must be 1-50"}
     stmt = (
         select(Activity)
         .where(
@@ -656,6 +698,8 @@ async def _activities(db: Any, user_id: str, arguments: dict[str, Any]) -> dict[
         }
     if sport is not None:
         stmt = stmt.where(Activity.sport == sport)
+    if name:
+        stmt = stmt.where(Activity.title.ilike(f"%{name.strip()}%"))
     rows = (await db.execute(stmt)).scalars().all()
     return {
         "range": f"{start}/{end}",
@@ -797,7 +841,11 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
                 "n": lap.lap_index,
                 "sec": round(lap.elapsed_s),
                 "m": round(lap.distance_m) if getattr(lap, "distance_m", None) else None,
-                "pace_s_km": _pace_s_km(getattr(lap, "avg_speed_mps", None)),
+                "pace_s_km": _lap_pace_s_km(
+                    getattr(lap, "avg_speed_mps", None),
+                    getattr(lap, "distance_m", None),
+                    getattr(lap, "elapsed_s", None),
+                ),
                 "hr": getattr(lap, "avg_hr_bpm", None),
                 "max_hr": getattr(lap, "max_hr_bpm", None),
                 "cadence": getattr(lap, "avg_cadence", None),

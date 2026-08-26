@@ -30,7 +30,7 @@ interface BackendLoadItem {
   total_duration_s?: number;
 }
 
-const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
+const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
 const SPORT_COLORS: Record<SportColorCategory, string> = {
   strength: "#FF4D62",
@@ -175,7 +175,7 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const dayOfWeekToday = (today.getDay() + 6) % 7; // 0=Mon, 6=Sun
+    const dayOfWeekToday = today.getDay(); // 0=Sun, 6=Sat
     const totalDaysToDisplay = 51 * 7 + (dayOfWeekToday + 1);
 
     const startDate = new Date(today);

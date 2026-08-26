@@ -1372,7 +1372,7 @@ export default function AiPage() {
         if (data?.nickname) setNickname(data.nickname);
         else if (data?.first_name) setNickname(data.first_name);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const processImageFiles = useCallback((files: FileList | File[]) => {
@@ -1877,10 +1877,10 @@ export default function AiPage() {
       const includeTools = recentToolIndices.has(index) || olderToolIndices.has(index);
       const tools = includeTools
         ? message.tools?.filter((tool): tool is ToolCall => typeof tool !== "string").map((tool) => ({
-            name: tool.name,
-            arguments: tool.arguments,
-            ...(recentToolIndices.has(index) && tool.result ? { result: tool.result } : {}),
-          }))
+          name: tool.name,
+          arguments: tool.arguments,
+          ...(recentToolIndices.has(index) && tool.result ? { result: tool.result } : {}),
+        }))
         : undefined;
       return {
         role: message.role === "ai" ? "assistant" : "user",
@@ -2613,42 +2613,42 @@ export default function AiPage() {
             }
           }}
         >
-            <summary className="ai-session-menu-trigger" aria-label={`Actions for project ${p.name}`}>
-              <span aria-hidden="true">⋮</span>
-            </summary>
-            <div className="ai-session-menu-popover" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(event) => {
-                  event.currentTarget.closest("details")?.removeAttribute("open");
-                  handleNewChatInProject(p);
-                }}
-              >
-                New Chat
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(event) => {
-                  openProjectEditor(p);
-                  event.currentTarget.closest("details")?.removeAttribute("open");
-                }}
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="is-danger"
-                onClick={(event) => {
-                  setProjectPendingDelete(p);
-                  event.currentTarget.closest("details")?.removeAttribute("open");
-                }}
-              >
-                Delete
-              </button>
-            </div>
+          <summary className="ai-session-menu-trigger" aria-label={`Actions for project ${p.name}`}>
+            <span aria-hidden="true">⋮</span>
+          </summary>
+          <div className="ai-session-menu-popover" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(event) => {
+                event.currentTarget.closest("details")?.removeAttribute("open");
+                handleNewChatInProject(p);
+              }}
+            >
+              New Chat
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(event) => {
+                openProjectEditor(p);
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="is-danger"
+              onClick={(event) => {
+                setProjectPendingDelete(p);
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}
+            >
+              Delete
+            </button>
+          </div>
         </details>
       </div>
     );
@@ -2785,30 +2785,30 @@ export default function AiPage() {
             <div className="ai-link-chat-body">
 
               {/* No session selected */}
-            {sessionNotFound ? (
-              <div className="ai-link-empty print-hide">
-                <div className="ai-link-empty-intro">
-                  <h1>Session not found</h1>
-                  <p>This chat may have been deleted or the link may be invalid.</p>
-                  <button type="button" className="btn btn-primary" onClick={handleNewChat}>
-                    Start a new chat
-                  </button>
+              {sessionNotFound ? (
+                <div className="ai-link-empty print-hide">
+                  <div className="ai-link-empty-intro">
+                    <h1>Session not found</h1>
+                    <p>This chat may have been deleted or the link may be invalid.</p>
+                    <button type="button" className="btn btn-primary" onClick={handleNewChat}>
+                      Start a new chat
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ) : !routeSessionId && messages.length === 0 ? (
-              <div className="ai-link-empty print-hide">
-                {renderEmptyPrompt()}
-              </div>
+              ) : !routeSessionId && messages.length === 0 ? (
+                <div className="ai-link-empty print-hide">
+                  {renderEmptyPrompt()}
+                </div>
 
-            ) : messagesLoading ? (
-              <div className="ai-link-empty print-hide">
-                <SessionLoadingSkeleton />
-              </div>
-            ) : isEmpty ? (
-              /* Session created but no messages yet */
-              <div className="ai-link-empty print-hide">
-                {renderEmptyPrompt(routeSessionId ?? undefined)}
-              </div>
+              ) : messagesLoading ? (
+                <div className="ai-link-empty print-hide">
+                  <SessionLoadingSkeleton />
+                </div>
+              ) : isEmpty ? (
+                /* Session created but no messages yet */
+                <div className="ai-link-empty print-hide">
+                  {renderEmptyPrompt(routeSessionId ?? undefined)}
+                </div>
 
               ) : (
                 /* Active conversation */
@@ -2911,8 +2911,8 @@ export default function AiPage() {
                                 <WaveThinkingText text="thinking" />
                               ) : displayAnswer ? (
                                 <div className="markdown-body" onMouseUp={handleResponseSelection}>
-                                  <ReactMarkdown 
-                                    remarkPlugins={[remarkGfm, remarkMath]} 
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm, remarkMath]}
                                     rehypePlugins={[rehypeKatex]}
                                     components={{ a: InlineCitationLink }}
                                   >

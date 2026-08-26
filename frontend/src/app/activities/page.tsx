@@ -122,6 +122,8 @@ function getActivityInsight(activity: { sport: string; training_load_vendor?: nu
 export default function ActivitiesPage() {
   const [activities, setActivities] = useState<ActivitySummary[]>([]);
   const [sportFilter, setSportFilter] = useState<string>("");
+  const [nameFilter, setNameFilter] = useState("");
+  const [nameDraft, setNameDraft] = useState("");
   const [filters, setFilters] = useState<ActivityFilters>(DEFAULT_FILTERS);
   const [draftFilters, setDraftFilters] = useState<ActivityFilters>(DEFAULT_FILTERS);
   const [isLoading, setIsLoading] = useState(true);
@@ -148,6 +150,7 @@ export default function ActivitiesPage() {
       const offset = (page - 1) * limit;
       const params = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
       if (sportFilter) params.set("sport", sportFilter);
+      if (nameFilter) params.set("name", nameFilter);
       if (filters.period && filters.periodValue) {
         params.set("period", filters.period);
         params.set("period_value", filters.periodValue);
@@ -174,7 +177,7 @@ export default function ActivitiesPage() {
       setTotalCount(0);
     }
     setIsLoading(false);
-  }, [sportFilter, filters, page, limit]);
+  }, [sportFilter, nameFilter, filters, page, limit]);
 
   useEffect(() => {
     fetchActivities();
@@ -191,6 +194,7 @@ export default function ActivitiesPage() {
     Boolean(filters.minDurationMinutes || filters.maxDurationMinutes),
     Boolean(filters.minTrainingLoad || filters.maxTrainingLoad),
     Boolean(filters.minDistanceKm || filters.maxDistanceKm),
+    Boolean(nameFilter),
     filters.sort !== "newest",
   ].filter(Boolean).length;
   const periodInputLabel = draftFilters.period
@@ -211,20 +215,6 @@ export default function ActivitiesPage() {
         <header className="page-header">
           <PageTitle>Activities Log</PageTitle>
           <div className="activity-header-controls">
-            <SingleSelect
-              ariaLabel="Sport filter"
-              detailsName="activity-header-menu"
-              value={sportFilter}
-              onChange={(value) => {
-                setSportFilter(value);
-                updatePage(1);
-              }}
-              id="sport-filter"
-              options={[
-                { value: "", label: "All Sports" },
-                ...Object.entries(SPORT_LABELS).map(([value, label]) => ({ value, label })),
-              ]}
-            />
             <details className="activity-filter" name="activity-header-menu">
               <summary className="activity-filter-trigger">
                 Filters
@@ -238,10 +228,22 @@ export default function ActivitiesPage() {
                 onSubmit={(event) => {
                   event.preventDefault();
                   setFilters({ ...draftFilters });
+                  setNameFilter(nameDraft.trim());
                   updatePage(1);
                   event.currentTarget.closest("details")?.removeAttribute("open");
                 }}
               >
+                <label className="activity-filter-sport-select">
+                  <span>Sport</span>
+                  <select id="sport-filter" aria-label="Sport filter" value={sportFilter} onChange={(event) => setSportFilter(event.target.value)}>
+                    <option value="">All Sports</option>
+                    {Object.entries(SPORT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </label>
+                <div className="activity-name-search">
+                  <input aria-label="Search activities by name" placeholder="Search by activity name" value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} />
+                  <button type="submit" aria-label="Search activities" title="Search activities"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" /><path d="m16 16 4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
+                </div>
                 <div className="activity-filter-grid">
                   <div className="activity-filter-field">
                     <span>Filter period</span>
@@ -354,6 +356,8 @@ export default function ActivitiesPage() {
                     onClick={(event) => {
                       setDraftFilters(DEFAULT_FILTERS);
                       setFilters(DEFAULT_FILTERS);
+                      setNameDraft("");
+                      setNameFilter("");
                       updatePage(1);
                       event.currentTarget.closest("details")?.removeAttribute("open");
                     }}

@@ -134,6 +134,7 @@ def _interval_hr_recovery(
 @router.get("/")
 async def list_activities(
     sport: str | None = None,
+    name: str | None = Query(default=None, min_length=1, max_length=100),
     period: DatePeriod | None = None,
     period_value: str | None = None,
     weekday: int | None = Query(default=None, ge=1, le=7),
@@ -165,6 +166,8 @@ async def list_activities(
             )
         else:
             conditions.append(Activity.sport == sport)
+    if name:
+        conditions.append(Activity.title.ilike(f"%{name.strip()}%"))
 
     bounds = _period_bounds(period, period_value)
     if bounds:
@@ -545,6 +548,9 @@ async def get_activity(
     for lap in laps:
         lap_name, load_unit = _hyrox_lap_detail(lap.lap_trigger)
         lap_name = lap_name or _swim_lap_name(lap.lap_trigger)
+        avg_speed_mps = lap.avg_speed_mps
+        if avg_speed_mps is None and lap.distance_m and lap.distance_m > 0 and lap.elapsed_s > 0:
+            avg_speed_mps = lap.distance_m / lap.elapsed_s
         lap_payload.append(
             {
                 "lap_index": lap.lap_index,
@@ -559,7 +565,7 @@ async def get_activity(
                 "distance_m": lap.distance_m,
                 "avg_hr_bpm": lap.avg_hr_bpm,
                 "max_hr_bpm": lap.max_hr_bpm,
-                "avg_speed_mps": lap.avg_speed_mps,
+                "avg_speed_mps": avg_speed_mps,
                 "avg_power_w": lap.avg_power_w,
                 "avg_cadence": lap.avg_cadence,
                 "lap_type": _lap_type(lap.lap_trigger),

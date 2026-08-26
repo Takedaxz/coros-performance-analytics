@@ -14,6 +14,7 @@ from src.api.routes import (
     ai_router,
     auth_router,
     dashboard_router,
+    feeling_router,
     settings_router,
     sync_router,
     training_plan_router,
@@ -100,6 +101,7 @@ app.add_middleware(
 
 app.include_router(sync_router, prefix="/api/sync", tags=["sync"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
+app.include_router(feeling_router, prefix="/api/feelings", tags=["feelings"])
 app.include_router(activity_router, prefix="/api/activities", tags=["activities"])
 app.include_router(ai_router, prefix="/api/ai", tags=["ai"])
 app.include_router(settings_router, prefix="/api/settings", tags=["settings"])

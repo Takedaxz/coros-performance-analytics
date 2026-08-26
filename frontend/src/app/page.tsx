@@ -91,9 +91,7 @@ export default function DashboardPage() {
   const [selectedRecordGroup, setSelectedRecordGroup] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedMetrics, setSelectedMetrics] = useState<WeeklyActivityMetric[]>(
-    WEEKLY_ACTIVITY_METRICS,
-  );
+  const selectedMetrics = WEEKLY_ACTIVITY_METRICS;
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -354,22 +352,6 @@ export default function DashboardPage() {
     return score > bestScore ? day : best;
   }, rawWeeklyActivityData[0]);
 
-  function toggleWeeklyMetric(metric: WeeklyActivityMetric): void {
-    setSelectedMetrics((current) => {
-      if (current.includes(metric)) {
-        return current.length === 1 ? current : current.filter((item) => item !== metric);
-      }
-      return WEEKLY_ACTIVITY_METRICS.filter((item) => current.includes(item) || item === metric);
-    });
-  }
-
-  const metricSelectorLabel =
-    selectedMetrics.length === WEEKLY_ACTIVITY_METRICS.length
-      ? "All metrics"
-      : selectedMetrics.length === 1
-        ? WEEKLY_ACTIVITY_CONFIG[selectedMetric].label
-        : `${WEEKLY_ACTIVITY_CONFIG[selectedMetric].label} +${selectedMetrics.length - 1}`;
-
   return (
     <div className="app-layout">
       <Sidebar />
@@ -521,47 +503,6 @@ export default function DashboardPage() {
                   <div>
                     <span className="instrument-eyebrow">Weekly activity</span>
                   </div>
-                  <details className="weekly-metric-selector">
-                    <summary>
-                      <span className="weekly-selector-signals" aria-hidden="true">
-                        {selectedMetrics.map((metric) => (
-                          <span key={metric} style={{ background: weeklyMetricColor(metric) }} />
-                        ))}
-                      </span>
-                      {metricSelectorLabel}
-                      <span aria-hidden="true">⌄</span>
-                    </summary>
-                    <div className="weekly-metric-menu">
-                      <div className="instrument-eyebrow">Metrics</div>
-                      {WEEKLY_ACTIVITY_METRICS.map((metric) => {
-                        const isSelected = selectedMetrics.includes(metric);
-                        return (
-                          <button
-                            key={metric}
-                            type="button"
-                            className="dropdown-option"
-                            aria-pressed={isSelected}
-                            aria-disabled={isSelected && selectedMetrics.length === 1}
-                            onClick={() => toggleWeeklyMetric(metric)}
-                            style={{ cursor: isSelected && selectedMetrics.length === 1 ? "not-allowed" : "pointer" }}
-                          >
-                            <span
-                              className="weekly-metric-check"
-                              aria-hidden="true"
-                              style={{ background: isSelected ? weeklyMetricColor(metric) : "var(--color-overlay-medium)" }}
-                            >
-                              {isSelected && (
-                                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                                  <path d="M2 5.2 4.1 7.3 8.2 2.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              )}
-                            </span>
-                            {WEEKLY_ACTIVITY_CONFIG[metric].label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </details>
                 </header>
 
                 <div className="weekly-instrument-overview">
@@ -609,7 +550,7 @@ export default function DashboardPage() {
                       />
                     )}
                     <Tooltip
-                      cursor={{ fill: "var(--color-chart-cursor)", radius: 10 }}
+                      cursor={false}
                       content={({ active, payload, label }) => {
                         if (!active || !payload || !payload.length) return null;
                         const dayData = payload[0]?.payload;
@@ -705,7 +646,7 @@ export default function DashboardPage() {
                           <Cell
                             key={`${metric}-${entry.dateStr}`}
                             fill={weeklyMetricColor(metric)}
-                            fillOpacity={entry.isToday ? 1 : 0.78}
+                            fillOpacity={0.78}
                           />
                         ))}
                       </Bar>

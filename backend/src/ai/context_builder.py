@@ -13,6 +13,7 @@ from src.db.models import (
     Activity,
     ActivityLap,
     ActivityRecord,
+    DailyFeeling,
     DailyHealth,
     FitnessEstimate,
     Goal,
@@ -753,6 +754,14 @@ async def build_training_context(
     res = await db.execute(stmt)
     health_records = res.scalars().all()
 
+    feeling_records = list(
+        await db.scalars(
+            select(DailyFeeling)
+            .where(DailyFeeling.user_id == user_id, DailyFeeling.date >= start_date)
+            .order_by(DailyFeeling.date.asc())
+        )
+    )
+
     # 2. Fetch Sleep (aggregate by day if possible, or just raw sessions)
     start_time = datetime.datetime.combine(start_date, datetime.time.min)
     stmt = (
@@ -820,6 +829,15 @@ async def build_training_context(
 
     # Build Context String
     lines = []
+    now = _now_local()
+    yesterday = today - datetime.timedelta(days=1)
+    lines += [
+        "### Current Date & Time Reference",
+        f"- **Current Timestamp:** {now.strftime('%A, %Y-%m-%d %H:%M')} (Timezone: {_USER_TZ.key})",
+        f"- **Today's Date:** {today.isoformat()} ({now.strftime('%A')})",
+        f"- **Yesterday's Date:** {yesterday.isoformat()} ({(now - datetime.timedelta(days=1)).strftime('%A')})",
+        "",
+    ]
     if goal_section:
         lines.append(goal_section)
         lines.append("")
@@ -847,6 +865,14 @@ async def build_training_context(
         lines.append(
             f"| {h.date} | {hrv} | {hrv_band} | {zscore} | {readiness} | {strain} | {rhr} | {rec} | {stress} | {spo2} | {flags} |"
         )
+
+    lines.extend(["", "#### Athlete-Reported Daily Feeling"])
+    if feeling_records:
+        for feeling in feeling_records:
+            note = f" — {feeling.note}" if feeling.note else ""
+            lines.append(f"- {feeling.date}: {feeling.feeling.replace('_', ' ')}{note}")
+    else:
+        lines.append("- No athlete-reported feelings in this period.")
 
     lines.extend(
         [

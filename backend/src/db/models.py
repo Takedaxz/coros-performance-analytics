@@ -398,6 +398,28 @@ class DailyHealth(Base):
 
 
 # ---------------------------------------------------------------------------
+# Athlete-reported daily feeling
+# ---------------------------------------------------------------------------
+
+
+class DailyFeeling(Base):
+    __tablename__ = "daily_feelings"
+    __table_args__ = (UniqueConstraint("user_id", "date", name="uq_daily_feeling_user_date"),)
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    feeling: Mapped[str] = mapped_column(String(20), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(280), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+# ---------------------------------------------------------------------------
 # Fitness Estimates
 # ---------------------------------------------------------------------------
 

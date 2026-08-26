@@ -11,6 +11,7 @@ from src.ai.coach_tools import (
     _calendar_change_proposal,
     _execute_tool,
     _health_trend,
+    _lap_pace_s_km,
     _pace_s_km,
     _past_race_goals,
     _rank_strength_exercises,
@@ -38,6 +39,7 @@ def test_activity_tool_rejects_unknown_sport() -> None:
 def test_activity_tool_computes_compact_pace() -> None:
     assert _pace_s_km(3.0) == 333
     assert _pace_s_km(None) is None
+    assert _lap_pace_s_km(None, 500.0, 150.0) == 300
 
 
 def test_strength_exercise_search_returns_ranked_coros_identity() -> None:
@@ -200,6 +202,7 @@ async def test_health_trend_keeps_rich_data_without_nulls() -> None:
         sleep_quality_vendor=82.0,
         is_nap=False,
     )
+    feeling = SimpleNamespace(date=dt.date(2026, 8, 14), feeling="low", note="Poor sleep")
     activity = SimpleNamespace(
         id="activity-1",
         start_time=dt.datetime(2026, 8, 14, 6),
@@ -229,7 +232,9 @@ async def test_health_trend_keeps_rich_data_without_nulls() -> None:
 
     class Db:
         def __init__(self) -> None:
-            self.results = iter([Result([health]), Result([sleep]), Result([activity])])
+            self.results = iter(
+                [Result([health]), Result([sleep]), Result([feeling]), Result([activity])]
+            )
 
         async def execute(self, _statement: object) -> Result:
             return next(self.results)
@@ -240,6 +245,9 @@ async def test_health_trend_keeps_rich_data_without_nulls() -> None:
     assert "load_impact" not in result["health"][0]
     assert result["sleep"][0]["duration_min"] == 480
     assert "light_min" not in result["sleep"][0]
+    assert result["athlete_feelings"] == [
+        {"date": "2026-08-14", "feeling": "low", "note": "Poor sleep"}
+    ]
     assert result["activities"][0]["km"] == 8.0
 
 
