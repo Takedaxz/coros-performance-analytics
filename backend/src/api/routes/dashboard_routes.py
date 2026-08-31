@@ -9,7 +9,8 @@ from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.engine import get_db_session
-from src.db.models import Activity, DailyHealth, FitnessEstimate, SleepSession, User
+from src.activity_laps import training_time_s
+from src.db.models import Activity, ActivityLap, DailyHealth, FitnessEstimate, SleepSession, User
 from src.metrics.derived import compute_cardio_fitness_age
 
 router = APIRouter()
@@ -41,6 +42,21 @@ async def dashboard_summary(
         .limit(10)
     )
     activities = act_result.scalars().all()
+    rest_duration_by_activity: dict[str, float] = {}
+    if activities:
+        rest_duration_result = await db.execute(
+            select(ActivityLap.activity_id, func.sum(ActivityLap.elapsed_s))
+            .where(
+                ActivityLap.activity_id.in_([activity.id for activity in activities]),
+                ActivityLap.lap_trigger == "coros_rest",
+            )
+            .group_by(ActivityLap.activity_id)
+        )
+        rest_duration_by_activity = {
+            activity_id: float(rest_duration_s)
+            for activity_id, rest_duration_s in rest_duration_result.all()
+            if rest_duration_s is not None
+        }
 
     # Daily health for period
     health_result = await db.execute(
@@ -96,6 +112,10 @@ async def dashboard_summary(
                 "start_time": a.start_time.isoformat(),
                 "distance_m": a.distance_m,
                 "elapsed_time_s": a.elapsed_time_s,
+                "training_time_s": training_time_s(
+                    a.timer_time_s,
+                    rest_duration_by_activity.get(a.id, 0.0),
+                ),
                 "avg_hr_bpm": a.avg_hr_bpm,
                 "avg_speed_mps": a.avg_speed_mps,
                 "avg_power_w": a.avg_power_w,

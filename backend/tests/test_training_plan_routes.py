@@ -8,6 +8,7 @@ from src.api.routes import training_plan_routes
 from src.api.routes.training_plan_routes import (
     CorosWorkoutDraft,
     CorosWorkoutStep,
+    MoveCorosWorkout,
     TrainingEvent,
     _build_coros_program,
     _calculate_program_summary,
@@ -19,6 +20,61 @@ from src.api.routes.training_plan_routes import (
     _schedule_new_workout,
     fetch_coros_calendar,
 )
+
+
+@pytest.mark.asyncio
+async def test_duplicate_coros_workout_keeps_the_source_scheduled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    updates: list[dict[str, object]] = []
+    source_entity = {"idInPlan": 7, "sortNoInSchedule": 1}
+    source_program = {"idInPlan": 7, "id": "program-7", "name": "Easy Run", "pbVersion": 2}
+
+    class Client:
+        async def fetch_training_schedule(self, _start: str, _end: str) -> dict[str, object]:
+            return {"maxIdInPlan": 7}
+
+        async def post_training_hub(self, _path: str, payload: dict[str, object]) -> None:
+            updates.append(payload)
+
+    client = Client()
+
+    async def coros_client(_db: object) -> Client:
+        return client
+
+    async def scheduled_match(
+        _client: Client, _uid: str
+    ) -> tuple[dict[str, object], dict[str, object], str]:
+        return source_entity, source_program, "20260831"
+
+    monkeypatch.setattr(training_plan_routes, "_coros_client", coros_client)
+    monkeypatch.setattr(training_plan_routes, "_scheduled_match", scheduled_match)
+    monkeypatch.setattr(
+        training_plan_routes,
+        "_parse_coros_schedule",
+        lambda _schedule: [
+            TrainingEvent(
+                uid="coros:plan:8:20260902",
+                summary="Easy Run",
+                start="2026-09-02",
+                end="2026-09-02",
+                description="",
+                location="",
+                event_type="run",
+                is_all_day=True,
+            )
+        ],
+    )
+
+    duplicated = await training_plan_routes.duplicate_coros_workout(
+        "coros:plan:7:20260831",
+        MoveCorosWorkout(date="2026-09-02", confirmed=True),
+        object(),  # type: ignore[arg-type]
+    )
+
+    assert duplicated.uid == "coros:plan:8:20260902"
+    assert len(updates) == 1
+    assert updates[0]["versionObjects"] == [{"id": 8, "status": 1}]
 
 
 def test_exercise_video_catalog_keeps_only_official_coros_videos() -> None:

@@ -6,6 +6,8 @@ import PageTitle from "@/components/PageTitle";
 import SingleSelect from "@/components/SingleSelect";
 import NumberStepper from "@/components/NumberStepper";
 import CustomDatePicker from "@/components/CustomDatePicker";
+import FileUpload from "@/components/FileUpload";
+import ThemeToggle from "@/components/ThemeToggle";
 import type { SyncStatus } from "@/lib/types";
 
 interface UserGoal {
@@ -19,6 +21,15 @@ interface UserGoal {
   goal_race_tier: string;
   weekly_training_hours: string;
   is_active?: boolean;
+}
+
+interface UserDocument {
+  id: string;
+  goal_id: string | null;
+  original_filename: string;
+  content_type: string;
+  size_bytes: number;
+  created_at: string;
 }
 
 interface UserProfile {
@@ -62,6 +73,19 @@ const EMPTY_PROFILE: UserProfile = {
   resting_hr_bpm: null,
   heart_rate_reserve_bpm: null,
 };
+
+function formatDocumentSize(bytes: number): string {
+  if (bytes > 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.ceil(bytes / 1024)} KB`;
+}
+
+function PaperclipIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />
+    </svg>
+  );
+}
 
 function daysUntil(dateStr: string): number | null {
   if (!dateStr) return null;
@@ -120,6 +144,11 @@ export default function SettingsPage() {
   const [goalSaving, setGoalSaving] = useState(false);
   const [goalSaved, setGoalSaved] = useState(false);
   const [goalError, setGoalError] = useState("");
+  const [documents, setDocuments] = useState<UserDocument[]>([]);
+  const [goalFile, setGoalFile] = useState<File | null>(null);
+  const [documentError, setDocumentError] = useState("");
+  const [previewDocument, setPreviewDocument] = useState<UserDocument | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ label: string; name: string; onConfirm: () => void } | null>(null);
 
   // Edit/Add forms state
   const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
@@ -168,6 +197,13 @@ export default function SettingsPage() {
     } finally {
       setGoalsLoading(false);
     }
+  }
+
+  async function fetchDocuments() {
+    try {
+      const res = await fetch(`${apiBase}/api/settings/documents`);
+      if (res.ok) setDocuments(await res.json());
+    } catch { /* Backend not available */ }
   }
 
   useEffect(() => {
@@ -228,12 +264,42 @@ export default function SettingsPage() {
 
     fetchConfig();
     fetchGoals();
+    fetchDocuments();
     fetchProfile();
     fetchMcpStatus();
     fetchCorosCreds();
     const syncStatusTimer = window.setInterval(fetchConfig, 60_000);
     return () => window.clearInterval(syncStatusTimer);
   }, [apiBase]);
+
+  async function uploadDocument(file: File, goalId?: string) {
+    setDocumentError("");
+    const body = new FormData();
+    body.append("file", file);
+    if (goalId) body.append("goal_id", goalId);
+    try {
+      const res = await fetch(`${apiBase}/api/settings/documents`, { method: "POST", body });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || `HTTP ${res.status}`);
+      }
+      const document = await res.json();
+      setDocuments((current) => [document, ...current]);
+    } catch (err) {
+      setDocumentError(err instanceof Error ? err.message : "Failed to upload document");
+    }
+  }
+
+  async function deleteDocument(id: string, filename: string) {
+    setConfirmDelete({
+      label: "Delete this document?",
+      name: filename,
+      onConfirm: async () => {
+        const res = await fetch(`${apiBase}/api/settings/documents/${id}`, { method: "DELETE" });
+        if (res.ok) setDocuments((current) => current.filter((document) => document.id !== id));
+      },
+    });
+  }
 
   useEffect(() => {
     if (!profileLoaded.current || !profileDirty.current) return;
@@ -388,6 +454,8 @@ export default function SettingsPage() {
       }
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const savedGoal = await res.json();
+      if (goalFile && savedGoal.id) await uploadDocument(goalFile, savedGoal.id);
       setGoalSaved(true);
       setTimeout(() => setGoalSaved(false), 3000);
 
@@ -395,6 +463,7 @@ export default function SettingsPage() {
       setEditingGoalId(null);
       setIsAddingGoal(false);
       setGoalForm(EMPTY_GOAL);
+      setGoalFile(null);
       
       await fetchGoals();
     } catch (err) {
@@ -404,18 +473,21 @@ export default function SettingsPage() {
     }
   }
 
-  async function deleteGoal(id: string) {
-    if (!confirm("Are you sure you want to delete this training goal?")) return;
-    setGoalError("");
-    try {
-      const res = await fetch(`${apiBase}/api/settings/goals/${id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      await fetchGoals();
-    } catch (err) {
-      setGoalError(err instanceof Error ? err.message : "Failed to delete");
-    }
+  async function deleteGoal(id: string, raceName: string) {
+    setConfirmDelete({
+      label: "Delete this training goal?",
+      name: raceName,
+      onConfirm: async () => {
+        setGoalError("");
+        try {
+          const res = await fetch(`${apiBase}/api/settings/goals/${id}`, { method: "DELETE" });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          await fetchGoals();
+        } catch (err) {
+          setGoalError(err instanceof Error ? err.message : "Failed to delete");
+        }
+      },
+    });
   }
 
   async function toggleActive(id: string) {
@@ -445,18 +517,21 @@ export default function SettingsPage() {
       weekly_training_hours: g.weekly_training_hours,
       is_active: g.is_active,
     });
+    setGoalFile(null);
   }
 
   function startAddGoal() {
     setEditingGoalId(null);
     setIsAddingGoal(true);
     setGoalForm(EMPTY_GOAL);
+    setGoalFile(null);
   }
 
   function cancelGoalForm() {
     setEditingGoalId(null);
     setIsAddingGoal(false);
     setGoalForm(EMPTY_GOAL);
+    setGoalFile(null);
   }
 
   function updateProfileField<Key extends keyof UserProfile>(key: Key, value: UserProfile[Key]) {
@@ -492,6 +567,9 @@ export default function SettingsPage() {
         )}
         <header className="page-header">
           <PageTitle>Settings</PageTitle>
+          <div className="settings-header-actions">
+            <ThemeToggle showLabel={false} className="settings-theme-toggle" />
+          </div>
         </header>
         <div className="page-body settings-page">
           <div className="settings-sections">
@@ -703,8 +781,8 @@ export default function SettingsPage() {
               <section className="settings-section hover-card" id="settings-coaching">
                 <div className="settings-section-heading">
                   <div>
-                    <h2>Coaching context</h2>
-                    <p>Define the outcomes and constraints the coach should consider in every recommendation.</p>
+                    <h2>Race & training details</h2>
+                    <p>Keep your race goals, training notes, and important documents together.</p>
                   </div>
                 </div>
 
@@ -738,7 +816,7 @@ export default function SettingsPage() {
                             placeholder="Select race date"
                           />
                         </div>
-                        <div className="settings-field">
+                        <div className="settings-field settings-goal-tier">
                           <label htmlFor="goal-tier">Race tier</label>
                           <SingleSelect
                             id="goal-tier"
@@ -755,7 +833,7 @@ export default function SettingsPage() {
                             ]}
                           />
                         </div>
-                        <div className="settings-field">
+                        <div className="settings-field settings-goal-target-time">
                           <label id="goal-time-label">Target time</label>
                           <div className="settings-target-time" aria-labelledby="goal-time-label">
                             <div className="settings-target-time-part">
@@ -860,6 +938,16 @@ export default function SettingsPage() {
                         <label htmlFor="goal-notes">Goal notes</label>
                         <textarea id="goal-notes" rows={3} placeholder="Experience, injury considerations, or pacing priorities." value={goalForm.goal_description} onChange={(e) => setGoalForm((g) => ({ ...g, goal_description: e.target.value }))} />
                       </div>
+                      <div className="settings-field">
+                        <label htmlFor="goal-document">Race ticket or confirmation</label>
+                        <FileUpload id="goal-document" value={goalFile} accept="image/*,application/pdf" helper="Optional image or PDF, up to 20 MB." buttonLabel="Choose file" onChange={setGoalFile} />
+                        {editingGoalId && documents.filter((document) => document.goal_id === editingGoalId).map((document) => (
+                          <button className="settings-document-link" type="button" key={document.id} onClick={() => setPreviewDocument(document)}>
+                            <PaperclipIcon />
+                            {document.original_filename}
+                          </button>
+                        ))}
+                      </div>
                       {canEnterGoalResult && (
                         <div className="settings-field">
                           <label htmlFor="goal-race-notes">Race notes</label>
@@ -925,6 +1013,12 @@ export default function SettingsPage() {
                                   </div>
                                   {g.goal_description && <p>{g.goal_description}</p>}
                                   {g.goal_race_note && <p>Race note: {g.goal_race_note}</p>}
+                                  {documents.filter((document) => document.goal_id === g.id).map((document) => (
+                                    <button className="settings-document-link" key={document.id} onClick={() => setPreviewDocument(document)}>
+                                      <PaperclipIcon />
+                                      {document.original_filename}
+                                    </button>
+                                  ))}
                                 </div>
                                 <div className="settings-goal-actions">
                                   <button className="btn btn-ghost btn-sm" onClick={() => startEditGoal(g)}>Edit</button>
@@ -933,7 +1027,7 @@ export default function SettingsPage() {
                                       {g.is_active ? "Archive" : "Activate"}
                                     </button>
                                   )}
-                                  <button className="btn btn-ghost btn-sm settings-danger-action" onClick={() => g.id && deleteGoal(g.id)}>Delete</button>
+                                  <button className="btn btn-ghost btn-sm settings-danger-action" onClick={() => g.id && deleteGoal(g.id, g.goal_race_name)}>Delete</button>
                                 </div>
                               </article>
                             );
@@ -942,6 +1036,57 @@ export default function SettingsPage() {
                     </div>
                   )}
 
+                </div>
+
+                <div className="settings-subsection" id="settings-documents">
+                  <div className="settings-subsection-heading">
+                    <div>
+                      <h3>Documents</h3>
+                      <p>Keep race tickets and order confirmations in this private vault.</p>
+                    </div>
+                    <FileUpload id="document-upload" value={null} accept="image/*,application/pdf" helper="" buttonLabel="Upload document" iconOnly onChange={(file) => { if (file) void uploadDocument(file); }} />
+                  </div>
+                  {documentError && <p className="settings-feedback is-error">{documentError}</p>}
+                  <div className="settings-doc-grid">
+                    {documents.length === 0 ? <p className="settings-empty">No documents yet.</p> : documents.map((document) => (
+                      <article className="settings-doc-card" key={document.id} onClick={() => setPreviewDocument(document)}>
+                        <div className="settings-doc-card-thumb">
+                          {document.content_type.startsWith("image/") ? (
+                            <img
+                              src={`${apiBase}/api/settings/documents/${document.id}/file`}
+                              alt={document.original_filename}
+                            />
+                          ) : (
+                            <iframe
+                              src={`${apiBase}/api/settings/documents/${document.id}/file#toolbar=0&view=FitH`}
+                              title={document.original_filename}
+                              tabIndex={-1}
+                            />
+                          )}
+                        </div>
+                        <div className="settings-doc-card-info">
+                          <strong className="settings-doc-card-name" title={document.original_filename}>
+                            {document.original_filename}
+                          </strong>
+                          <div className="settings-goal-meta">
+                            <span>{document.goal_id ? goals.find((goal) => goal.id === document.goal_id)?.goal_race_name || "Competition" : "All documents"}</span>
+                          </div>
+                          <div className="settings-doc-card-footer">
+                            <span className="settings-doc-card-meta">{formatDocumentSize(document.size_bytes)}</span>
+                            <button
+                              className="btn btn-ghost btn-sm settings-danger-action"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void deleteDocument(document.id, document.original_filename);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="settings-subsection" id="settings-training-notes">
@@ -969,6 +1114,70 @@ export default function SettingsPage() {
           </div>
         </div>
       </main>
+      {previewDocument && (
+        <div className="doc-preview-overlay" onClick={() => setPreviewDocument(null)}>
+          <div className="doc-preview-popup" onClick={(e) => e.stopPropagation()}>
+            <div className="doc-preview-header">
+              <span className="doc-preview-filename">{previewDocument.original_filename}</span>
+              <div className="doc-preview-header-actions">
+                <a
+                  className="doc-preview-close"
+                  aria-label="Download"
+                  href={`${apiBase}/api/settings/documents/${previewDocument.id}/file?download=true`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                </a>
+                <button className="doc-preview-close" aria-label="Close" onClick={() => setPreviewDocument(null)}>✕</button>
+              </div>
+            </div>
+            {previewDocument.content_type.startsWith("image/") ? (
+              <img
+                className="doc-preview-image"
+                src={`${apiBase}/api/settings/documents/${previewDocument.id}/file`}
+                alt={previewDocument.original_filename}
+              />
+            ) : (
+              <iframe
+                className="doc-preview-frame"
+                src={`${apiBase}/api/settings/documents/${previewDocument.id}/file`}
+                title={previewDocument.original_filename}
+              />
+            )}
+          </div>
+        </div>
+      )}
+      {confirmDelete && (
+        <div className="doc-preview-overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="doc-preview-popup confirm-delete-popup" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-delete-body">
+              <div>
+                <p className="confirm-delete-label">{confirmDelete.label}</p>
+                <p className="confirm-delete-name">{confirmDelete.name}</p>
+              </div>
+              <div className="confirm-delete-actions">
+                <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDelete(null)}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm settings-danger-action"
+                  onClick={async () => {
+                    setConfirmDelete(null);
+                    await confirmDelete.onConfirm();
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

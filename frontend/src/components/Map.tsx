@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { CircleMarker, LatLngBounds, Map as LeafletMap, Polyline } from "leaflet";
 import { routePositionAt, type TimedRoutePoint } from "./routeReplay";
-import { cartoBasemapUrl, type Theme } from "@/lib/theme";
+import { openFreeMapStyleUrl, type Theme } from "@/lib/theme";
 
 interface RoutePoint {
   lat: number;
@@ -245,7 +245,10 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
     playbackRef.current.elapsedSeconds = 0;
     segmentIndexRef.current = 0;
 
-    import("leaflet").then((L) => {
+    Promise.all([
+      import("leaflet"),
+      import("@maplibre/maplibre-gl-leaflet"),
+    ]).then(([L, { default: maplibreGL }]) => {
       const container = mapContainerRef.current;
       if (!isMounted || !container || !document.body.contains(container)) return;
 
@@ -285,14 +288,12 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
 
       const currentTheme = (): Theme =>
         document.documentElement.dataset.theme === "light" ? "light" : "dark";
-      const tileLayer = L.tileLayer(cartoBasemapUrl(currentTheme()), {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: "abcd",
-        maxZoom: 20,
+      const basemapLayer = maplibreGL({
+        style: openFreeMapStyleUrl(currentTheme()),
+        interactive: false,
       }).addTo(map);
       themeObserver = new MutationObserver(() => {
-        tileLayer.setUrl(cartoBasemapUrl(currentTheme()));
+        basemapLayer.getMaplibreMap().setStyle(openFreeMapStyleUrl(currentTheme()));
       });
       themeObserver.observe(document.documentElement, {
         attributeFilter: ["data-theme"],

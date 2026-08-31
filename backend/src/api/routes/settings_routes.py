@@ -1,11 +1,16 @@
 """Settings routes: user preferences, API config, data management."""
 
 import datetime
+import os
+import secrets
+import tempfile
+from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import get_settings
@@ -15,11 +20,12 @@ from src.db.credential_store import (
     save_coros_credentials,
 )
 from src.db.engine import get_db_session
-from src.db.models import Goal, User
+from src.db.models import Document, Goal, User
 from src.db.owner import get_owner_id
 
 router = APIRouter()
 settings = get_settings()
+MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 
 
 async def _api_enabled(db: AsyncSession) -> bool:
@@ -85,6 +91,18 @@ class GoalUpdate(BaseModel):
     goal_race_tier: Literal["A", "B", "C", "D", "E"] | None = None
     weekly_training_hours: float | None = None
     is_active: bool | None = None
+
+
+class DocumentResponse(BaseModel):
+    id: str
+    goal_id: str | None
+    original_filename: str
+    content_type: str
+    size_bytes: int
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
 
 
 class UserProfile(BaseModel):
@@ -401,6 +419,7 @@ async def delete_goal(
     if not goal:
         raise HTTPException(status_code=404, detail="Goal not found")
 
+    await db.execute(update(Document).where(Document.goal_id == goal_id).values(goal_id=None))
     await db.delete(goal)
     await db.commit()
     return {"status": "success", "message": "Goal deleted"}
@@ -425,3 +444,107 @@ async def toggle_goal_active(
     await db.commit()
     await db.refresh(goal)
     return goal
+
+
+def _document_path(storage_filename: str) -> Path:
+    root = Path(settings.raw_file_store_path).resolve()
+    path = (root / storage_filename).resolve()
+    if path.parent != root:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return path
+
+
+@router.get("/documents", response_model=list[DocumentResponse])
+async def get_documents(db: AsyncSession = Depends(get_db_session)) -> list[Document]:
+    result = await db.execute(
+        select(Document)
+        .where(Document.user_id == get_owner_id())
+        .order_by(Document.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+@router.post("/documents", response_model=DocumentResponse, status_code=201)
+async def upload_document(
+    file: UploadFile = File(...),
+    goal_id: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db_session),
+) -> Document:
+    content_type = file.content_type or ""
+    if content_type != "application/pdf" and not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only PDF and image files are allowed.")
+    if goal_id:
+        goal = await db.scalar(
+            select(Goal).where(Goal.id == goal_id, Goal.user_id == get_owner_id())
+        )
+        if goal is None:
+            raise HTTPException(status_code=404, detail="Goal not found")
+
+    data = await file.read(MAX_DOCUMENT_BYTES + 1)
+    if len(data) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(status_code=413, detail="Files must be 20 MB or smaller.")
+    original_filename = (Path(file.filename or "document").name or "document")[:255]
+    storage_filename = f"document_{secrets.token_hex(16)}"
+    path = _document_path(storage_filename)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".upload-", delete=False) as temp:
+        temp.write(data)
+        temp_path = Path(temp.name)
+    os.replace(temp_path, path)
+    document = Document(
+        user_id=get_owner_id(),
+        goal_id=goal_id,
+        original_filename=original_filename,
+        storage_filename=storage_filename,
+        content_type=content_type,
+        size_bytes=len(data),
+    )
+    db.add(document)
+    try:
+        await db.commit()
+        await db.refresh(document)
+    except Exception:
+        await db.rollback()
+        path.unlink(missing_ok=True)
+        temp_path.unlink(missing_ok=True)
+        raise
+    return document
+
+
+@router.get("/documents/{document_id}/file")
+async def serve_document(
+    document_id: str,
+    download: bool = False,
+    db: AsyncSession = Depends(get_db_session),
+) -> FileResponse:
+    document = await db.scalar(
+        select(Document).where(Document.id == document_id, Document.user_id == get_owner_id())
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    path = _document_path(document.storage_filename)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Document file not found")
+    if download:
+        return FileResponse(
+            path,
+            media_type=document.content_type,
+            filename=document.original_filename,
+        )
+    return FileResponse(path, media_type=document.content_type)
+
+
+
+@router.delete("/documents/{document_id}")
+async def delete_document(
+    document_id: str, db: AsyncSession = Depends(get_db_session)
+) -> dict[str, str]:
+    document = await db.scalar(
+        select(Document).where(Document.id == document_id, Document.user_id == get_owner_id())
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    _document_path(document.storage_filename).unlink(missing_ok=True)
+    await db.delete(document)
+    await db.commit()
+    return {"status": "success"}

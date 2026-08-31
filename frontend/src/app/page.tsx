@@ -708,7 +708,7 @@ export default function DashboardPage() {
                           </span>
                         </div>
                         <span style={{ display: "block", marginTop: "5px", color: "var(--color-text-muted)", fontSize: "11px" }}>
-                          {activity.distance_m ? formatDistance(activity.distance_m) : sportVisual.label} · {activity.elapsed_time_s ? formatDuration(activity.elapsed_time_s) : "--"}
+                          {activity.distance_m ? formatDistance(activity.distance_m) : sportVisual.label} · {activity.training_time_s ? formatDuration(activity.training_time_s) : activity.elapsed_time_s ? formatDuration(activity.elapsed_time_s) : "--"}
                         </span>
                       </div>
                       <div className="dashboard-activity-date" style={{ textAlign: "right", color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums" }}>

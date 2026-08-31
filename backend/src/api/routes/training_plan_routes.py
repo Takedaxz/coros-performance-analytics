@@ -1860,6 +1860,57 @@ async def edit_coros_workout(
         raise HTTPException(status_code=502, detail=f"COROS Calendar unavailable: {exc}") from exc
 
 
+async def _copy_coros_workout(
+    client: CorosApiClient, entity: ScheduleObject, program: ScheduleObject, date: str
+) -> TrainingEvent:
+    happen_day = _coros_day(date)
+    copied = dict(program)
+    copied["id"] = "0"
+    copied["idInPlan"] = "0"
+    schedule = await client.fetch_training_schedule(happen_day, happen_day)
+    max_id = schedule.get("maxIdInPlan")
+    new_id = int(max_id) + 1 if isinstance(max_id, (int, float, str)) else 1
+    copied["idInPlan"] = new_id
+    new_entity: ScheduleObject = {
+        "happenDay": happen_day,
+        "idInPlan": new_id,
+        "sortNoInSchedule": entity.get("sortNoInSchedule", 1),
+    }
+    if isinstance(copied.get("exerciseBarChart"), list):
+        new_entity["exerciseBarChart"] = copied["exerciseBarChart"]
+    await client.post_training_hub(
+        "/training/schedule/update",
+        {
+            "entities": [new_entity],
+            "programs": [copied],
+            "versionObjects": [{"id": new_id, "status": 1}],
+            "pbVersion": copied.get("pbVersion", 2),
+        },
+    )
+    verified = _parse_coros_schedule(await client.fetch_training_schedule(happen_day, happen_day))
+    for event in verified:
+        if event.uid.endswith(f":{new_id}:{happen_day}"):
+            return event
+    raise HTTPException(
+        status_code=502, detail="COROS accepted the workout copy but did not return it on reread."
+    )
+
+
+@router.post("/coros/workouts/{uid:path}/duplicate", response_model=TrainingEvent)
+async def duplicate_coros_workout(
+    uid: str,
+    request: MoveCorosWorkout,
+    db: AsyncSession = Depends(get_db_session),
+) -> TrainingEvent:
+    """Duplicate one scheduled workout onto a selected date."""
+    client = await _coros_client(db)
+    try:
+        entity, program, _ = await _scheduled_match(client, uid)
+        return await _copy_coros_workout(client, entity, program, request.date)
+    except CorosApiClientError as exc:
+        raise HTTPException(status_code=502, detail=f"COROS Calendar unavailable: {exc}") from exc
+
+
 @router.post("/coros/workouts/{uid:path}/move", response_model=TrainingEvent)
 async def move_coros_workout(
     uid: str,
@@ -1879,29 +1930,7 @@ async def move_coros_workout(
                 )
                 if event.uid == uid
             )
-        copied = dict(program)
-        copied["id"] = "0"
-        copied["idInPlan"] = "0"
-        schedule = await client.fetch_training_schedule(new_day, new_day)
-        max_id = schedule.get("maxIdInPlan")
-        new_id = int(max_id) + 1 if isinstance(max_id, (int, float, str)) else 1
-        copied["idInPlan"] = new_id
-        new_entity: ScheduleObject = {
-            "happenDay": new_day,
-            "idInPlan": new_id,
-            "sortNoInSchedule": entity.get("sortNoInSchedule", 1),
-        }
-        if isinstance(copied.get("exerciseBarChart"), list):
-            new_entity["exerciseBarChart"] = copied["exerciseBarChart"]
-        await client.post_training_hub(
-            "/training/schedule/update",
-            {
-                "entities": [new_entity],
-                "programs": [copied],
-                "versionObjects": [{"id": new_id, "status": 1}],
-                "pbVersion": copied.get("pbVersion", 2),
-            },
-        )
+        copied = await _copy_coros_workout(client, entity, program, request.date)
         await client.post_training_hub(
             "/training/schedule/update",
             {
@@ -1916,12 +1945,7 @@ async def move_coros_workout(
                 "pbVersion": program.get("pbVersion", 2),
             },
         )
-        for event in _parse_coros_schedule(await client.fetch_training_schedule(new_day, new_day)):
-            if event.uid.endswith(f":{new_id}:{new_day}"):
-                return event
-        raise HTTPException(
-            status_code=502, detail="COROS moved the workout but did not return it on reread."
-        )
+        return copied
     except CorosApiClientError as exc:
         raise HTTPException(status_code=502, detail=f"COROS Calendar unavailable: {exc}") from exc
 

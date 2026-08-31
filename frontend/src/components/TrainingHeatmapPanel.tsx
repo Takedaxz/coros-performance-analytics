@@ -473,18 +473,19 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
       {/* One timeline keeps month labels and cells aligned during drag/swipe. */}
       <div ref={heatmapScrollRef} style={{ overflowX: "auto", overflowY: "hidden", padding: "8px 0", scrollbarGutter: "stable" }}>
         <div style={{ minWidth: "725px", width: "100%" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0, 1fr)", gap: "6px", marginBottom: "6px", fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "16px minmax(0, 1fr) 16px", gap: "6px", marginBottom: "6px", fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)" }}>
             <span aria-hidden="true" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(13, minmax(0, 1fr))", gap: "3px" }}>
               {months.map((m, idx) => (
                 <span key={idx}>{m}</span>
               ))}
             </div>
+            <span aria-hidden="true" />
           </div>
 
           <div style={{ display: "flex", gap: "6px" }}>
             {/* Weekday Labels Column */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "3px", justifyContent: "space-around", fontSize: "10px", fontWeight: 700, color: "var(--color-text-muted)", width: "16px", flexShrink: 0 }}>
+            <div className="heatmap-weekday-labels" style={{ display: "flex", flexDirection: "column", gap: "3px", justifyContent: "space-around", fontSize: "10px", fontWeight: 700, color: "var(--color-text-muted)", width: "16px", flexShrink: 0 }}>
               {WEEKDAYS.map((w, idx) => (
                 <span key={idx} style={{ height: "11px", lineHeight: "11px" }}>{w}</span>
               ))}
@@ -518,6 +519,12 @@ export default function TrainingHeatmapPanel({ activities = [] }: TrainingHeatma
                     );
                   })}
                 </div>
+              ))}
+            </div>
+
+            <div aria-hidden="true" className="heatmap-weekday-labels" style={{ display: "flex", flexDirection: "column", gap: "3px", justifyContent: "space-around", fontSize: "10px", fontWeight: 700, color: "var(--color-text-muted)", width: "16px", flexShrink: 0 }}>
+              {WEEKDAYS.map((w, idx) => (
+                <span key={idx} style={{ height: "11px", lineHeight: "11px" }}>{w}</span>
               ))}
             </div>
           </div>

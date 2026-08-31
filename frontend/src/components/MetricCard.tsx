@@ -4,6 +4,7 @@ import React, { ReactNode } from "react";
 
 interface MetricCardProps {
   label: string;
+  shortLabel?: string;
   value: string | number;
   unit?: string;
   baselineDelta?: string;
@@ -15,6 +16,7 @@ interface MetricCardProps {
 
 export default function MetricCard({
   label,
+  shortLabel,
   value,
   unit,
   baselineDelta,
@@ -62,12 +64,17 @@ export default function MetricCard({
       <div>
         <div className="metric-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
           <span className="metric-label" style={{ fontSize: "11px", fontWeight: 700, color: "var(--color-text-primary)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-            {label}
+            {shortLabel ? (
+              <>
+                <span className="metric-label-full">{label}</span>
+                <span className="metric-label-short">{shortLabel}</span>
+              </>
+            ) : label}
           </span>
-          {icon && <span style={{ color: "var(--color-text-muted)", width: 16, height: 16, display: "flex", alignItems: "center" }}>{icon}</span>}
+          {icon && <span className="metric-card-icon" style={{ color: "var(--color-text-muted)", width: 16, height: 16, display: "flex", alignItems: "center" }}>{icon}</span>}
         </div>
 
-        <div style={{ display: "flex", alignItems: "baseline", gap: "4px" }}>
+        <div className="metric-value-row" style={{ display: "flex", alignItems: "baseline", gap: "4px" }}>
           <span
             className="metric-value"
             style={{
@@ -86,9 +93,10 @@ export default function MetricCard({
       </div>
 
       {(baselineDelta || subtext) && (
-        <div style={{ marginTop: "14px", display: "flex", alignItems: "center", flexWrap: "wrap", gap: baselineDelta ? "6px" : undefined, justifyContent: baselineDelta ? "flex-start" : "space-between" }}>
+        <div className="metric-subtext-row" style={{ marginTop: "14px", display: "flex", alignItems: "center", flexWrap: "wrap", gap: baselineDelta ? "6px" : undefined, justifyContent: baselineDelta ? "flex-start" : "space-between" }}>
           {baselineDelta ? (
             <span
+              className="metric-baseline-delta"
               style={{
                 fontSize: "11px",
                 fontWeight: 600,
@@ -105,7 +113,7 @@ export default function MetricCard({
             </span>
           ) : <div />}
           {subtext && (
-            <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>
+            <span className="metric-subtext-text" style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>
               {subtext}
             </span>
           )}

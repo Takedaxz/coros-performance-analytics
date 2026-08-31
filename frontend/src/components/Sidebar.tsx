@@ -154,6 +154,7 @@ export default function Sidebar() {
                 key={item.href}
                 href={item.href}
                 className={`nav-link ${pathname === item.href ? "active" : ""}`}
+                aria-label={item.label}
                 title={item.label}
               >
                 {item.icon}

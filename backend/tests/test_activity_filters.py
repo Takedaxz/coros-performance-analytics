@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from src.activity_laps import swim_lap_name
+from src.activity_laps import distance_splits, swim_lap_name, training_time_s
 from src.api.routes.activity_routes import (
     DatePeriod,
     _lap_start_elapsed,
@@ -14,6 +14,7 @@ from src.api.routes.activity_routes import (
 )
 from src.api.routes.dashboard_routes import _training_volume_bounds, training_volume_trend
 from src.parsers.fit_parser import _fit_lap_trigger
+from src.db.models import ActivityRecord
 
 
 @pytest.mark.parametrize(
@@ -86,6 +87,11 @@ def test_lap_elapsed_uses_first_lap_as_origin() -> None:
     assert _lap_start_elapsed(datetime(2026, 7, 28, 12, 44, 35), first) == 80
 
 
+def test_training_time_excludes_only_timer_and_labelled_rest_time() -> None:
+    assert training_time_s(6_772.59, 120) == pytest.approx(6_652.59)
+    assert training_time_s(None, 120) is None
+
+
 @pytest.mark.parametrize(
     ("trigger", "expected"),
     [
@@ -114,3 +120,16 @@ def test_swim_lap_mapping_uses_fit_sport_and_stroke() -> None:
     ) == "coros_rest"
     assert _fit_lap_trigger("running", None, 1000, None, "None") is None
     assert swim_lap_name("coros_swim:breaststroke") == "Breaststroke"
+
+
+def test_distance_splits_exclude_timer_pauses() -> None:
+    records = [
+        ActivityRecord(timestamp=datetime(2026, 8, 29, 6, 0), elapsed_s=0, distance_m=0),
+        ActivityRecord(timestamp=datetime(2026, 8, 29, 6, 1), elapsed_s=60, distance_m=500),
+        ActivityRecord(timestamp=datetime(2026, 8, 29, 6, 3), elapsed_s=180, distance_m=1000),
+    ]
+
+    splits = distance_splits(records, 1000, pause_intervals=[(60, 120)])
+
+    assert splits[0]["elapsed_s"] == 120
+    assert splits[0]["avg_speed_mps"] == pytest.approx(1000 / 120)

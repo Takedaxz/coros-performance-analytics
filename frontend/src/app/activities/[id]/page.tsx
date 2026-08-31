@@ -50,6 +50,7 @@ interface ActivityDetail {
   title?: string;
   start_time: string;
   elapsed_time_s?: number;
+  timer_time_s?: number;
   distance_m?: number;
   elevation_gain_m?: number;
   elevation_loss_m?: number;
@@ -70,7 +71,13 @@ interface ActivityDetail {
   threshold_hr_bpm?: number;
   threshold_pace_s_per_km?: number;
   laps: ActivityLap[];
-  lap_splits?: Record<string, ActivityLap[]>;
+  pauses?: ActivityPause[];
+  lap_splits?: Record<string, ActivitySplit[]>;
+}
+
+interface ActivityPause {
+  start_elapsed_s: number;
+  elapsed_s: number;
 }
 
 interface ActivityLap {
@@ -89,6 +96,11 @@ interface ActivityLap {
   avg_cadence?: number;
   lap_type?: "warmup" | "training" | "cooldown" | "rest" | "run" | "ride" | "swim" | "functional";
   hrr_bpm?: number;
+}
+
+interface ActivitySplit extends ActivityLap {
+  start_elapsed_s?: number;
+  end_elapsed_s?: number;
 }
 
 const LAP_TYPE_LABELS: Record<NonNullable<ActivityLap["lap_type"]>, string> = {
@@ -1170,6 +1182,15 @@ export default function ActivityDetailPage() {
     : [];
   const activeRunDistance = activeRunLaps.reduce((total, lap) => total + (lap.distance_m ?? 0), 0);
   const activeRunDuration = activeRunLaps.reduce((total, lap) => total + lap.elapsed_s, 0);
+  const restDuration = activity.laps
+    .filter((lap) => lap.lap_type === "rest")
+    .reduce((total, lap) => total + lap.elapsed_s, 0);
+  const trainingDuration = activity.timer_time_s != null
+    ? Math.max(0, activity.timer_time_s - restDuration)
+    : activeRunDuration;
+  const pausedDuration = activity.elapsed_time_s != null && activity.timer_time_s != null
+    ? Math.max(0, activity.elapsed_time_s - activity.timer_time_s)
+    : activity.pauses?.reduce((total, pause) => total + pause.elapsed_s, 0) ?? 0;
   const activityMetrics: ActivityMetric[] = strength
     ? [
       ["Sets", strength.sets],
@@ -1188,7 +1209,16 @@ export default function ActivityDetailPage() {
         ? [["Distance", (activity.distance_m / 1000).toFixed(2), "km"] as ActivityMetric]
         : []),
       ...(activity.elapsed_time_s != null && activity.elapsed_time_s > 0
-        ? [["Duration", formatDuration(activity.elapsed_time_s)] as ActivityMetric]
+        ? [["Total", formatDuration(activity.elapsed_time_s)] as ActivityMetric]
+        : []),
+      ...(trainingDuration > 0
+        ? [["Training time", formatDuration(trainingDuration)] as ActivityMetric]
+        : []),
+      ...(restDuration > 0
+        ? [["Rest", formatDuration(restDuration)] as ActivityMetric]
+        : []),
+      ...(pausedDuration > 0
+        ? [["Paused", formatDuration(pausedDuration)] as ActivityMetric]
         : []),
       ...(activity.avg_speed_mps != null && activity.avg_speed_mps > 0 && !isTriathlon
         ? activity.sport === "swim"
@@ -1789,6 +1819,12 @@ export default function ActivityDetailPage() {
                       const kilometerSplits = sourceLaps.length === 1
                         ? activity.lap_splits?.[String(lap.lap_index)] ?? []
                         : [];
+                      const pausesInLap = (activity.pauses ?? []).filter((pause) =>
+                        kilometerSplits.some((split) =>
+                          pause.start_elapsed_s >= (split.start_elapsed_s ?? 0)
+                          && pause.start_elapsed_s < (split.end_elapsed_s ?? 0),
+                        ),
+                      );
                       const isExpanded = expandedLapIndex === lap.lap_index;
                       const lapSport = lap.leg ?? activity.sport;
                       const isLapSwim = lapSport === "swim";
@@ -1921,14 +1957,31 @@ export default function ActivityDetailPage() {
                                     <table className="lap-split-table breakdown-nested-table mono">
                                       <thead><tr><th>{isSwim ? "Length" : "Km"}</th><th>Distance</th><th>Duration</th><th>{isSwim ? "Pace /100m" : "Pace"}</th><th>Avg HR</th><th>Max HR</th></tr></thead>
                                       <tbody>{kilometerSplits.map((split, index) => (
-                                        <tr key={`${lap.lap_index}-${index}`}>
-                                          <td data-label={isSwim ? "Length" : "Km"}><span className="lap-split-index">{index + 1}</span></td>
-                                          <td data-label="Distance">{split.distance_m ? isSwim ? `${Math.round(split.distance_m)} m` : `${(split.distance_m / 1000).toFixed(2)} km` : "--"}</td>
-                                          <td data-label="Duration">{formatSplitDuration(split.elapsed_s)}</td>
-                                          <td data-label={isSwim ? "Pace /100m" : "Pace"} className="lap-split-pace">{split.avg_speed_mps ? isSwim ? formatSwimPace(split.avg_speed_mps) : `${formatPace(split.avg_speed_mps)}/km` : split.distance_m && split.elapsed_s > 0 && !isSwim ? `${formatPace(split.distance_m / split.elapsed_s)}/km` : "--"}</td>
-                                          <td data-label="Avg HR">{split.avg_hr_bpm ? `${split.avg_hr_bpm} bpm` : "--"}</td>
-                                          <td data-label="Max HR">{split.max_hr_bpm ? `${split.max_hr_bpm} bpm` : "--"}</td>
-                                        </tr>
+                                        <Fragment key={`${lap.lap_index}-${index}`}>
+                                          {pausesInLap
+                                            .filter((pause) =>
+                                              pause.start_elapsed_s >= (split.start_elapsed_s ?? 0)
+                                              && pause.start_elapsed_s < (split.end_elapsed_s ?? 0),
+                                            )
+                                            .map((pause, pauseIndex) => (
+                                              <tr className="lap-summary-row is-rest" key={`${lap.lap_index}-pause-${pauseIndex}`}>
+                                                <td data-label="Pause"><span className="breakdown-row-label">Pause</span></td>
+                                                <td data-label="Distance">--</td>
+                                                <td data-label="Duration">{formatSplitDuration(pause.elapsed_s)}</td>
+                                                <td data-label="Pace">--</td>
+                                                <td data-label="Avg HR">--</td>
+                                                <td data-label="Max HR">--</td>
+                                              </tr>
+                                            ))}
+                                          <tr>
+                                            <td data-label={isSwim ? "Length" : "Km"}><span className="lap-split-index">{index + 1}</span></td>
+                                            <td data-label="Distance">{split.distance_m ? isSwim ? `${Math.round(split.distance_m)} m` : `${(split.distance_m / 1000).toFixed(2)} km` : "--"}</td>
+                                            <td data-label="Duration">{formatSplitDuration(split.elapsed_s)}</td>
+                                            <td data-label={isSwim ? "Pace /100m" : "Pace"} className="lap-split-pace">{split.avg_speed_mps ? isSwim ? formatSwimPace(split.avg_speed_mps) : `${formatPace(split.avg_speed_mps)}/km` : split.distance_m && split.elapsed_s > 0 && !isSwim ? `${formatPace(split.distance_m / split.elapsed_s)}/km` : "--"}</td>
+                                            <td data-label="Avg HR">{split.avg_hr_bpm ? `${split.avg_hr_bpm} bpm` : "--"}</td>
+                                            <td data-label="Max HR">{split.max_hr_bpm ? `${split.max_hr_bpm} bpm` : "--"}</td>
+                                          </tr>
+                                        </Fragment>
                                       ))}</tbody>
                                     </table>
                                   </div>

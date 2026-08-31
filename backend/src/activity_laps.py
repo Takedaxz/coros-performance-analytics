@@ -2,6 +2,8 @@
 
 from src.db.models import ActivityRecord
 
+PauseInterval = tuple[float, float]
+
 _HYROX_EXERCISE_NAMES = {
     "T1064": "Dumbbell Lunges",
     "T1207": "Indoor Rower",
@@ -46,11 +48,19 @@ def lap_type(lap_trigger: str | None) -> str | None:
     return None
 
 
+def training_time_s(timer_time_s: float | None, rest_time_s: float) -> float | None:
+    """Return timer time excluding explicitly labelled COROS rest intervals."""
+    if timer_time_s is None:
+        return None
+    return max(0.0, timer_time_s - rest_time_s)
+
+
 def distance_splits(
     records: list[ActivityRecord],
     chunk_distance_m: float,
     source_lap_distances: list[float] | None = None,
     source_lap_start_elapsed: list[float] | None = None,
+    pause_intervals: list[PauseInterval] | None = None,
 ) -> list[dict[str, float | int | None]]:
     """Build fixed-distance splits from raw records, retaining COROS lap boundaries."""
     distance_records = [
@@ -67,6 +77,23 @@ def distance_splits(
     end_elapsed = distance_records[-1].elapsed_s
     if start_distance is None or start_elapsed is None or end_distance is None or end_elapsed is None:
         return []
+
+    pauses = pause_intervals or []
+
+    def active_elapsed(wall_elapsed_s: float) -> float:
+        return max(0.0, wall_elapsed_s - sum(
+            max(0.0, min(wall_elapsed_s, end) - start)
+            for start, end in pauses
+            if wall_elapsed_s > start
+        ))
+
+    def wall_elapsed(active_elapsed_s: float) -> float:
+        paused_before_s = 0.0
+        for start, end in pauses:
+            if active_elapsed_s < start - paused_before_s:
+                break
+            paused_before_s += end - start
+        return active_elapsed_s + paused_before_s
 
     splits: list[dict[str, float | int | None]] = []
     source_distance_total = sum(source_lap_distances or [])
@@ -105,11 +132,13 @@ def distance_splits(
         cadences = [
             record.cadence for record in segment_records if record.cadence is not None
         ]
-        elapsed_s = max(0.0, segment_end_elapsed - segment_start_elapsed)
+        elapsed_s = max(0.0, active_elapsed(segment_end_elapsed) - active_elapsed(segment_start_elapsed))
         distance_m = max(0.0, segment_end_distance - segment_start_distance)
         splits.append(
             {
                 "lap_index": len(splits),
+                "start_elapsed_s": segment_start_elapsed,
+                "end_elapsed_s": segment_end_elapsed,
                 "source_lap_index": lap_end_index if lap_end_distances and lap_end_index < len(lap_end_distances) else None,
                 "elapsed_s": elapsed_s,
                 "distance_m": distance_m,
@@ -135,9 +164,10 @@ def distance_splits(
             fraction = (next_split_distance - previous_distance) / (
                 current.distance_m - previous_distance
             )
-            crossing_elapsed = previous_elapsed + fraction * (
-                current.elapsed_s - previous_elapsed
+            crossing_active_elapsed = active_elapsed(previous_elapsed) + fraction * (
+                active_elapsed(current.elapsed_s) - active_elapsed(previous_elapsed)
             )
+            crossing_elapsed = wall_elapsed(crossing_active_elapsed)
             append_split(next_split_distance, crossing_elapsed, index)
             segment_start_distance = next_split_distance
             segment_start_elapsed = crossing_elapsed

@@ -16,9 +16,10 @@ from src.activity_laps import (
     hyrox_lap_detail as _hyrox_lap_detail,
     lap_type as _lap_type,
     swim_lap_name as _swim_lap_name,
+    training_time_s as _training_time_s,
 )
 from src.db.engine import get_db_session
-from src.db.models import Activity, ActivityLap, ActivityRecord, FitnessEstimate
+from src.db.models import Activity, ActivityLap, ActivityPause, ActivityRecord, FitnessEstimate
 from src.db.owner import get_owner_id
 
 if TYPE_CHECKING:
@@ -87,6 +88,36 @@ def _validate_range(
 
 def _lap_start_elapsed(lap_start: datetime, first_lap_start: datetime) -> float:
     return max(0.0, (lap_start - first_lap_start).total_seconds())
+
+
+def _activity_summary_payload(activity: Activity, rest_time_s: float) -> dict:
+    training_time_s = _training_time_s(activity.timer_time_s, rest_time_s)
+    training_speed_mps = (
+        activity.distance_m / training_time_s
+        if activity.distance_m is not None
+        and activity.distance_m > 0
+        and training_time_s is not None
+        and training_time_s > 0
+        else None
+    )
+    return {
+        "id": activity.id,
+        "sport": activity.sport,
+        "subsport": activity.subsport,
+        "title": activity.title,
+        "start_time": activity.start_time.isoformat(),
+        "elapsed_time_s": activity.elapsed_time_s,
+        "training_time_s": training_time_s,
+        "distance_m": activity.distance_m,
+        "elevation_gain_m": activity.elevation_gain_m,
+        "avg_hr_bpm": activity.avg_hr_bpm,
+        "avg_speed_mps": activity.avg_speed_mps,
+        "training_speed_mps": training_speed_mps,
+        "avg_power_w": activity.avg_power_w,
+        "calories_kcal": activity.calories_kcal,
+        "training_load_vendor": activity.training_load_vendor,
+        "source_type": activity.source_type,
+    }
 
 
 def _interval_hr_recovery(
@@ -214,28 +245,29 @@ async def list_activities(
     result = await db.execute(query)
     activities = result.scalars().all()
 
+    rest_duration_by_activity: dict[str, float] = {}
+    if activities:
+        rest_duration_result = await db.execute(
+            select(ActivityLap.activity_id, func.sum(ActivityLap.elapsed_s))
+            .where(
+                ActivityLap.activity_id.in_([activity.id for activity in activities]),
+                ActivityLap.lap_trigger == "coros_rest",
+            )
+            .group_by(ActivityLap.activity_id)
+        )
+        rest_duration_by_activity = {
+            activity_id: float(rest_duration_s)
+            for activity_id, rest_duration_s in rest_duration_result.all()
+            if rest_duration_s is not None
+        }
+
     count_result = await db.execute(count_query)
     total_count = count_result.scalar() or 0
 
     return {
         "total_count": total_count,
         "activities": [
-            {
-                "id": a.id,
-                "sport": a.sport,
-                "subsport": a.subsport,
-                "title": a.title,
-                "start_time": a.start_time.isoformat(),
-                "elapsed_time_s": a.elapsed_time_s,
-                "distance_m": a.distance_m,
-                "elevation_gain_m": a.elevation_gain_m,
-                "avg_hr_bpm": a.avg_hr_bpm,
-                "avg_speed_mps": a.avg_speed_mps,
-                "avg_power_w": a.avg_power_w,
-                "calories_kcal": a.calories_kcal,
-                "training_load_vendor": a.training_load_vendor,
-                "source_type": a.source_type,
-            }
+            _activity_summary_payload(a, rest_duration_by_activity.get(a.id, 0.0))
             for a in activities
         ],
         "limit": limit,
@@ -255,10 +287,8 @@ from src.metrics.derived import EfficiencyMetrics, compute_efficiency
 from src.parsers.fit_parser import parse_fit_file
 
 logger = logging.getLogger(__name__)
-RUNNING_DYNAMICS_PARSER_VERSION = "0.3.1"
+RUNNING_DYNAMICS_PARSER_VERSION = "0.4.0"
 RUNNING_DYNAMICS_READY_VERSIONS = {
-    "0.2.0",
-    "0.3.0",
     RUNNING_DYNAMICS_PARSER_VERSION,
 }
 
@@ -341,8 +371,17 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
         and bool(records_count)
         and activity.parser_version not in RUNNING_DYNAMICS_READY_VERSIONS
     )
+    needs_pause_refresh = (
+        activity.sport in {"run", "trail_run", "ride", "walk", "hike"}
+        and bool(records_count)
+        and activity.parser_version != RUNNING_DYNAMICS_PARSER_VERSION
+    )
     has_complete_fit_data = (
-        records_count > 0 and not rebuild_multisport and not needs_running_dynamics
+        records_count > 0
+        and activity.elevation_gain_m is not None
+        and not rebuild_multisport
+        and not needs_running_dynamics
+        and not needs_pause_refresh
     )
     if (
         has_complete_fit_data
@@ -381,6 +420,7 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
             records_count > 0
             and (needs_step_labels or needs_phase_refresh)
             and not needs_running_dynamics
+            and not needs_pause_refresh
         ):
             if detail_laps:
                 await db.execute(delete(ActivityLap).where(ActivityLap.activity_id == activity.id))
@@ -412,6 +452,23 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
         parsed_segments = [segment for segment in parsed_segments if segment.sessions]
         if not parsed_segments:
             raise ValueError("COROS download contains no readable FIT sessions")
+
+        elevation_gains = [
+            session.elevation_gain_m
+            for segment in parsed_segments
+            for session in segment.sessions
+            if session.elevation_gain_m is not None
+        ]
+        if elevation_gains:
+            activity.elevation_gain_m = sum(elevation_gains)
+        timer_times = [
+            session.timer_time_s
+            for segment in parsed_segments
+            for session in segment.sessions
+            if session.timer_time_s is not None
+        ]
+        if timer_times:
+            activity.timer_time_s = sum(timer_times)
 
         db_laps = []
         fit_records = []
@@ -448,6 +505,16 @@ async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -
             await db.execute(delete(ActivityLap).where(ActivityLap.activity_id == activity.id))
         if rebuild_multisport or needs_running_dynamics:
             await db.execute(delete(ActivityRecord).where(ActivityRecord.activity_id == activity.id))
+        await db.execute(delete(ActivityPause).where(ActivityPause.activity_id == activity.id))
+        db.add_all(
+            ActivityPause(
+                activity_id=activity.id,
+                start_time=pause.start_time.replace(tzinfo=None),
+                end_time=pause.end_time.replace(tzinfo=None),
+            )
+            for segment in parsed_segments
+            for pause in segment.pauses
+        )
         if not lap_count or rebuild_multisport or (needs_phase_refresh and detail_laps):
             db.add_all(detail_laps or db_laps)
 
@@ -516,6 +583,13 @@ async def get_activity(
         else None
     )
 
+    pause_result = await db.execute(
+        select(ActivityPause)
+        .where(ActivityPause.activity_id == activity_id)
+        .order_by(ActivityPause.start_time)
+    )
+    pauses = list(pause_result.scalars().all())
+
     # Fetch laps
     lap_result = await db.execute(
         select(ActivityLap)
@@ -532,7 +606,7 @@ async def get_activity(
         else None
     )
     records: list[ActivityRecord] = []
-    needs_records = split_distance_m is not None or any(
+    needs_records = split_distance_m is not None or bool(pauses) or any(
         _lap_type(lap.lap_trigger) == "rest" for lap in laps
     )
     if laps and needs_records:
@@ -543,6 +617,15 @@ async def get_activity(
         )
         records = list(record_result.scalars().all())
     recovery_by_lap = _interval_hr_recovery(laps, records)
+    record_origin = records[0].timestamp if records else None
+    pause_payload = [
+        {
+            "start_elapsed_s": max(0.0, (pause.start_time - record_origin).total_seconds()),
+            "elapsed_s": (pause.end_time - pause.start_time).total_seconds(),
+        }
+        for pause in pauses
+        if record_origin is not None and pause.end_time > pause.start_time
+    ]
 
     lap_payload = []
     for lap in laps:
@@ -590,6 +673,13 @@ async def get_activity(
             split_distance_m,
             source_lap_distances,
             source_lap_start_elapsed,
+            [
+                (
+                    float(pause["start_elapsed_s"]),
+                    float(pause["start_elapsed_s"] + pause["elapsed_s"]),
+                )
+                for pause in pause_payload
+            ],
         )
         for split in distance_splits:
             source_lap_index = split.pop("source_lap_index", None)
@@ -606,6 +696,7 @@ async def get_activity(
         "timezone": activity.timezone,
         "elapsed_time_s": activity.elapsed_time_s,
         "timer_time_s": activity.timer_time_s,
+        "pauses": pause_payload,
         "moving_time_s": activity.moving_time_s,
         "distance_m": activity.distance_m,
         "elevation_gain_m": activity.elevation_gain_m,

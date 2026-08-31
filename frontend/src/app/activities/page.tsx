@@ -427,9 +427,9 @@ export default function ActivitiesPage() {
                     const sportVisual = getSportVisual(activity.sport, activity.title, activity.subsport);
                     const metrics = [
                       ["Distance", activity.distance_m != null ? formatDistance(activity.distance_m) : "--"],
-                      ["Duration", activity.elapsed_time_s != null ? formatDuration(activity.elapsed_time_s) : "--"],
+                      ["Duration", activity.training_time_s != null ? formatDuration(activity.training_time_s) : activity.elapsed_time_s != null ? formatDuration(activity.elapsed_time_s) : "--"],
                       ["Avg HR", activity.avg_hr_bpm != null ? `${activity.avg_hr_bpm} bpm` : "--"],
-                      ["Pace", activity.avg_speed_mps != null ? formatPace(activity.avg_speed_mps, activity.sport) : "--"],
+                      ["Pace", activity.training_speed_mps != null ? formatPace(activity.training_speed_mps, activity.sport) : activity.avg_speed_mps != null ? formatPace(activity.avg_speed_mps, activity.sport) : "--"],
                       ["Power", activity.avg_power_w != null ? `${activity.avg_power_w} W` : "--"],
                       ["Calories", activity.calories_kcal != null ? `${activity.calories_kcal} kcal` : "--"],
                       ["Load", activity.training_load_vendor != null ? String(activity.training_load_vendor) : "--"],

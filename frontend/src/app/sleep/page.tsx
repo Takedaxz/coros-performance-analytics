@@ -112,6 +112,19 @@ function formatDateNice(dateStr: string): string {
   });
 }
 
+function formatFeelingDateTitle(dateStr: string): string {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if (!y || !m || !d) return dateStr;
+  const dateObj = new Date(y, m - 1, d);
+  return dateObj.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 
 function formatHoursMinutes(hours: number): string {
   const totalMinutes = Math.round(hours * 60);
@@ -241,6 +254,7 @@ export default function SleepPage() {
   const [feelingEditError, setFeelingEditError] = useState<string | null>(null);
   const feelingEditDialogRef = useRef<HTMLDialogElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const feelingHeatmapScrollRef = useRef<HTMLDivElement>(null);
   const [hoveredDay, setHoveredDay] = useState<HeatmapFeelingDay | null>(null);
   const [tooltipPos, setTooltipPos] = useState<TooltipPos | null>(null);
   const [, setIsLoading] = useState(true);
@@ -353,6 +367,11 @@ export default function SleepPage() {
 
     return daysList;
   }, [feelings]);
+
+  useEffect(() => {
+    const scrollElement = feelingHeatmapScrollRef.current;
+    if (scrollElement) scrollElement.scrollLeft = scrollElement.scrollWidth;
+  }, [heatmapDays.length]);
 
   const handleCellHover = (item: HeatmapFeelingDay, e: React.MouseEvent<HTMLSpanElement>) => {
     if (item.isFuture) return;
@@ -515,7 +534,7 @@ export default function SleepPage() {
 
         <div className="page-body">
           {/* Summary Cards */}
-          <div className="metrics-grid">
+          <div className="metrics-grid sleep-summary-metrics">
             <MetricCard
               label="Overnight HRV"
               value={latestHrv ?? "--"}
@@ -662,17 +681,18 @@ export default function SleepPage() {
               </div>
             </div>
 
-            {/* Month Labels Row */}
-            <div style={{ display: "flex", marginLeft: "28px", justifyContent: "space-between", marginBottom: "6px", fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)" }}>
-              {months.map((m, idx) => (
-                <span key={idx}>{m}</span>
-              ))}
-            </div>
+            <div className="feeling-heatmap-scroll" ref={feelingHeatmapScrollRef}>
+              {/* Month Labels Row */}
+              <div className="feeling-heatmap-months" style={{ display: "flex", margin: "0 22px 6px 28px", justifyContent: "space-between", fontSize: "11px", fontWeight: 700, color: "var(--color-text-muted)" }}>
+                {months.map((m, idx) => (
+                  <span key={idx}>{m}</span>
+                ))}
+              </div>
 
-            {/* Heatmap 7x52 Grid Container */}
-            <div style={{ display: "flex", gap: "6px", overflowX: "auto", padding: "8px 0" }}>
+              {/* Heatmap 7x52 Grid Container */}
+              <div className="feeling-heatmap-grid" style={{ display: "flex", gap: "6px", padding: "8px 0" }}>
               {/* Weekday Labels Column */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "3px", justifyContent: "space-around", fontSize: "10px", fontWeight: 700, color: "var(--color-text-muted)", width: "16px", flexShrink: 0 }}>
+              <div className="heatmap-weekday-labels" style={{ display: "flex", flexDirection: "column", gap: "3px", justifyContent: "space-around", fontSize: "10px", fontWeight: 700, color: "var(--color-text-muted)", width: "16px", flexShrink: 0 }}>
                 {WEEKDAYS.map((w, idx) => (
                   <span key={idx} style={{ height: "11px", lineHeight: "11px" }}>{w}</span>
                 ))}
@@ -709,6 +729,12 @@ export default function SleepPage() {
                   </div>
                 ))}
               </div>
+              <div aria-hidden="true" className="heatmap-weekday-labels" style={{ display: "flex", flexDirection: "column", gap: "3px", justifyContent: "space-around", fontSize: "10px", fontWeight: 700, color: "var(--color-text-muted)", width: "16px", flexShrink: 0 }}>
+                {WEEKDAYS.map((w, idx) => (
+                  <span key={idx} style={{ height: "11px", lineHeight: "11px" }}>{w}</span>
+                ))}
+              </div>
+              </div>
             </div>
 
             {/* Legend & Summary Statistics Row */}
@@ -744,7 +770,7 @@ export default function SleepPage() {
           >
             <div className="daily-feeling-dialog-content">
               <span className="daily-feeling-kicker">Edit check-in</span>
-              <h2 id="sleep-feeling-edit-title">{editingFeelingDate}</h2>
+              <h2 id="sleep-feeling-edit-title">{editingFeelingDate ? formatFeelingDateTitle(editingFeelingDate) : ""}</h2>
               <p>Choose the feeling that best matches this day.</p>
               <div className="daily-feeling-options" role="radiogroup" aria-label="Choose feeling">
                 {FEELING_OPTIONS.map((option) => (

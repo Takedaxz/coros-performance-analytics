@@ -59,11 +59,34 @@ export default function ExerciseCombobox({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [dropdownPosition, setDropdownPosition] = useState<DropdownPosition | null>(null);
   const [videoPreview, setVideoPreview] = useState<VideoPreview | null>(null);
+  const [mounted, setMounted] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const updatePosition = () => {
+    const bounds = containerRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const viewportPadding = 12;
+    const spaceBelow = window.innerHeight - bounds.bottom - viewportPadding;
+    const spaceAbove = bounds.top - viewportPadding;
+    const openUpward = spaceBelow < 220 && spaceAbove > spaceBelow;
+    const maxHeight = Math.min(340, Math.max(120, (openUpward ? spaceAbove : spaceBelow) - 4));
+    const width = Math.min(Math.max(bounds.width, 320), window.innerWidth - viewportPadding * 2);
+    setDropdownPosition({
+      bottom: openUpward ? window.innerHeight - bounds.top + 4 : "auto",
+      left: Math.max(viewportPadding, Math.min(bounds.left, window.innerWidth - width - viewportPadding)),
+      maxHeight,
+      top: openUpward ? "auto" : bounds.bottom + 4,
+      width,
+    });
+  };
 
   const resolvedValueName = useMemo(() => resolveExerciseName(value, value), [value]);
 
@@ -94,11 +117,31 @@ export default function ExerciseCombobox({
 
   useEffect(() => {
     if (isOpen) {
+      updatePosition();
+      const selectedIdx = filteredOptions.findIndex(
+        (opt) => opt.name === value || opt.label === value || opt.id === value
+      );
+      if (selectedIdx !== -1) {
+        setHighlightedIndex(selectedIdx);
+        setTimeout(() => {
+          const selectedElem = listRef.current?.children[selectedIdx] as HTMLElement | undefined;
+          selectedElem?.scrollIntoView({ block: "nearest", behavior: "auto" });
+        }, 50);
+      } else {
+        setHighlightedIndex(0);
+      }
       setTimeout(() => searchInputRef.current?.focus(), 50);
+      const handleScrollOrResize = () => updatePosition();
+      window.addEventListener("scroll", handleScrollOrResize, true);
+      window.addEventListener("resize", handleScrollOrResize);
+      return () => {
+        window.removeEventListener("scroll", handleScrollOrResize, true);
+        window.removeEventListener("resize", handleScrollOrResize);
+      };
     } else {
       setQuery("");
     }
-  }, [isOpen]);
+  }, [isOpen, value, filteredOptions]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -147,21 +190,7 @@ export default function ExerciseCombobox({
       setIsOpen(false);
       return;
     }
-    const bounds = containerRef.current?.getBoundingClientRect();
-    if (!bounds) return;
-    const viewportPadding = 12;
-    const spaceBelow = window.innerHeight - bounds.bottom - viewportPadding;
-    const spaceAbove = bounds.top - viewportPadding;
-    const openUpward = spaceBelow < 220 && spaceAbove > spaceBelow;
-    const maxHeight = Math.min(340, Math.max(120, (openUpward ? spaceAbove : spaceBelow) - 4));
-    const width = Math.min(Math.max(bounds.width, 320), window.innerWidth - viewportPadding * 2);
-    setDropdownPosition({
-      bottom: openUpward ? window.innerHeight - bounds.top + 4 : "auto",
-      left: Math.max(viewportPadding, Math.min(bounds.left, window.innerWidth - width - viewportPadding)),
-      maxHeight,
-      top: openUpward ? "auto" : bounds.bottom + 4,
-      width,
-    });
+    updatePosition();
     setIsOpen(true);
   };
 
@@ -218,7 +247,7 @@ export default function ExerciseCombobox({
         </button>
       </div>
 
-      {isOpen && !disabled && !loading && dropdownPosition && createPortal(
+      {mounted && isOpen && !disabled && !loading && dropdownPosition && createPortal(
         <>
           <div className="exercise-combobox-dropdown" ref={dropdownRef} role="listbox" style={dropdownPosition}>
           <div className="exercise-search-wrap">

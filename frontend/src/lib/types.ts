@@ -7,10 +7,12 @@ export interface ActivitySummary {
   title?: string;
   start_time: string;
   elapsed_time_s?: number;
+  training_time_s?: number;
   distance_m?: number;
   elevation_gain_m?: number;
   avg_hr_bpm?: number;
   avg_speed_mps?: number;
+  training_speed_mps?: number;
   avg_power_w?: number;
   calories_kcal?: number;
   training_load_vendor?: number;

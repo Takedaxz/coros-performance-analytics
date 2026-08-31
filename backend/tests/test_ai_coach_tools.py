@@ -253,6 +253,14 @@ async def test_health_trend_keeps_rich_data_without_nulls() -> None:
 
 @pytest.mark.asyncio
 async def test_activity_detail_tool_includes_a_saved_note() -> None:
+    strength_detail = {
+        "exercises_detail": [
+            {
+                "name_key": "T1042",
+                "entries": [{"reps": 8, "weight_kg": 35.0}],
+            }
+        ]
+    }
     activity = SimpleNamespace(
         id="activity-1",
         start_time=dt.datetime(2026, 8, 16, 9, 40),
@@ -270,6 +278,7 @@ async def test_activity_detail_tool_includes_a_saved_note() -> None:
         cardiac_drift_pct_app=2.1,
         elevation_gain_m=50.0,
         elevation_loss_m=50.0,
+        strength_detail=strength_detail,
         activity_note="Legs felt heavy after the sled push.",
     )
 
@@ -296,6 +305,15 @@ async def test_activity_detail_tool_includes_a_saved_note() -> None:
     result = await _activity_detail(Db(), "owner", "activity-1")
 
     assert result["activity"]["note"] == "Legs felt heavy after the sled push."
+    assert result["activity"]["strength_detail"] == {
+        "exercises_detail": [
+            {
+                "name_key": "T1042",
+                "name": "Incline Bench Press",
+                "entries": [{"reps": 8, "weight_kg": 35.0}],
+            }
+        ]
+    }
 
 
 @pytest.mark.asyncio

@@ -102,8 +102,11 @@ Follow these guidelines:
    value, ask for it before proposing the workout; do not label the step
    "Loaded" or imply that weight is scheduled.
    When choosing a loaded strength weight, first use the athlete's most recent
-   recorded kilograms for the same or closest matching movement in the supplied
-   strength-session context. If no prior lift is available, use the athlete's
+   recorded kilograms for the same or closest matching movement. First call
+   `get_activities` with `sport: "strength"`, then `get_activity_detail` for the
+   relevant session(s); its `strength_detail` contains the recorded sets and
+   kilograms. Do not claim weights are unavailable when that field has entries.
+   If no prior lift is available, use the athlete's
    profile body weight as a reference and choose a conservative load below it;
    body weight is a reference, not the scheduled external load. Ask for the
    athlete's kilograms only when neither reference is available.

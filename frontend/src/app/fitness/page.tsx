@@ -229,6 +229,7 @@ export default function FitnessPage() {
           <div className="metrics-grid fitness-metrics-grid">
             <MetricCard
               label="Estimated VO2 Max"
+              shortLabel="VO2 Max"
               value={latestVo2.toFixed(1)}
               unit="ml/kg/min"
               accentColor="var(--color-accent-primary)"
@@ -241,6 +242,7 @@ export default function FitnessPage() {
             />
             <MetricCard
               label="Running Fitness Index"
+              shortLabel="Fitness Index"
               value={latestFitness}
               subtext="Pace & threshold score"
               icon={(
@@ -253,6 +255,7 @@ export default function FitnessPage() {
             />
             <MetricCard
               label="Cardio Fitness Age"
+              shortLabel="Fitness Age"
               value={latestCardioFitnessAge ?? "--"}
               unit={latestCardioFitnessAge === null ? undefined : "years"}
               accentColor="var(--color-accent-exertion)"

@@ -75,11 +75,20 @@ class ParsedSession:
 
 
 @dataclass(frozen=True)
+class ParsedPause:
+    """A manual FIT timer pause bounded by stop and start events."""
+
+    start_time: datetime
+    end_time: datetime
+
+
+@dataclass(frozen=True)
 class ParsedFitFile:
     """Complete parsed result from a FIT file."""
 
     sessions: list[ParsedSession] = field(default_factory=list)
     laps: list[ParsedLap] = field(default_factory=list)
+    pauses: list[ParsedPause] = field(default_factory=list)
     records: list[ParsedRecord] = field(default_factory=list)
     device_manufacturer: str | None = None
     device_product: str | None = None
@@ -161,6 +170,7 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
     """
     sessions: list[ParsedSession] = []
     laps: list[ParsedLap] = []
+    pauses: list[ParsedPause] = []
     records: list[ParsedRecord] = []
     errors: list[str] = []
     device_manufacturer: str | None = None
@@ -168,6 +178,7 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
     device_serial: str | None = None
     file_type: str | None = None
     lap_index = 0
+    pause_started_at: datetime | None = None
 
     try:
         with fitdecode.FitReader(BytesIO(data)) as reader:
@@ -239,6 +250,20 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
                     )
                     lap_index += 1
 
+                elif msg_name == "event":
+                    if _get_field_value(frame, "event") != "timer":
+                        continue
+                    timestamp = _get_field_value(frame, "timestamp")
+                    event_type = _get_field_value(frame, "event_type")
+                    if not isinstance(timestamp, datetime):
+                        continue
+                    if event_type in {"stop", "stop_all"}:
+                        pause_started_at = timestamp
+                    elif event_type == "start" and pause_started_at is not None:
+                        if timestamp > pause_started_at:
+                            pauses.append(ParsedPause(pause_started_at, timestamp))
+                        pause_started_at = None
+
                 elif msg_name == "record":
                     ts = _get_field_value(frame, "timestamp")
                     if ts is None:
@@ -276,6 +301,7 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
     return ParsedFitFile(
         sessions=sessions,
         laps=laps,
+        pauses=pauses,
         records=records,
         device_manufacturer=device_manufacturer,
         device_product=device_product,

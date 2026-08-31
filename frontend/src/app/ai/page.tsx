@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, type ChangeEvent as ReactChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import ReactMarkdown from "react-markdown";
@@ -229,6 +229,14 @@ function InlineCitationLink({ href, children, ...props }: React.AnchorHTMLAttrib
   );
 }
 
+function MarkdownTable(props: React.HTMLAttributes<HTMLTableElement>) {
+  return (
+    <div className="markdown-table-wrapper">
+      <table {...props} />
+    </div>
+  );
+}
+
 function normalizeToolCall(tool: ToolCall | string): ToolCall {
   return typeof tool === "string" ? { name: tool, arguments: {} } : tool;
 }
@@ -239,9 +247,30 @@ function formatToolArguments(arguments_: Record<string, unknown>): string {
     .join(", ");
 }
 
+function formatStrengthExerciseMatches(result: Record<string, unknown> | undefined): string | null {
+  const matches = result?.matches;
+  if (!Array.isArray(matches)) return null;
+  const rows = matches.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const { query, matches: candidates } = item as Record<string, unknown>;
+    if (typeof query !== "string" || !Array.isArray(candidates)) return [];
+    const names = candidates.flatMap((candidate) => (
+      candidate && typeof candidate === "object" && !Array.isArray(candidate)
+        && typeof (candidate as Record<string, unknown>).name === "string"
+        ? [(candidate as Record<string, string>).name]
+        : []
+    ));
+    return names.length ? [`${query}\n${names.map((name) => `• ${name}`).join("\n")}`] : [];
+  });
+  return rows.length ? `Matches\n\n${rows.join("\n\n")}` : null;
+}
+
 function formatToolTooltip(tool: ToolCall): string {
   const calendarChanges = calendarChangeActions(tool);
   if (calendarChanges.length) return calendarChanges.map(calendarChangeSummary).join("\n");
+  if (tool.name === "search_strength_exercises") {
+    return formatStrengthExerciseMatches(tool.result) ?? formatToolArguments(tool.arguments);
+  }
   const knowledge = tool.display_result?.knowledge;
   if (tool.name === "search_coaching_knowledge" && knowledge?.length) {
     return `Query: ${String(tool.arguments.query ?? "")}\n\n${knowledge.join("\n\n")}`;
@@ -628,6 +657,15 @@ function Icons8Icon({
   color?: string;
   opacity?: number;
 }) {
+  const iconUrl =
+    name.startsWith("http://") || name.startsWith("https://")
+      ? name
+      : name.startsWith("id:")
+      ? `https://img.icons8.com/?size=100&id=${name.slice(3)}&format=png&color=000000`
+      : name === "u9iu04GHHrJZ" || name === "close-pane"
+      ? "https://img.icons8.com/?size=100&id=u9iu04GHHrJZ&format=png&color=000000"
+      : `/icons/${name}.png`;
+
   return (
     <span
       className={className}
@@ -636,13 +674,13 @@ function Icons8Icon({
         display: "inline-block",
         width: size,
         height: size,
-        backgroundColor: color || "var(--color-text-secondary)",
+        backgroundColor: color || "currentColor",
         opacity: opacity ?? 0.75,
-        WebkitMaskImage: `url(/icons/${name}.png)`,
+        WebkitMaskImage: `url(${iconUrl})`,
         WebkitMaskSize: "contain",
         WebkitMaskRepeat: "no-repeat",
         WebkitMaskPosition: "center",
-        maskImage: `url(/icons/${name}.png)`,
+        maskImage: `url(${iconUrl})`,
         maskSize: "contain",
         maskRepeat: "no-repeat",
         maskPosition: "center",
@@ -666,6 +704,10 @@ function ChatIcon({ isActive }: { isActive?: boolean }) {
 
 function FolderIcon() {
   return <Icons8Icon name="folder" size={13} />;
+}
+
+function ClosePaneIcon({ size = 14 }: { size?: number }) {
+  return <Icons8Icon name="u9iu04GHHrJZ" size={size} />;
 }
 
 function DownloadIcon() {
@@ -775,7 +817,13 @@ function ThinkingAccordion({ thinking, isThinkingActive }: { thinking: string; i
         <ChevronIcon isOpen={isOpen} />
       </summary>
       <div className="ai-thinking-accordion-content">
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{thinking}</ReactMarkdown>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={[rehypeKatex]}
+          components={{ table: MarkdownTable }}
+        >
+          {thinking}
+        </ReactMarkdown>
       </div>
     </details>
   );
@@ -850,7 +898,9 @@ function formatModelShortPillName(id: string, name?: string): string {
     .replace(/\bGrok\b/gi, "Grok")
     .replace(/\bXai\b/gi, "xAI")
     .replace(/\bOllama\b/gi, "Ollama")
-    .replace(/\bGroq\b/gi, "Groq");
+    .replace(/\bGroq\b/gi, "Groq")
+    .replace(/\bGlm\b/gi, "GLM")
+    .replace(/\bZhipu\b/gi, "Zhipu");
 
   return formatted;
 }
@@ -1144,6 +1194,7 @@ function relativeTime(iso: string): string {
 let cachedSessions: Session[] | null = null;
 let cachedProjects: Project[] | null = null;
 let cachedExpandedProjects: Set<string> | null = null;
+let cachedSessionsOpen: boolean | null = null;
 
 export default function AiPage() {
   const router = useRouter();
@@ -1186,6 +1237,7 @@ export default function AiPage() {
   const [messagesLoading, setMessagesLoading] = useState(routeSessionId !== null);
   const [goals, setGoals] = useState<any[]>([]);
   const [input, setInput] = useState("");
+  const [composerNeedsBottomSpace, setComposerNeedsBottomSpace] = useState(false);
   const [selectedResponseExcerpt, setSelectedResponseExcerpt] = useState<string | null>(null);
   const [responseSelection, setResponseSelection] = useState<{
     excerpt: string;
@@ -1230,6 +1282,8 @@ export default function AiPage() {
   const [expandedPillGroup, setExpandedPillGroup] = useState<string | null>(null);
   const [draftProjectId, setDraftProjectId] = useState<string | null>(null);
   const [activeToolTooltip, setActiveToolTooltip] = useState<string | null>(null);
+  const [activeToolTooltipPosition, setActiveToolTooltipPosition] = useState<{ bottom: number; left: number; width: number } | null>(null);
+  const activeToolTooltipAnchorRef = useRef<HTMLElement | null>(null);
   const [calendarChangeResults, setCalendarChangeResults] = useState<Record<string, CalendarChangeResult>>({});
   const [calendarChangePending, setCalendarChangePending] = useState<string | null>(null);
   const [calendarChangeReview, setCalendarChangeReview] = useState<CalendarChangeReview | null>(null);
@@ -1243,6 +1297,58 @@ export default function AiPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const projectEditDialogRef = useRef<HTMLDialogElement>(null);
   const calendarChangeDialogRef = useRef<HTMLDialogElement>(null);
+
+  const [isSessionsOpen, setIsSessionsOpen] = useState(() => cachedSessionsOpen ?? false);
+
+  const updateActiveToolTooltipPosition = useCallback(() => {
+    const anchor = activeToolTooltipAnchorRef.current;
+    if (!anchor) return;
+    const popupWidth = Math.min(320, window.innerWidth - 32);
+    const bounds = anchor.getBoundingClientRect();
+    setActiveToolTooltipPosition({
+      bottom: window.innerHeight - bounds.top + 6,
+      left: Math.min(
+        Math.max(bounds.left + bounds.width / 2, 16 + popupWidth / 2),
+        window.innerWidth - 16 - popupWidth / 2,
+      ),
+      width: popupWidth,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const isMobile = window.innerWidth <= 760;
+    if (isMobile) {
+      setIsSessionsOpen(false);
+      cachedSessionsOpen = false;
+      return;
+    }
+
+    if (cachedSessionsOpen !== null) {
+      setIsSessionsOpen(cachedSessionsOpen);
+      return;
+    }
+    try {
+      const saved = localStorage.getItem("coros-ai-sessions-open");
+      const next = saved !== null ? saved === "true" : true;
+      cachedSessionsOpen = next;
+      setIsSessionsOpen(next);
+    } catch {
+      setIsSessionsOpen(true);
+    }
+  }, []);
+
+  const handleToggleSessions = useCallback((open: boolean) => {
+    setIsSessionsOpen(open);
+    const isMobile = typeof window !== "undefined" && window.innerWidth <= 760;
+    if (!isMobile) {
+      cachedSessionsOpen = open;
+      try {
+        localStorage.setItem("coros-ai-sessions-open", String(open));
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
 
   useEffect(() => {
     routeSessionIdRef.current = routeSessionId;
@@ -1269,7 +1375,7 @@ export default function AiPage() {
     setResponseSelection({
       excerpt,
       left: Math.min(window.innerWidth - 116, Math.max(8, rect.left + rect.width / 2)),
-      top: Math.min(window.innerHeight - 44, rect.bottom + 8),
+      top: Math.min(window.innerHeight - 44, Math.max(8, rect.bottom + 8)),
     });
   }
 
@@ -1279,6 +1385,12 @@ export default function AiPage() {
     setResponseSelection(null);
     window.getSelection()?.removeAllRanges();
     window.requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  function handleComposerChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
+    const textarea = event.currentTarget;
+    setInput(textarea.value);
+    setComposerNeedsBottomSpace(textarea.value.length > 0 && textarea.clientHeight > 80);
   }
 
   async function confirmCalendarChange(change: CalendarChangeAction, key: string, closeReview = true) {
@@ -1342,10 +1454,16 @@ export default function AiPage() {
       const target = e.target as HTMLElement;
       if (!target.closest(".ai-tool-chip")) {
         setActiveToolTooltip(null);
+        setActiveToolTooltipPosition(null);
+        activeToolTooltipAnchorRef.current = null;
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setActiveToolTooltip(null);
+      if (e.key === "Escape") {
+        setActiveToolTooltip(null);
+        setActiveToolTooltipPosition(null);
+        activeToolTooltipAnchorRef.current = null;
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleKeyDown);
@@ -1354,6 +1472,16 @@ export default function AiPage() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [activeToolTooltip]);
+
+  useEffect(() => {
+    if (!activeToolTooltip) return;
+    window.addEventListener("scroll", updateActiveToolTooltipPosition, true);
+    window.addEventListener("resize", updateActiveToolTooltipPosition);
+    return () => {
+      window.removeEventListener("scroll", updateActiveToolTooltipPosition, true);
+      window.removeEventListener("resize", updateActiveToolTooltipPosition);
+    };
+  }, [activeToolTooltip, updateActiveToolTooltipPosition]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1610,10 +1738,14 @@ export default function AiPage() {
 
   const handleNewChatInProject = (project: Project) => {
     if (isLoading) return;
+    if (typeof window !== "undefined" && window.innerWidth <= 760) {
+      handleToggleSessions(false);
+    }
     setExpandedProjects((prev) => new Set(prev).add(project.id));
     setDraftProjectId(project.id);
     setMessages([]);
     setInput("");
+    setComposerNeedsBottomSpace(false);
     setSelectedResponseExcerpt(null);
     setSelectedModel(defaultModel);
     router.push("/ai");
@@ -1621,8 +1753,12 @@ export default function AiPage() {
 
   function handleNewChat() {
     if (isLoading) return;
+    if (typeof window !== "undefined" && window.innerWidth <= 760) {
+      handleToggleSessions(false);
+    }
     setMessages([]);
     setInput("");
+    setComposerNeedsBottomSpace(false);
     setSelectedResponseExcerpt(null);
     setDraftProjectId(null);
     setSelectedModel(defaultModel);
@@ -1861,6 +1997,7 @@ export default function AiPage() {
     routeSessionIdRef.current = sid;
     setMessages(initialStreamMsgs);
     setInput("");
+    setComposerNeedsBottomSpace(false);
     setSelectedResponseExcerpt(null);
     setPendingImages([]);
     setPendingCsv(null);
@@ -2239,13 +2376,11 @@ export default function AiPage() {
             />
             <textarea
               id={inputId}
-              className="cmd-bar"
+              className={`cmd-bar${composerNeedsBottomSpace ? " has-bottom-space" : ""}`}
               placeholder="Ask AI Coach"
               value={input}
               ref={composerRef}
-              onChange={(e) => {
-                setInput(e.target.value);
-              }}
+              onChange={handleComposerChange}
               onPaste={handlePaste}
               onKeyDown={async (e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -2262,11 +2397,6 @@ export default function AiPage() {
               }}
               disabled={isLoading}
               autoFocus
-              style={{
-                resize: "none",
-                lineHeight: "1.4",
-                overflowY: "auto"
-              }}
               rows={1}
             />
             <div className="cmd-bar-actions">
@@ -2451,6 +2581,9 @@ export default function AiPage() {
         onDragStart={(event) => handleSessionDragStart(event, s.id)}
         onDragEnd={handleSessionDragEnd}
         onClick={() => {
+          if (typeof window !== "undefined" && window.innerWidth <= 760) {
+            handleToggleSessions(false);
+          }
           setSelectedModel(s.model_name);
           router.push(`/ai/${encodeURIComponent(s.id)}`);
         }}
@@ -2690,93 +2823,140 @@ export default function AiPage() {
                 </button>
               </>
             )}
+            <button
+              className="ai-mobile-sessions-toggle"
+              type="button"
+              onClick={() => handleToggleSessions(!isSessionsOpen)}
+              aria-label={isSessionsOpen ? "Close sessions sidebar" : "Open sessions sidebar"}
+              title={isSessionsOpen ? "Close sessions" : "Open sessions"}
+            >
+              <ClosePaneIcon size={16} />
+            </button>
           </div>
         </header>
 
-        <div className="ai-link-workspace">
+        <div
+          className={`ai-sessions-backdrop${isSessionsOpen ? " is-open" : ""}`}
+          onClick={() => handleToggleSessions(false)}
+          aria-hidden="true"
+        />
+
+        <div className={`ai-link-workspace${!isSessionsOpen ? " is-sessions-collapsed" : ""}`}>
 
           {/* ── Sessions sidebar ── */}
-          <aside className="ai-link-sessions print-hide">
-            <div className="ai-link-session-header">
-              <span>Sessions</span>
-              <div style={{ display: "flex", gap: "4px" }}>
-                <button
-                  className="ai-link-new-chat"
-                  onClick={() => {
-                    setNewProjectName("");
-                    setProjectCreateError("");
-                    setCreatingProject(true);
-                  }}
-                  title="Add project"
-                  aria-label="Add project"
-                >
-                  <FolderIcon />
-                </button>
-                <button
-                  id="new-chat-btn"
-                  className="ai-link-new-chat"
-                  onClick={handleNewChat}
-                  disabled={isLoading}
-                >
-                  <PlusIcon />
-                </button>
+          <aside className={`ai-link-sessions print-hide${!isSessionsOpen ? " is-collapsed" : ""}`}>
+            <div className="ai-link-session-content">
+              <div className="ai-link-session-header">
+                <span>Sessions</span>
+                <div style={{ display: "flex", gap: "4px" }}>
+                  <button
+                    className="ai-link-new-chat"
+                    onClick={() => {
+                      setNewProjectName("");
+                      setProjectCreateError("");
+                      setCreatingProject(true);
+                    }}
+                    title="Add project"
+                    aria-label="Add project"
+                  >
+                    <FolderIcon />
+                  </button>
+                  <button
+                    id="new-chat-btn"
+                    className="ai-link-new-chat"
+                    onClick={handleNewChat}
+                    disabled={isLoading}
+                    title="New chat"
+                    aria-label="New chat"
+                  >
+                    <PlusIcon />
+                  </button>
+                  <button
+                    className="ai-link-new-chat"
+                    onClick={() => handleToggleSessions(false)}
+                    title="Close sidebar panel"
+                    aria-label="Close sidebar panel"
+                  >
+                    <ClosePaneIcon />
+                  </button>
+                </div>
+              </div>
+
+              <div className="ai-link-session-list">
+                {sessionsLoading ? (
+                  <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>Loading…</p>
+                ) : sessions.length === 0 && projects.length === 0 && !creatingProject ? (
+                  <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>No sessions yet.</p>
+                ) : (
+                  <>
+                    {(projects.length > 0 || creatingProject) && (
+                      <section className="ai-session-section" aria-labelledby="ai-projects-section-title">
+                        <h2 id="ai-projects-section-title" className="ai-session-section-heading">Projects</h2>
+                        {creatingProject && (
+                          <div className="ai-project-create-form">
+                            <div className="ai-project-create-row">
+                              <FolderIcon />
+                              {renderInlineInput({
+                                value: newProjectName,
+                                onChange: setNewProjectName,
+                                onSave: () => handleCreateProject(newProjectName),
+                                onCancel: () => {
+                                  if (projectCreateSaving) return;
+                                  setCreatingProject(false);
+                                  setNewProjectName("");
+                                  setProjectCreateError("");
+                                },
+                                placeholder: "Project name",
+                                disabled: projectCreateSaving,
+                                inputClassName: "ai-project-name-input",
+                                ariaLabel: "Project name",
+                              })}
+                            </div>
+                            {projectCreateError && (
+                              <p className="ai-project-create-error" role="alert">{projectCreateError}</p>
+                            )}
+                          </div>
+                        )}
+                        {projects.map(renderProjectGroup)}
+                      </section>
+                    )}
+                    {(ungroupedSessions.length > 0 || projects.length > 0) && (
+                      <section
+                        className={`ai-session-section${sessionDropTarget === "chats" ? " is-drop-target" : ""}`}
+                        aria-labelledby="ai-chats-section-title"
+                        onDragOver={(event) => handleSessionDragOver(event, "chats")}
+                        onDrop={(event) => void handleSessionDrop(event, "chats")}
+                      >
+                        <h2 id="ai-chats-section-title" className="ai-session-section-heading">Chats</h2>
+                        {ungroupedSessions.map(renderSessionRow)}
+                        {ungroupedSessions.length === 0 && draggedSessionId && (
+                          <p className="ai-session-drop-hint">Drop chats here</p>
+                        )}
+                      </section>
+                    )}
+                  </>
+                )}
               </div>
             </div>
 
-            <div className="ai-link-session-list">
-              {sessionsLoading ? (
-                <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>Loading…</p>
-              ) : sessions.length === 0 && projects.length === 0 && !creatingProject ? (
-                <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textAlign: "center", padding: "var(--space-4)" }}>No sessions yet.</p>
-              ) : (
-                <>
-                  {(projects.length > 0 || creatingProject) && (
-                    <section className="ai-session-section" aria-labelledby="ai-projects-section-title">
-                      <h2 id="ai-projects-section-title" className="ai-session-section-heading">Projects</h2>
-                      {creatingProject && (
-                        <div className="ai-project-create-form">
-                          <div className="ai-project-create-row">
-                            <FolderIcon />
-                            {renderInlineInput({
-                              value: newProjectName,
-                              onChange: setNewProjectName,
-                              onSave: () => handleCreateProject(newProjectName),
-                              onCancel: () => {
-                                if (projectCreateSaving) return;
-                                setCreatingProject(false);
-                                setNewProjectName("");
-                                setProjectCreateError("");
-                              },
-                              placeholder: "Project name",
-                              disabled: projectCreateSaving,
-                              inputClassName: "ai-project-name-input",
-                              ariaLabel: "Project name",
-                            })}
-                          </div>
-                          {projectCreateError && (
-                            <p className="ai-project-create-error" role="alert">{projectCreateError}</p>
-                          )}
-                        </div>
-                      )}
-                      {projects.map(renderProjectGroup)}
-                    </section>
-                  )}
-                  {(ungroupedSessions.length > 0 || projects.length > 0) && (
-                    <section
-                      className={`ai-session-section${sessionDropTarget === "chats" ? " is-drop-target" : ""}`}
-                      aria-labelledby="ai-chats-section-title"
-                      onDragOver={(event) => handleSessionDragOver(event, "chats")}
-                      onDrop={(event) => void handleSessionDrop(event, "chats")}
-                    >
-                      <h2 id="ai-chats-section-title" className="ai-session-section-heading">Chats</h2>
-                      {ungroupedSessions.map(renderSessionRow)}
-                      {ungroupedSessions.length === 0 && draggedSessionId && (
-                        <p className="ai-session-drop-hint">Drop chats here</p>
-                      )}
-                    </section>
-                  )}
-                </>
-              )}
+            <div className="ai-link-session-rail">
+              <button
+                className="ai-rail-button"
+                onClick={() => handleToggleSessions(true)}
+                title="Open sidebar panel"
+                aria-label="Open sidebar panel"
+              >
+                <ClosePaneIcon size={15} />
+              </button>
+              <button
+                className="ai-rail-button"
+                onClick={handleNewChat}
+                disabled={isLoading}
+                title="New chat"
+                aria-label="New chat"
+              >
+                <PlusIcon />
+              </button>
             </div>
           </aside>
 
@@ -2904,17 +3084,17 @@ export default function AiPage() {
                         return (
                           <div key={msg.id} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
                             <div className="ai-text">
-                              {(thinking || hasThinkingMarker) && (
+{(thinking || hasThinkingMarker) && (
                                 <ThinkingAccordion thinking={thinking ?? ""} isThinkingActive={hasOpenThinking || isAwaitingAnswer} />
                               )}
                               {msg.content === "" && isCurrentSessionStreaming ? (
                                 <WaveThinkingText text="thinking" />
                               ) : displayAnswer ? (
-                                <div className="markdown-body" onMouseUp={handleResponseSelection}>
+                                <div className="markdown-body" onMouseMove={handleResponseSelection} onMouseUp={handleResponseSelection}>
                                   <ReactMarkdown
                                     remarkPlugins={[remarkGfm, remarkMath]}
                                     rehypePlugins={[rehypeKatex]}
-                                    components={{ a: InlineCitationLink }}
+                                    components={{ a: InlineCitationLink, table: MarkdownTable }}
                                   >
                                     {displayAnswer.replaceAll(" -- ", " — ")}
                                   </ReactMarkdown>
@@ -2941,11 +3121,30 @@ export default function AiPage() {
                                           className={`ai-tool-chip${isPinned ? " is-pinned" : ""}`}
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            setActiveToolTooltip((prev) => (prev === toolKey ? null : toolKey));
+                                            if (activeToolTooltip === toolKey) {
+                                              setActiveToolTooltip(null);
+                                              setActiveToolTooltipPosition(null);
+                                              activeToolTooltipAnchorRef.current = null;
+                                              return;
+                                            }
+                                            activeToolTooltipAnchorRef.current = e.currentTarget;
+                                            setActiveToolTooltip(toolKey);
+                                            updateActiveToolTooltipPosition();
                                           }}
                                         >
                                           {toolLabel(tool.name)}
-                                          <span className="ai-tool-tooltip" role="tooltip">
+                                          <span
+                                            className="ai-tool-tooltip"
+                                            role="tooltip"
+                                            style={isPinned && activeToolTooltipPosition ? {
+                                              bottom: activeToolTooltipPosition.bottom,
+                                              left: activeToolTooltipPosition.left,
+                                              position: "fixed",
+                                              transform: "translateX(-50%)",
+                                              width: activeToolTooltipPosition.width,
+                                              zIndex: 1100,
+                                            } : undefined}
+                                          >
                                             {tool.name === "web_search" && sources && sources.length > 0 ? (
                                               <div className="ai-tool-tooltip-sources">
                                                 <div className="ai-tool-tooltip-query">
@@ -3113,13 +3312,11 @@ export default function AiPage() {
                         />
                         <textarea
                           id="chat-input"
-                          className="cmd-bar"
-                          placeholder="Ask your coach anything..."
+                          className={`cmd-bar${composerNeedsBottomSpace ? " has-bottom-space" : ""}`}
+                          placeholder="Ask anything..."
                           value={input}
                           ref={composerRef}
-                          onChange={(e) => {
-                            setInput(e.target.value);
-                          }}
+                          onChange={handleComposerChange}
                           onPaste={handlePaste}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.shiftKey) {
@@ -3129,13 +3326,6 @@ export default function AiPage() {
                             }
                           }}
                           disabled={isLoading}
-                          style={{
-                            resize: "none",
-                            paddingTop: "16px",
-                            paddingBottom: "16px",
-                            lineHeight: "1.4",
-                            overflowY: "auto"
-                          }}
                           rows={1}
                         />
                         <div className="cmd-bar-actions">
@@ -3197,58 +3387,62 @@ export default function AiPage() {
                 void handleEditProject();
               }}
             >
-              <span className="ai-project-edit-label">Project settings</span>
-              <h2>Edit project</h2>
-              <label className="ai-project-edit-field">
-                <span>Project name</span>
-                <input
-                  autoFocus
-                  value={editingProjectName}
-                  maxLength={100}
-                  onChange={(event) => setEditingProjectName(event.target.value)}
-                  disabled={projectEditSaving}
-                />
-              </label>
-              <fieldset className="ai-project-edit-fieldset">
-                <legend>Activity icon</legend>
-                <div className="ai-project-icon-grid">
-                  {PROJECT_ICON_OPTIONS.map((icon) => (
-                    <button
-                      key={icon}
-                      type="button"
-                      className={`ai-project-icon-option${editingProjectIcon === icon ? " is-selected" : ""}`}
-                      aria-label={`Use ${icon.replaceAll("_", " ")} icon`}
-                      title={icon.replaceAll("_", " ")}
-                      aria-pressed={editingProjectIcon === icon}
-                      onClick={() => setEditingProjectIcon(editingProjectIcon === icon ? null : icon)}
-                      disabled={projectEditSaving}
-                    >
-                      <SportIcon sport={icon} size={24} />
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-              <fieldset className="ai-project-edit-fieldset">
-                <legend>Highlight color</legend>
-                <div className="ai-project-color-grid">
-                  {PROJECT_COLOR_OPTIONS.map((color) => (
-                    <button
-                      key={color.value}
-                      type="button"
-                      className={`ai-project-color-option${editingProjectColor === color.value ? " is-selected" : ""}`}
-                      aria-label={`Use ${color.label} highlight`}
-                      title={`${color.label} highlight`}
-                      aria-pressed={editingProjectColor === color.value}
-                      onClick={() => setEditingProjectColor(editingProjectColor === color.value ? null : color.value)}
-                      disabled={projectEditSaving}
-                    >
-                      <span style={{ backgroundColor: color.value }} />
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-              {projectEditError && <p className="ai-project-edit-error" role="alert">{projectEditError}</p>}
-              <div className="ai-delete-dialog-actions">
+              <header className="ai-project-edit-header">
+                <span className="ai-project-edit-label">Project settings</span>
+                <h2>Edit project</h2>
+              </header>
+              <div className="ai-project-edit-body">
+                <label className="ai-project-edit-field">
+                  <span>Project name</span>
+                  <input
+                    autoFocus
+                    value={editingProjectName}
+                    maxLength={100}
+                    onChange={(event) => setEditingProjectName(event.target.value)}
+                    disabled={projectEditSaving}
+                  />
+                </label>
+                <fieldset className="ai-project-edit-fieldset">
+                  <legend>Activity icon</legend>
+                  <div className="ai-project-icon-grid">
+                    {PROJECT_ICON_OPTIONS.map((icon) => (
+                      <button
+                        key={icon}
+                        type="button"
+                        className={`ai-project-icon-option${editingProjectIcon === icon ? " is-selected" : ""}`}
+                        aria-label={`Use ${icon.replaceAll("_", " ")} icon`}
+                        title={icon.replaceAll("_", " ")}
+                        aria-pressed={editingProjectIcon === icon}
+                        onClick={() => setEditingProjectIcon(editingProjectIcon === icon ? null : icon)}
+                        disabled={projectEditSaving}
+                      >
+                        <SportIcon sport={icon} size={24} />
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                <fieldset className="ai-project-edit-fieldset">
+                  <legend>Highlight color</legend>
+                  <div className="ai-project-color-grid">
+                    {PROJECT_COLOR_OPTIONS.map((color) => (
+                      <button
+                        key={color.value}
+                        type="button"
+                        className={`ai-project-color-option${editingProjectColor === color.value ? " is-selected" : ""}`}
+                        aria-label={`Use ${color.label} highlight`}
+                        title={`${color.label} highlight`}
+                        aria-pressed={editingProjectColor === color.value}
+                        onClick={() => setEditingProjectColor(editingProjectColor === color.value ? null : color.value)}
+                        disabled={projectEditSaving}
+                      >
+                        <span style={{ backgroundColor: color.value }} />
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                {projectEditError && <p className="ai-project-edit-error" role="alert">{projectEditError}</p>}
+              </div>
+              <div className="ai-project-edit-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setEditingProject(null)} disabled={projectEditSaving}>
                   Cancel
                 </button>
@@ -3352,71 +3546,75 @@ export default function AiPage() {
             if (!singleChange) return null;
             return (
               <div className="calendar-change-dialog-content">
-                <span className="calendar-change-dialog-label">COROS calendar</span>
-                <h2 id="calendar-change-title">{isBatch ? `Review ${changes.length} workouts` : `${singleChange.action[0].toUpperCase() + singleChange.action.slice(1)} workout?`}</h2>
-                <div className={isBatch ? "calendar-change-workouts" : undefined}>
-                  {changes.map((change, changeIndex) => {
-                    const itemKey = isBatch ? `${key}:${changeIndex}` : key;
-                    const draft = change.draft;
-                    const steps = calendarChangeSteps(change);
-                    const result = calendarChangeResults[itemKey];
-                    const name = typeof draft?.name === "string" ? draft.name : "Workout";
-                    const date = typeof draft?.date === "string" ? draft.date : change.date;
-                    const sport = typeof draft?.sport === "string" ? draft.sport.replaceAll("_", " ") : "";
-                    const poolLength = typeof draft?.pool_length_m === "number" ? draft.pool_length_m : null;
-                    const description = typeof draft?.description === "string" ? draft.description : "";
-                    return (
-                      <section className={isBatch ? "calendar-change-workout" : undefined} key={itemKey}>
-                        <dl className="calendar-change-summary">
-                          <div><dt>Workout</dt><dd>{name}</dd></div>
-                          {date && <div><dt>Date</dt><dd>{date}</dd></div>}
-                          {sport && <div><dt>Sport</dt><dd>{sport}</dd></div>}
-                          {poolLength !== null && <div><dt>Pool</dt><dd>{poolLength} m</dd></div>}
-                        </dl>
-                        {description && <p className="calendar-change-description">{description}</p>}
-                        {steps.length > 0 && (
-                          <ol className="calendar-change-steps">
-                            {steps.map((step, index) => {
-                              const stepName = resolveExerciseName(
-                                typeof step.exercise_code === "string" ? step.exercise_code : null,
-                                typeof step.name === "string" ? step.name : "Step",
-                              );
-                              const target = calendarStepTarget(step);
-                              const repeats = typeof step.repeat_count === "number" ? step.repeat_count : step.repeats;
-                              const intensity = calendarStepIntensity(step);
-                              return (
-                                <li key={`${stepName}-${index}`}>
-                                  <strong>{stepName}</strong>
-                                  {target && <span>{target}</span>}
-                                  {intensity && <span>{intensity}</span>}
-                                  {typeof repeats === "number" && repeats > 1 && <span>Repeat {repeats}×</span>}
-                                </li>
-                              );
-                            })}
-                          </ol>
-                        )}
-                        {result && !result.success && <p className="calendar-change-dialog-error" role="alert">{result.text}</p>}
-                        {isBatch && (
-                          <div className="calendar-change-workout-actions">
-                            {result?.success ? (
-                              <span className="calendar-change-status is-success">Added to calendar</span>
-                            ) : (
-                              <button
-                                type="button"
-                                className="btn calendar-change-dialog-confirm"
-                                onClick={() => void confirmCalendarChange(change, itemKey, false)}
-                                disabled={calendarChangePending !== null}
-                              >
-                                {calendarChangePending === itemKey ? "Saving…" : "Confirm"}
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </section>
-                    );
-                  })}
+                <header className="calendar-change-dialog-header">
+                  <span className="calendar-change-dialog-label">COROS calendar</span>
+                  <h2 id="calendar-change-title">{isBatch ? `Review ${changes.length} workouts` : `${singleChange.action[0].toUpperCase() + singleChange.action.slice(1)} workout?`}</h2>
+                </header>
+                <div className="calendar-change-dialog-body">
+                  <div className={isBatch ? "calendar-change-workouts" : undefined}>
+                    {changes.map((change, changeIndex) => {
+                      const itemKey = isBatch ? `${key}:${changeIndex}` : key;
+                      const draft = change.draft;
+                      const steps = calendarChangeSteps(change);
+                      const result = calendarChangeResults[itemKey];
+                      const name = typeof draft?.name === "string" ? draft.name : "Workout";
+                      const date = typeof draft?.date === "string" ? draft.date : change.date;
+                      const sport = typeof draft?.sport === "string" ? draft.sport.replaceAll("_", " ") : "";
+                      const poolLength = typeof draft?.pool_length_m === "number" ? draft.pool_length_m : null;
+                      const description = typeof draft?.description === "string" ? draft.description : "";
+                      return (
+                        <section className={isBatch ? "calendar-change-workout" : undefined} key={itemKey}>
+                          <dl className="calendar-change-summary">
+                            <div><dt>Workout</dt><dd>{name}</dd></div>
+                            {date && <div><dt>Date</dt><dd>{date}</dd></div>}
+                            {sport && <div><dt>Sport</dt><dd>{sport}</dd></div>}
+                            {poolLength !== null && <div><dt>Pool</dt><dd>{poolLength} m</dd></div>}
+                          </dl>
+                          {description && <p className="calendar-change-description">{description}</p>}
+                          {steps.length > 0 && (
+                            <ol className="calendar-change-steps">
+                              {steps.map((step, index) => {
+                                const stepName = resolveExerciseName(
+                                  typeof step.exercise_code === "string" ? step.exercise_code : null,
+                                  typeof step.name === "string" ? step.name : "Step",
+                                );
+                                const target = calendarStepTarget(step);
+                                const repeats = typeof step.repeat_count === "number" ? step.repeat_count : step.repeats;
+                                const intensity = calendarStepIntensity(step);
+                                return (
+                                  <li key={`${stepName}-${index}`}>
+                                    <strong>{stepName}</strong>
+                                    {target && <span>{target}</span>}
+                                    {intensity && <span>{intensity}</span>}
+                                    {typeof repeats === "number" && repeats > 1 && <span>Repeat {repeats}×</span>}
+                                  </li>
+                                );
+                              })}
+                            </ol>
+                          )}
+                          {result && !result.success && <p className="calendar-change-dialog-error" role="alert">{result.text}</p>}
+                          {isBatch && (
+                            <div className="calendar-change-workout-actions">
+                              {result?.success ? (
+                                <span className="calendar-change-status is-success">Added to calendar</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn calendar-change-dialog-confirm"
+                                  onClick={() => void confirmCalendarChange(change, itemKey, false)}
+                                  disabled={calendarChangePending !== null}
+                                >
+                                  {calendarChangePending === itemKey ? "Saving…" : "Confirm"}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </section>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="ai-delete-dialog-actions">
+                <div className="calendar-change-dialog-actions">
                   <button type="button" className="btn btn-secondary" onClick={() => setCalendarChangeReview(null)} disabled={calendarChangePending !== null}>
                     {isBatch ? "Close" : "Cancel"}
                   </button>

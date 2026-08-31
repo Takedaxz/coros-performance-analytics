@@ -156,6 +156,23 @@ class Goal(Base):
     user: Mapped["User"] = relationship(back_populates="goals")
 
 
+class Document(Base):
+    __tablename__ = "documents"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    goal_id: Mapped[str | None] = mapped_column(
+        ForeignKey("goals.id", ondelete="SET NULL"), nullable=True
+    )
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_filename: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 # ---------------------------------------------------------------------------
 # Activity
 # ---------------------------------------------------------------------------
@@ -247,6 +264,9 @@ class Activity(Base):
     laps: Mapped[list["ActivityLap"]] = relationship(
         back_populates="activity", cascade="all, delete-orphan"
     )
+    pauses: Mapped[list["ActivityPause"]] = relationship(
+        back_populates="activity", cascade="all, delete-orphan"
+    )
 
 
 class ActivityRecord(Base):
@@ -302,6 +322,22 @@ class ActivityLap(Base):
     lap_trigger: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     activity: Mapped["Activity"] = relationship(back_populates="laps")
+
+
+class ActivityPause(Base):
+    """A FIT timer stop/start interval."""
+
+    __tablename__ = "activity_pauses"
+    __table_args__ = (Index("ix_activity_pause_start", "activity_id", "start_time"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    activity_id: Mapped[str] = mapped_column(
+        ForeignKey("activities.id", ondelete="CASCADE"), nullable=False
+    )
+    start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    activity: Mapped["Activity"] = relationship(back_populates="pauses")
 
 
 # ---------------------------------------------------------------------------

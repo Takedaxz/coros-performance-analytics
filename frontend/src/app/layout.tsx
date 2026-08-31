@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono, Outfit } from "next/font/google";
 import "../styles/globals.css";
 import "katex/dist/katex.min.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 import DailyFeelingCheckIn from "@/components/DailyFeelingCheckIn";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-body" });
@@ -16,7 +17,7 @@ const themeInitScript = `try {
 }`;
 
 export const metadata: Metadata = {
-  title: "COROS Core — Personal Performance",
+  title: "COROS Core",
   description: "Personal analytics dashboard for COROS watch data. Track training load, recovery, sleep, HRV, and fitness progression.",
   icons: {
     icon: { url: "/icon.svg?v=2", type: "image/svg+xml" },
@@ -38,7 +39,12 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${playfair.variable}`} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script
+          id="theme-init"
+          type={typeof window === "undefined" ? "text/javascript" : "text/plain"}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: themeInitScript }}
+        />
       </head>
       <body>
         {children}

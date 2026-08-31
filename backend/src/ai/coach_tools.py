@@ -31,6 +31,7 @@ from src.db.models import (
     SleepSession,
     SportType,
 )
+from src.strength_exercises import resolve_exercise_name
 from src.sync.api_client import CorosApiClientError
 
 _TREND_DAYS = frozenset({7, 14, 28, 56})
@@ -97,7 +98,7 @@ def coach_tool_functions(
         )
 
     def get_activity_detail(activity_id: str) -> dict[str, Any]:
-        """Get detailed splits and metrics for one activity owned by the athlete."""
+        """Get detailed splits, metrics, and recorded strength sets for one owned activity."""
         return run("get_activity_detail", activity_id=activity_id)
 
     def compare_activities(activity_ids: list[str]) -> dict[str, Any]:
@@ -730,6 +731,25 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
     if not activity:
         return {"error": "activity not found"}
 
+    strength_detail = getattr(activity, "strength_detail", None)
+    if isinstance(strength_detail, dict) and isinstance(
+        strength_detail.get("exercises_detail"), list
+    ):
+        strength_detail = {
+            **strength_detail,
+            "exercises_detail": [
+                {
+                    **exercise,
+                    "name": resolve_exercise_name(
+                        exercise.get("name_key"), exercise.get("name")
+                    ),
+                }
+                if isinstance(exercise, dict)
+                else exercise
+                for exercise in strength_detail["exercises_detail"]
+            ],
+        }
+
     laps = (
         (
             await db.execute(
@@ -834,7 +854,12 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
             "te_anaerobic": getattr(activity, "training_effect_anaerobic_vendor", None),
             "elev_gain_m": getattr(activity, "elevation_gain_m", None),
             "elev_loss_m": getattr(activity, "elevation_loss_m", None),
-            **({"note": activity.activity_note} if getattr(activity, "activity_note", None) else {}),
+            "strength_detail": strength_detail,
+            **(
+                {"note": activity.activity_note}
+                if getattr(activity, "activity_note", None)
+                else {}
+            ),
         },
         "laps": [
             {

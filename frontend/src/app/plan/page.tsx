@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
+import CustomDatePicker from "@/components/CustomDatePicker";
 import NumberStepper from "@/components/NumberStepper";
 import SingleSelect from "@/components/SingleSelect";
 import ExerciseCombobox, { type ExerciseOption } from "@/components/ExerciseCombobox";
@@ -73,6 +74,7 @@ type CalendarMoveNotice = { kind: "pending" | "success" | "error"; message: stri
 type DeleteTarget =
   | { kind: "calendar"; uid: string; name: string }
   | { kind: "library"; workout: LibraryWorkout };
+type DuplicateTarget = { uid: string; name: string; date: string };
 
 const WORKOUT_ICON_PATHS = {
   calendar: "M3 5h18M7 3v4m10-4v4M5 9h14v12H5z",
@@ -398,6 +400,7 @@ export default function TrainingPlanPage() {
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [deletingLibraryWorkoutId, setDeletingLibraryWorkoutId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [duplicateTarget, setDuplicateTarget] = useState<DuplicateTarget | null>(null);
   const [isSavingWorkout, setIsSavingWorkout] = useState(false);
   const [isLoadingWorkoutEditor, setIsLoadingWorkoutEditor] = useState(false);
   const [workoutLoadError, setWorkoutLoadError] = useState("");
@@ -681,6 +684,26 @@ export default function TrainingPlanPage() {
       setCalendarMoveNotice({ kind: "error", message: cause instanceof Error ? cause.message : "Could not move workout." });
     }
   };
+  const duplicateWorkout = async () => {
+    if (!duplicateTarget?.date) return;
+    const target = duplicateTarget;
+    const source = events.find((event) => event.uid === target.uid);
+    if (!source) return;
+    setDuplicateTarget(null);
+    setCalendarMoveNotice({ kind: "pending", message: `Duplicating ${source.summary}…` });
+    try {
+      const response = await fetch(`${apiBase}/api/training-plan/coros/workouts/${encodeURIComponent(target.uid)}/duplicate`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date: target.date, confirmed: true }),
+      });
+      if (!response.ok) throw new Error((await response.json() as { detail?: string }).detail || `HTTP ${response.status}`);
+      const duplicated: TrainingEvent = await response.json();
+      setEvents((current) => [...current, duplicated]);
+      setSelectedDate(target.date);
+      setCalendarMoveNotice({ kind: "success", message: `${source.summary} duplicated.` });
+    } catch (cause) {
+      setCalendarMoveNotice({ kind: "error", message: cause instanceof Error ? cause.message : "Could not duplicate workout." });
+    }
+  };
 
   const beginCalendarWorkoutDrag = (event: DragEvent<HTMLSpanElement>, workout: TrainingEvent) => {
     if (workout.start.slice(0, 10) < todayKey) return;
@@ -882,7 +905,10 @@ export default function TrainingPlanPage() {
       <Sidebar />
       <main className="main-content">
         <header className="page-header">
-          <PageTitle>Training Calendar</PageTitle>
+          <PageTitle>
+            <span className="page-title-full">Training Calendar</span>
+            <span className="page-title-mobile">Calendar</span>
+          </PageTitle>
           <div className="plan-calendar-controls">
             <button
               className={`plan-calendar-source-switch is-${source}`}
@@ -895,9 +921,9 @@ export default function TrainingPlanPage() {
               <span>COROS</span>
               <span>iCal</span>
             </button>
-            <button className="btn btn-secondary btn-sm" type="button" onClick={returnToToday}>Today</button>
-            <button className="btn btn-secondary btn-sm" type="button" onClick={() => moveMonth(-1)} aria-label="Previous month">‹</button>
-            <button className="btn btn-secondary btn-sm" type="button" onClick={() => moveMonth(1)} aria-label="Next month">›</button>
+            <button className="btn btn-secondary btn-sm plan-calendar-today" type="button" onClick={returnToToday}>Today</button>
+            <button className="btn btn-secondary btn-sm plan-calendar-nav-btn" type="button" onClick={() => moveMonth(-1)} aria-label="Previous month">‹</button>
+            <button className="btn btn-secondary btn-sm plan-calendar-nav-btn" type="button" onClick={() => moveMonth(1)} aria-label="Next month">›</button>
           </div>
         </header>
 
@@ -1025,6 +1051,7 @@ export default function TrainingPlanPage() {
                     {event.workout_steps?.length ? <WorkoutStructure steps={event.workout_steps} /> : null}
                     {source === "coros" && (
                       <div className="plan-workout-actions">
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => setDuplicateTarget({ uid: event.uid, name: event.summary, date: selectedDate })}>Duplicate</button>
                         <button className="btn btn-secondary btn-sm" type="button" onClick={() => void openEditWorkout(event.uid)}>Edit</button>
                         <button className="btn btn-secondary btn-sm" type="button" onClick={() => setDeleteTarget({ kind: "calendar", uid: event.uid, name: event.summary })}>Delete</button>
                       </div>
@@ -1032,6 +1059,16 @@ export default function TrainingPlanPage() {
                   </div>
                 ))}
               </aside>
+            </div>
+          )}
+          {duplicateTarget && (
+            <div className="plan-workout-editor-backdrop" role="dialog" aria-modal="true" aria-labelledby="duplicate-workout-title">
+              <section className="plan-duplicate-workout-dialog">
+                <h2 id="duplicate-workout-title">Duplicate workout</h2>
+                <p>{duplicateTarget.name}</p>
+                <div className="plan-duplicate-workout-date"><span>Schedule date</span><CustomDatePicker value={duplicateTarget.date} minDate={todayKey} ariaLabel="Duplicate workout date" onChange={(date) => setDuplicateTarget({ ...duplicateTarget, date })} /></div>
+                <div className="plan-workout-actions"><button className="btn btn-secondary btn-sm" type="button" onClick={() => setDuplicateTarget(null)}>Cancel</button><button className="btn btn-primary btn-sm" type="button" disabled={!duplicateTarget.date} onClick={() => void duplicateWorkout()}>Duplicate</button></div>
+              </section>
             </div>
           )}
           {(workoutDraft || isLoadingWorkoutEditor) && (
