@@ -837,6 +837,7 @@ type Session = {
   model_name: string;
   created_at: string;
   updated_at: string;
+  last_message_at: string | null;
 };
 
 type Project = {
@@ -1182,13 +1183,16 @@ const MORE_PROMPTS: SuggestedPrompt[] = [
 ];
 
 function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
+  const date = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+  const diff = Date.now() - date.getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
+  const days = Math.floor(hrs / 24);
+  if (days <= 3) return `${days}d ago`;
+  return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 let cachedSessions: Session[] | null = null;
@@ -1298,7 +1302,58 @@ export default function AiPage() {
   const projectEditDialogRef = useRef<HTMLDialogElement>(null);
   const calendarChangeDialogRef = useRef<HTMLDialogElement>(null);
 
-  const [isSessionsOpen, setIsSessionsOpen] = useState(() => cachedSessionsOpen ?? false);
+  // SSR-safe: always match server default (open) on first render to prevent hydration mismatch.
+  // For client-side navigation cachedSessionsOpen is already set so we get the correct value.
+  const [isSessionsOpen, setIsSessionsOpen] = useState(() => cachedSessionsOpen ?? true);
+  const sessionsAsideRef = useRef<HTMLElement | null>(null);
+
+  // Correct the open/closed state from localStorage immediately before first paint.
+  // Direct style mutation on the aside suppresses the CSS transition so there is no visible animation.
+  useLayoutEffect(() => {
+    const isMobile = window.innerWidth <= 760;
+    let next: boolean;
+    if (cachedSessionsOpen !== null) {
+      next = cachedSessionsOpen;
+    } else if (isMobile) {
+      next = false;
+      cachedSessionsOpen = false;
+    } else {
+      try {
+        const saved = localStorage.getItem("coros-ai-sessions-open");
+        next = saved !== null ? saved === "true" : true;
+        cachedSessionsOpen = next;
+      } catch {
+        next = true;
+      }
+    }
+
+    if (next !== isSessionsOpen) {
+      const el = sessionsAsideRef.current;
+      if (el) el.style.transition = "none";
+      setIsSessionsOpen(next);
+      // Re-enable transition after the corrected state has been painted.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const el = sessionsAsideRef.current;
+          if (el) el.style.transition = "";
+        });
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleToggleSessions = useCallback((open: boolean) => {
+    setIsSessionsOpen(open);
+    const isMobile = typeof window !== "undefined" && window.innerWidth <= 760;
+    if (!isMobile) {
+      cachedSessionsOpen = open;
+      try {
+        localStorage.setItem("coros-ai-sessions-open", String(open));
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
 
   const updateActiveToolTooltipPosition = useCallback(() => {
     const anchor = activeToolTooltipAnchorRef.current;
@@ -1315,68 +1370,36 @@ export default function AiPage() {
     });
   }, []);
 
-  useLayoutEffect(() => {
-    const isMobile = window.innerWidth <= 760;
-    if (isMobile) {
-      setIsSessionsOpen(false);
-      cachedSessionsOpen = false;
-      return;
-    }
-
-    if (cachedSessionsOpen !== null) {
-      setIsSessionsOpen(cachedSessionsOpen);
-      return;
-    }
-    try {
-      const saved = localStorage.getItem("coros-ai-sessions-open");
-      const next = saved !== null ? saved === "true" : true;
-      cachedSessionsOpen = next;
-      setIsSessionsOpen(next);
-    } catch {
-      setIsSessionsOpen(true);
-    }
-  }, []);
-
-  const handleToggleSessions = useCallback((open: boolean) => {
-    setIsSessionsOpen(open);
-    const isMobile = typeof window !== "undefined" && window.innerWidth <= 760;
-    if (!isMobile) {
-      cachedSessionsOpen = open;
-      try {
-        localStorage.setItem("coros-ai-sessions-open", String(open));
-      } catch {
-        // ignore
-      }
-    }
-  }, []);
-
   useEffect(() => {
     routeSessionIdRef.current = routeSessionId;
   }, [routeSessionId]);
 
   function handleResponseSelection(event: ReactMouseEvent<HTMLDivElement>) {
-    const selection = window.getSelection();
-    if (
-      !selection
-      || selection.rangeCount === 0
-      || selection.isCollapsed
-      || !event.currentTarget.contains(selection.anchorNode)
-      || !event.currentTarget.contains(selection.focusNode)
-    ) {
-      setResponseSelection(null);
-      return;
-    }
-    const excerpt = selection.toString().trim().slice(0, MAX_SELECTED_RESPONSE_EXCERPT_LENGTH);
-    const rect = selection.getRangeAt(0).getBoundingClientRect();
-    if (!excerpt || (!rect.width && !rect.height)) {
-      setResponseSelection(null);
-      return;
-    }
-    setResponseSelection({
-      excerpt,
-      left: Math.min(window.innerWidth - 116, Math.max(8, rect.left + rect.width / 2)),
-      top: Math.min(window.innerHeight - 44, Math.max(8, rect.bottom + 8)),
-    });
+    const container = event.currentTarget;
+    setTimeout(() => {
+      const selection = window.getSelection();
+      if (
+        !selection
+        || selection.rangeCount === 0
+        || selection.isCollapsed
+        || !container.contains(selection.anchorNode)
+        || !container.contains(selection.focusNode)
+      ) {
+        setResponseSelection(null);
+        return;
+      }
+      const excerpt = selection.toString().trim().slice(0, MAX_SELECTED_RESPONSE_EXCERPT_LENGTH);
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      if (!excerpt || (!rect.width && !rect.height)) {
+        setResponseSelection(null);
+        return;
+      }
+      setResponseSelection({
+        excerpt,
+        left: Math.min(window.innerWidth - 116, Math.max(8, rect.left + rect.width / 2)),
+        top: Math.min(window.innerHeight - 44, Math.max(8, rect.bottom + 8)),
+      });
+    }, 10);
   }
 
   function addSelectedResponseToChat() {
@@ -1390,7 +1413,7 @@ export default function AiPage() {
   function handleComposerChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
     const textarea = event.currentTarget;
     setInput(textarea.value);
-    setComposerNeedsBottomSpace(textarea.value.length > 0 && textarea.clientHeight > 80);
+    setComposerNeedsBottomSpace(textarea.value.length > 0 && textarea.scrollHeight > 80);
   }
 
   async function confirmCalendarChange(change: CalendarChangeAction, key: string, closeReview = true) {
@@ -1492,6 +1515,25 @@ export default function AiPage() {
     }
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activePreviewImage]);
+
+  useEffect(() => {
+    if (!responseSelection) return;
+    const handleDocumentMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest(".response-selection-action")) {
+        setResponseSelection(null);
+      }
+    };
+    const handleScrollOrResize = () => setResponseSelection(null);
+    document.addEventListener("mousedown", handleDocumentMouseDown);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentMouseDown);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [responseSelection]);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/settings/profile`)
@@ -2268,6 +2310,8 @@ export default function AiPage() {
   }
 
   const isEmpty = messages.length === 0;
+  const composerHasContext = searchMode !== "none" || coachingKnowledgeEnabled || pendingImages.length > 0 || pendingCsv !== null || selectedResponseExcerpt !== null;
+  const composerHasFooter = composerNeedsBottomSpace || composerHasContext;
 
   // Shared empty-state content (prompt bar + chips)
   function renderEmptyPrompt(sessionId?: string) {
@@ -2306,7 +2350,8 @@ export default function AiPage() {
         <div className="ai-link-empty-composer">
           <label className="sr-only" htmlFor={inputId}>Ask AI Coach</label>
 
-          <div className="cmd-bar-wrap">
+          <div className={`cmd-bar-wrap${composerHasFooter ? " has-footer" : ""}${composerHasContext ? " has-context" : ""}`}>
+            <div className="cmd-bar-context">
             {searchMode !== "none" && (
               <div className={`web-search-active-chip${searchMode === "deep" ? " is-deep-research" : ""}`}>
                 {searchMode === "deep" ? <DeepResearchIcon /> : <WebSearchIcon />}
@@ -2355,6 +2400,7 @@ export default function AiPage() {
             )}
             {pendingCsv && <CsvAttachmentChip name={pendingCsv.name} onRemove={() => setPendingCsv(null)} />}
             {selectedResponseExcerpt && <SelectedResponseChip excerpt={selectedResponseExcerpt} onRemove={() => setSelectedResponseExcerpt(null)} />}
+            </div>
             <button
               type="button"
               className="cmd-bar-attach-btn"
@@ -2631,7 +2677,7 @@ export default function AiPage() {
                 {capitalizeFirstLetter(s.title)}
               </p>
               <p style={{ alignItems: "center", display: "flex", fontSize: "10px", gap: "6px", color: "var(--color-text-muted)", margin: "2px 0 0", lineHeight: 1 }}>
-                {relativeTime(s.updated_at)}
+                {relativeTime(s.last_message_at ?? s.created_at)}
                 {streamingSessionIds.has(s.id) && <span className="ai-session-pinned-label" style={{ color: "var(--color-accent-primary)" }}>Thinking...</span>}
                 {s.is_pinned && <span className="ai-session-pinned-label">Pinned</span>}
               </p>
@@ -2844,7 +2890,7 @@ export default function AiPage() {
         <div className={`ai-link-workspace${!isSessionsOpen ? " is-sessions-collapsed" : ""}`}>
 
           {/* ── Sessions sidebar ── */}
-          <aside className={`ai-link-sessions print-hide${!isSessionsOpen ? " is-collapsed" : ""}`}>
+          <aside ref={(el) => { sessionsAsideRef.current = el; }} className={`ai-link-sessions print-hide${!isSessionsOpen ? " is-collapsed" : ""}`}>
             <div className="ai-link-session-content">
               <div className="ai-link-session-header">
                 <span>Sessions</span>
@@ -3090,7 +3136,7 @@ export default function AiPage() {
                               {msg.content === "" && isCurrentSessionStreaming ? (
                                 <WaveThinkingText text="thinking" />
                               ) : displayAnswer ? (
-                                <div className="markdown-body" onMouseMove={handleResponseSelection} onMouseUp={handleResponseSelection}>
+                                <div className="markdown-body" onMouseDown={() => setResponseSelection(null)} onMouseUp={handleResponseSelection}>
                                   <ReactMarkdown
                                     remarkPlugins={[remarkGfm, remarkMath]}
                                     rehypePlugins={[rehypeKatex]}
@@ -3242,7 +3288,8 @@ export default function AiPage() {
 
                   <div className="chat-input-bar ai-link-composer print-hide">
                     <div className="chat-input-bar-inner">
-                      <div className="cmd-bar-wrap" style={{ maxWidth: "100%" }}>
+                      <div className={`cmd-bar-wrap${composerHasFooter ? " has-footer" : ""}${composerHasContext ? " has-context" : ""}`} style={{ maxWidth: "100%" }}>
+                        <div className="cmd-bar-context">
                         {searchMode !== "none" && (
                           <div className={`web-search-active-chip${searchMode === "deep" ? " is-deep-research" : ""}`}>
                             {searchMode === "deep" ? <DeepResearchIcon /> : <WebSearchIcon />}
@@ -3291,6 +3338,7 @@ export default function AiPage() {
                         )}
                         {pendingCsv && <CsvAttachmentChip name={pendingCsv.name} onRemove={() => setPendingCsv(null)} />}
                         {selectedResponseExcerpt && <SelectedResponseChip excerpt={selectedResponseExcerpt} onRemove={() => setSelectedResponseExcerpt(null)} />}
+                        </div>
                         <button
                           type="button"
                           className="cmd-bar-attach-btn"

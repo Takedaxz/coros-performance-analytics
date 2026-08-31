@@ -8,6 +8,8 @@ import NumberStepper from "@/components/NumberStepper";
 import CustomDatePicker from "@/components/CustomDatePicker";
 import FileUpload from "@/components/FileUpload";
 import ThemeToggle from "@/components/ThemeToggle";
+import PdfViewer from "@/components/PdfViewer";
+import ImageViewer from "@/components/ImageViewer";
 import type { SyncStatus } from "@/lib/types";
 
 interface UserGoal {
@@ -1122,7 +1124,22 @@ export default function SettingsPage() {
               <div className="doc-preview-header-actions">
                 <a
                   className="doc-preview-close"
+                  aria-label="Open in new tab"
+                  title="Open in new tab"
+                  href={`${apiBase}/api/settings/documents/${previewDocument.id}/file`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                  </svg>
+                </a>
+                <a
+                  className="doc-preview-close"
                   aria-label="Download"
+                  title="Download"
                   href={`${apiBase}/api/settings/documents/${previewDocument.id}/file?download=true`}
                   target="_blank"
                   rel="noreferrer"
@@ -1136,19 +1153,25 @@ export default function SettingsPage() {
                 <button className="doc-preview-close" aria-label="Close" onClick={() => setPreviewDocument(null)}>✕</button>
               </div>
             </div>
-            {previewDocument.content_type.startsWith("image/") ? (
-              <img
-                className="doc-preview-image"
-                src={`${apiBase}/api/settings/documents/${previewDocument.id}/file`}
-                alt={previewDocument.original_filename}
-              />
-            ) : (
-              <iframe
-                className="doc-preview-frame"
-                src={`${apiBase}/api/settings/documents/${previewDocument.id}/file`}
-                title={previewDocument.original_filename}
-              />
-            )}
+            <div className="doc-preview-body">
+              {previewDocument.content_type.startsWith("image/") ? (
+                <ImageViewer
+                  url={`${apiBase}/api/settings/documents/${previewDocument.id}/file`}
+                  filename={previewDocument.original_filename}
+                />
+              ) : previewDocument.content_type === "application/pdf" || previewDocument.original_filename.toLowerCase().endsWith(".pdf") ? (
+                <PdfViewer
+                  url={`${apiBase}/api/settings/documents/${previewDocument.id}/file`}
+                  filename={previewDocument.original_filename}
+                />
+              ) : (
+                <iframe
+                  className="doc-preview-frame"
+                  src={`${apiBase}/api/settings/documents/${previewDocument.id}/file#toolbar=1&navpanes=0&view=FitH`}
+                  title={previewDocument.original_filename}
+                />
+              )}
+            </div>
           </div>
         </div>
       )}

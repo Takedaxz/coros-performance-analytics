@@ -724,6 +724,7 @@ class SessionListItem(BaseModel):
     model_name: str
     created_at: str
     updated_at: str
+    last_message_at: str | None = None
 
 
 class SessionCreateRequest(BaseModel):
@@ -959,13 +960,32 @@ async def delete_project(
 
 @router.get("/sessions", response_model=list[SessionListItem])
 async def list_sessions(db: AsyncSession = Depends(get_db_session)) -> list[SessionListItem]:
-    """Return all chat sessions for the user, newest first."""
+    """Return all chat sessions for the user, newest first.
+
+    The ordering and sidebar timestamp use last_message_at — the time of the
+    most recent chat message — so that metadata edits (rename, move to project,
+    pin) never change the displayed date.
+    """
+    from sqlalchemy import outerjoin
+
+    last_msg_at = func.max(DBChatMessage.created_at).label("last_message_at")
     res = await db.execute(
-        select(DBChatSession)
+        select(DBChatSession, last_msg_at)
+        .select_from(
+            outerjoin(
+                DBChatSession,
+                DBChatMessage,
+                DBChatMessage.session_id == DBChatSession.id,
+            )
+        )
         .where(DBChatSession.user_id == get_owner_id())
-        .order_by(DBChatSession.is_pinned.desc(), DBChatSession.updated_at.desc())
+        .group_by(DBChatSession.id)
+        .order_by(
+            DBChatSession.is_pinned.desc(),
+            func.coalesce(last_msg_at, DBChatSession.created_at).desc(),
+        )
     )
-    sessions = res.scalars().all()
+    rows = res.all()
     return [
         SessionListItem(
             id=s.id,
@@ -975,8 +995,9 @@ async def list_sessions(db: AsyncSession = Depends(get_db_session)) -> list[Sess
             model_name=s.model_name or _active_model(),
             created_at=s.created_at.isoformat(),
             updated_at=s.updated_at.isoformat(),
+            last_message_at=last_msg.isoformat() if last_msg else None,
         )
-        for s in sessions
+        for s, last_msg in rows
     ]
 
 
