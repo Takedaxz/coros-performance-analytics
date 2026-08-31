@@ -35,7 +35,8 @@ function formatPace(speedMps: number): string {
   return `${min}:${sec.toString().padStart(2, "0")}/km`;
 }
 
-function formatRaceTime(seconds: number): string {
+function formatRaceTime(seconds: number | null): string {
+  if (seconds === null) return "--";
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
@@ -168,14 +169,14 @@ export default function FitnessPage() {
     fetchData();
   }, []);
 
-  const latestVo2 = [...data].reverse().find((d) => d.vo2max != null)?.vo2max || 54.2;
-  const latestFitness = [...data].reverse().find((d) => d.running_fitness != null)?.running_fitness || 81;
+  const latestVo2 = [...data].reverse().find((d) => d.vo2max != null)?.vo2max ?? null;
+  const latestFitness = [...data].reverse().find((d) => d.running_fitness != null)?.running_fitness ?? null;
   const latestThreshold = [...data].reverse().find((d) => d.threshold_pace != null)?.threshold_pace || null;
   const latestCardioFitnessAge = [...data]
     .reverse()
     .find((day) => day.cardio_fitness_age != null)?.cardio_fitness_age ?? null;
   const vo2Readings = data.filter((d): d is FitnessTrendDay & { vo2max: number } => d.vo2max !== null);
-  const vo2Change = vo2Readings.length > 1 ? latestVo2 - vo2Readings[0].vo2max : null;
+  const vo2Change = vo2Readings.length > 1 && latestVo2 !== null ? latestVo2 - vo2Readings[0].vo2max : null;
   const trendOptions = [
     { key: "running_fitness" as const, label: "Running fitness", unit: "", color: "var(--color-accent-primary)", format: (value: number) => value.toFixed(1) },
     { key: "lthr" as const, label: "LTHR", unit: "bpm", color: "var(--color-accent-exertion)", format: (value: number) => `${Math.round(value)} bpm` },
@@ -187,13 +188,12 @@ export default function FitnessPage() {
     setTrendMetrics((current) => current.includes(metric) ? (current.length > 1 ? current.filter((item) => item !== metric) : current) : [...current, metric]);
   };
 
-  const t1k = latestThreshold ? latestThreshold * 0.82 : (4.0 * 60 * (50 / latestVo2));
-  const t3k = latestThreshold ? latestThreshold * 0.91 * 3 : (12.0 * 60 * (50 / latestVo2));
-  const t5k = latestThreshold ? latestThreshold * 0.94 * 5 : (20.0 * 60 * (50 / latestVo2));
-  const t10k = latestThreshold ? latestThreshold * 0.98 * 10 : (41.5 * 60 * (50 / latestVo2) * 1.02);
-  const tHalf = latestThreshold ? latestThreshold * 1.02 * 21.0975 : (92.0 * 60 * (50 / latestVo2) * 1.05);
-  const tFull = latestThreshold ? latestThreshold * 1.07 * 42.195 : (192.0 * 60 * (50 / latestVo2) * 1.10);
-  const trainingThreshold = latestThreshold ?? 1;
+  const t1k = latestThreshold ? latestThreshold * 0.82 : null;
+  const t3k = latestThreshold ? latestThreshold * 0.91 * 3 : null;
+  const t5k = latestThreshold ? latestThreshold * 0.94 * 5 : null;
+  const t10k = latestThreshold ? latestThreshold * 0.98 * 10 : null;
+  const tHalf = latestThreshold ? latestThreshold * 1.02 * 21.0975 : null;
+  const tFull = latestThreshold ? latestThreshold * 1.07 * 42.195 : null;
   const predictions = [
     { label: "1K", seconds: t1k, distance: 1_000 },
     { label: "3K", seconds: t3k, distance: 3_000 },
@@ -202,19 +202,19 @@ export default function FitnessPage() {
     { label: "Half Marathon", seconds: tHalf, distance: 21_097.5 },
     { label: "Marathon", seconds: tFull, distance: 42_195 },
   ];
-  const danielsZones = [
-    { code: "@R", label: "Repetition", pace: formatPace(1000 / (trainingThreshold * 0.85)), color: "var(--color-status-critical)", glow: "rgba(255, 77, 98, 0.10)" },
-    { code: "@I", label: "Interval / VO2", pace: formatPace(1000 / (trainingThreshold * 0.93)), color: "var(--color-status-moderate)", glow: "rgba(240, 211, 72, 0.10)" },
-    { code: "@T", label: "Threshold", pace: formatPace(1000 / trainingThreshold), color: "var(--color-accent-primary)", glow: "rgba(33, 230, 165, 0.10)" },
-    { code: "@M", label: "Marathon", pace: formatPace(1000 / (trainingThreshold * 1.07)), color: "var(--color-accent-exertion)", glow: "rgba(45, 155, 240, 0.10)" },
-    { code: "@E", label: "Easy aerobic", pace: formatPace(1000 / (trainingThreshold * 1.25)), color: "var(--color-accent-sleep)", glow: "rgba(141, 171, 194, 0.10)" },
+  const danielsZones = latestThreshold === null ? [] : [
+    { code: "@R", label: "Repetition", pace: formatPace(1000 / (latestThreshold * 0.85)), color: "var(--color-status-critical)", glow: "rgba(255, 77, 98, 0.10)" },
+    { code: "@I", label: "Interval / VO2", pace: formatPace(1000 / (latestThreshold * 0.93)), color: "var(--color-status-moderate)", glow: "rgba(240, 211, 72, 0.10)" },
+    { code: "@T", label: "Threshold", pace: formatPace(1000 / latestThreshold), color: "var(--color-accent-primary)", glow: "rgba(33, 230, 165, 0.10)" },
+    { code: "@M", label: "Marathon", pace: formatPace(1000 / (latestThreshold * 1.07)), color: "var(--color-accent-exertion)", glow: "rgba(45, 155, 240, 0.10)" },
+    { code: "@E", label: "Easy aerobic", pace: formatPace(1000 / (latestThreshold * 1.25)), color: "var(--color-accent-sleep)", glow: "rgba(141, 171, 194, 0.10)" },
   ];
-  const frielZones = [
-    { code: "Z5", label: "Anaerobic", pace: `< ${formatPace(1000 / (trainingThreshold * 0.90))}`, color: "var(--color-status-critical)", glow: "rgba(255, 77, 98, 0.10)" },
-    { code: "Z4", label: "Threshold", pace: `${formatPace(1000 / (trainingThreshold * 1.05))} – ${formatPace(1000 / trainingThreshold)}`, color: "var(--color-accent-primary)", glow: "rgba(33, 230, 165, 0.10)" },
-    { code: "Z3", label: "Tempo", pace: `${formatPace(1000 / (trainingThreshold * 1.14))} – ${formatPace(1000 / (trainingThreshold * 1.05))}`, color: "var(--color-status-moderate)", glow: "rgba(240, 211, 72, 0.10)" },
-    { code: "Z2", label: "Endurance", pace: `${formatPace(1000 / (trainingThreshold * 1.29))} – ${formatPace(1000 / (trainingThreshold * 1.14))}`, color: "var(--color-accent-exertion)", glow: "rgba(45, 155, 240, 0.10)" },
-    { code: "Z1", label: "Active recovery", pace: `> ${formatPace(1000 / (trainingThreshold * 1.29))}`, color: "var(--color-accent-sleep)", glow: "rgba(141, 171, 194, 0.10)" },
+  const frielZones = latestThreshold === null ? [] : [
+    { code: "Z5", label: "Anaerobic", pace: `< ${formatPace(1000 / (latestThreshold * 0.90))}`, color: "var(--color-status-critical)", glow: "rgba(255, 77, 98, 0.10)" },
+    { code: "Z4", label: "Threshold", pace: `${formatPace(1000 / (latestThreshold * 1.05))} – ${formatPace(1000 / latestThreshold)}`, color: "var(--color-accent-primary)", glow: "rgba(33, 230, 165, 0.10)" },
+    { code: "Z3", label: "Tempo", pace: `${formatPace(1000 / (latestThreshold * 1.14))} – ${formatPace(1000 / (latestThreshold * 1.05))}`, color: "var(--color-status-moderate)", glow: "rgba(240, 211, 72, 0.10)" },
+    { code: "Z2", label: "Endurance", pace: `${formatPace(1000 / (latestThreshold * 1.29))} – ${formatPace(1000 / (latestThreshold * 1.14))}`, color: "var(--color-accent-exertion)", glow: "rgba(45, 155, 240, 0.10)" },
+    { code: "Z1", label: "Active recovery", pace: `> ${formatPace(1000 / (latestThreshold * 1.29))}`, color: "var(--color-accent-sleep)", glow: "rgba(141, 171, 194, 0.10)" },
   ];
 
   return (
@@ -230,7 +230,7 @@ export default function FitnessPage() {
             <MetricCard
               label="Estimated VO2 Max"
               shortLabel="VO2 Max"
-              value={latestVo2.toFixed(1)}
+              value={latestVo2?.toFixed(1) ?? "--"}
               unit="ml/kg/min"
               accentColor="var(--color-accent-primary)"
               subtext="Elite Athletic Capacity"
@@ -245,7 +245,7 @@ export default function FitnessPage() {
             <MetricCard
               label="Running Fitness Index"
               shortLabel="Fitness Index"
-              value={latestFitness}
+              value={latestFitness ?? "--"}
               subtext="Pace & threshold score"
               icon={(
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -385,7 +385,7 @@ export default function FitnessPage() {
                 <span className="card-title">VO2 Max Progression (12 Weeks)</span>
                 {vo2Readings.length > 0 && (
                   <div style={{ display: "flex", alignItems: "baseline", gap: "var(--space-2)", textAlign: "right" }}>
-                    <strong className="mono" style={{ fontSize: "20px", color: "var(--color-accent-primary)" }}>{latestVo2.toFixed(1)}</strong>
+                    <strong className="mono" style={{ fontSize: "20px", color: "var(--color-accent-primary)" }}>{latestVo2?.toFixed(1) ?? "--"}</strong>
                     <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>
                       {vo2Change === null || Math.abs(vo2Change) < 0.05 ? "Stable" : `${vo2Change > 0 ? "+" : ""}${vo2Change.toFixed(1)} over period`}
                     </span>
@@ -414,7 +414,7 @@ export default function FitnessPage() {
             <div className="card">
               <span className="card-title">Race Predictor</span>
               <h3 style={{ fontSize: "20px", margin: "var(--space-1) 0", color: "var(--color-text-primary)" }}>Estimated finish times</h3>
-              <p style={{ fontSize: "12px", color: "var(--color-text-muted)", marginBottom: "var(--space-3)" }}>Running level {Math.round(latestFitness)}</p>
+              <p style={{ fontSize: "12px", color: "var(--color-text-muted)", marginBottom: "var(--space-3)" }}>Running level {latestFitness === null ? "--" : Math.round(latestFitness)}</p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "var(--space-2)" }}>
                 {predictions.map((prediction) => (
                   <div
@@ -429,7 +429,7 @@ export default function FitnessPage() {
                   >
                     <span style={{ display: "block", color: "var(--color-text-secondary)", fontSize: "11px", fontWeight: 750 }}>{prediction.label}</span>
                     <strong className="mono" style={{ display: "block", marginTop: "7px", fontSize: "22px", lineHeight: 1, color: "var(--color-text-primary)" }}>{formatRaceTime(prediction.seconds)}</strong>
-                    <span style={{ display: "block", marginTop: "7px", color: "var(--color-text-secondary)", fontSize: "11px" }}>{formatPace(prediction.distance / prediction.seconds)}</span>
+                    <span style={{ display: "block", marginTop: "7px", color: "var(--color-text-secondary)", fontSize: "11px" }}>{prediction.seconds === null ? "--" : formatPace(prediction.distance / prediction.seconds)}</span>
                   </div>
                 ))}
               </div>

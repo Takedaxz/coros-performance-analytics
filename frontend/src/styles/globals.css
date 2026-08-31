@@ -391,24 +391,29 @@ a:hover {
 }
 
 .sidebar-logo h1 {
-  align-items: baseline;
+  align-items: center;
   color: var(--color-text-primary);
   display: flex;
-  font-family: var(--font-display), sans-serif;
-  font-size: 16px;
-  font-weight: 800;
-  gap: 6px;
-  letter-spacing: -0.01em;
+  font-family: var(--font-brand), var(--font-body), sans-serif;
+  gap: 7px;
   margin: 0;
+}
+
+.sidebar-logo .brand-word-primary {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  line-height: 0.9;
 }
 
 .sidebar-logo .brand-word-secondary {
   color: var(--color-text-muted);
-  font-family: var(--font-display), sans-serif;
-  font-size: 13px;
-  font-weight: 300;
-  letter-spacing: 0.14em;
-  text-transform: lowercase;
+  font-family: var(--font-body), sans-serif;
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.18em;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .sidebar-nav {

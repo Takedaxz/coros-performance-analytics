@@ -141,7 +141,7 @@ export default function Sidebar() {
           <circle className="brand-mark-core" cx="16" cy="16" r="2.25" />
         </svg>
         <h1>
-          <span>COROS</span>
+          <span className="brand-word-primary">COROS</span>
           <span className="brand-word-secondary">Core</span>
         </h1>
       </div>

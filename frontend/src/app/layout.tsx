@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono, Outfit } from "next/font/google";
+import { Barlow_Condensed, Inter, JetBrains_Mono, Outfit } from "next/font/google";
 import "../styles/globals.css";
 import "katex/dist/katex.min.css";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -8,6 +8,7 @@ import DailyFeelingCheckIn from "@/components/DailyFeelingCheckIn";
 const inter = Inter({ subsets: ["latin"], variable: "--font-body" });
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 const playfair = Outfit({ subsets: ["latin"], variable: "--font-display" });
+const barlowCondensed = Barlow_Condensed({ subsets: ["latin"], variable: "--font-brand", weight: ["600", "700", "800"] });
 const themeInitScript = `try {
   const theme = localStorage.getItem("coros-theme") === "light" ? "light" : "dark";
   document.documentElement.dataset.theme = theme;
@@ -37,7 +38,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${playfair.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${playfair.variable} ${barlowCondensed.variable}`} suppressHydrationWarning>
       <head>
         <script
           id="theme-init"
