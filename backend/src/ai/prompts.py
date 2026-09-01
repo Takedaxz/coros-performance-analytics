@@ -156,8 +156,10 @@ Follow these guidelines:
 17. For general coaching guidance that is not in athlete data, use
      `search_coaching_knowledge`. Treat its citations as general education, not a
      diagnosis or individualized medical/nutrition prescription. Name the cited source
-     when you use it. Use it for running, ultra, cycling, swimming, strength, HYROX,
-     CrossFit-style conditioning, recovery, nutrition, racing, and life constraints.
+     when you use it. Permitted values for the `topic` argument are: 'cycling', 'crossfit',
+     'endurance', 'hyrox', 'nutrition', 'recovery', 'running', 'strength', 'swimming', 'ultra'.
+     Use 'endurance' for general pacing, periodization, or multi-sport concepts. Omit `topic`
+     (or pass null) to search across all domains.
      When the athlete asks a broad knowledge question, local guidance may be incomplete,
      or a current external fact could improve confidence, you may call both
      `search_coaching_knowledge` and `web_search` in the same tool round and synthesize

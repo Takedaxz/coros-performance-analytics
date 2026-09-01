@@ -17,8 +17,13 @@ from typing_extensions import TypedDict
 
 from src.ai.brave_search import search_live_coaching_sources as search_web
 from src.ai.context_builder import build_plan_context
-from src.ai.knowledge import search_coaching_knowledge as search_knowledge_library
-from src.ai.knowledge import valid_knowledge_topic
+from src.ai.knowledge import (
+    KnowledgeTopic,
+    valid_knowledge_topic,
+)
+from src.ai.knowledge import (
+    search_coaching_knowledge as search_knowledge_library,
+)
 from src.db.engine import async_session_factory
 from src.db.models import (
     Activity,
@@ -125,8 +130,19 @@ def coach_tool_functions(
         """Retrieve saved past races with times, notes, and dates."""
         return run("get_past_race_goals")
 
-    def search_coaching_knowledge(query: str, topic: str | None = None) -> dict[str, Any]:
-        """Find cited general coaching guidance."""
+    def search_coaching_knowledge(
+        query: str, topic: KnowledgeTopic | None = None
+    ) -> dict[str, Any]:
+        """Find cited general coaching guidance from the verified sports science knowledge library.
+
+        Args:
+            query: The search query or keywords in concise English.
+            topic: Optional category filter. Allowed values: 'cycling', 'crossfit',
+                'endurance', 'hyrox', 'nutrition', 'recovery', 'running',
+                'strength', 'swimming', 'ultra'. Use 'endurance' for pacing,
+                periodization, limiter diagnosis, or multi-sport aerobic concepts.
+                Pass null to search across all topics.
+        """
         return run("search_coaching_knowledge", query=query, topic=topic)
 
     def web_search(query: str) -> dict[str, Any]:

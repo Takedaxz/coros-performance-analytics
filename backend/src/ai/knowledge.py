@@ -4,6 +4,20 @@ import re
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
+from typing import Literal
+
+KnowledgeTopic = Literal[
+    "cycling",
+    "crossfit",
+    "endurance",
+    "hyrox",
+    "nutrition",
+    "recovery",
+    "running",
+    "strength",
+    "swimming",
+    "ultra",
+]
 
 _KNOWLEDGE_DIR = Path(__file__).resolve().parents[2] / "knowledge" / "coaching"
 _MAX_RESULTS = 3
@@ -106,7 +120,7 @@ def _library() -> tuple[KnowledgeSection, ...]:
     )
 
 
-def search_coaching_knowledge(query: str, topic: str | None = None) -> list[str]:
+def search_coaching_knowledge(query: str, topic: KnowledgeTopic | None = None) -> list[str]:
     """Return up to three concise, in-document-cited knowledge excerpts."""
     query_terms = _terms(query)
     if not query_terms:
