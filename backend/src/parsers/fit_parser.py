@@ -4,7 +4,7 @@ Extracts Session, Lap, and Record messages from .FIT files into
 canonical dataclass results. Never mutates inputs.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from io import BytesIO
 from typing import Any
@@ -72,6 +72,7 @@ class ParsedSession:
     avg_power_w: int | None = None
     max_power_w: int | None = None
     normalized_power_w: int | None = None
+    pool_length_m: float | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,18 @@ class ParsedPause:
 
 
 @dataclass(frozen=True)
+class ParsedSwimLength:
+    """One active pool length from a FIT Length message."""
+
+    start_time: datetime
+    elapsed_s: float
+    stroke_count: int
+    stroke_rate_spm: int | None
+    stroke_type: str | None
+    distance_m: float | None = None
+
+
+@dataclass(frozen=True)
 class ParsedFitFile:
     """Complete parsed result from a FIT file."""
 
@@ -90,6 +103,7 @@ class ParsedFitFile:
     laps: list[ParsedLap] = field(default_factory=list)
     pauses: list[ParsedPause] = field(default_factory=list)
     records: list[ParsedRecord] = field(default_factory=list)
+    swim_lengths: list[ParsedSwimLength] = field(default_factory=list)
     device_manufacturer: str | None = None
     device_product: str | None = None
     device_serial: str | None = None
@@ -172,6 +186,7 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
     laps: list[ParsedLap] = []
     pauses: list[ParsedPause] = []
     records: list[ParsedRecord] = []
+    swim_lengths: list[ParsedSwimLength] = []
     errors: list[str] = []
     device_manufacturer: str | None = None
     device_product: str | None = None
@@ -221,6 +236,7 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
                             avg_power_w=_get_field_value(frame, "avg_power"),
                             max_power_w=_get_field_value(frame, "max_power"),
                             normalized_power_w=_get_field_value(frame, "normalized_power"),
+                            pool_length_m=_get_field_value(frame, "pool_length"),
                         )
                     )
 
@@ -295,14 +311,52 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
                         )
                     )
 
+                elif msg_name == "length":
+                    if _get_field_value(frame, "length_type") != "active":
+                        continue
+                    start_time = _get_field_value(frame, "start_time")
+                    elapsed_s = _get_field_value(frame, "total_timer_time") or _get_field_value(
+                        frame, "total_elapsed_time"
+                    )
+                    stroke_count = _get_field_value(frame, "total_strokes")
+                    if (
+                        not isinstance(start_time, datetime)
+                        or not isinstance(elapsed_s, (int, float))
+                        or elapsed_s <= 0
+                        or not isinstance(stroke_count, int)
+                        or stroke_count <= 0
+                    ):
+                        continue
+                    swim_stroke = _get_field_value(frame, "swim_stroke")
+                    stroke_type = str(swim_stroke) if swim_stroke not in {None, "none"} else None
+                    stroke_rate = _get_field_value(frame, "avg_swimming_cadence")
+                    swim_lengths.append(
+                        ParsedSwimLength(
+                            start_time=start_time,
+                            elapsed_s=float(elapsed_s),
+                            stroke_count=stroke_count,
+                            stroke_rate_spm=stroke_rate if isinstance(stroke_rate, int) else None,
+                            stroke_type=stroke_type,
+                        )
+                    )
+
     except Exception as exc:
         errors.append(f"FIT parse error: {exc}")
 
+    pool_length_m = next(
+        (
+            session.pool_length_m
+            for session in sessions
+            if session.subsport == "lap_swimming" and session.distance_m is not None
+        ),
+        None,
+    )
     return ParsedFitFile(
         sessions=sessions,
         laps=laps,
         pauses=pauses,
         records=records,
+        swim_lengths=[replace(length, distance_m=pool_length_m) for length in swim_lengths],
         device_manufacturer=device_manufacturer,
         device_product=device_product,
         device_serial=device_serial,

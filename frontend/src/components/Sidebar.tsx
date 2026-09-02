@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReactNode, useRef } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { nextTheme, type Theme } from "@/lib/theme";
 
 interface NavItem {
@@ -103,9 +103,35 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   },
 ];
 
+const AI_LATEST_PATH_KEY = "coros_latest_ai_path";
+
 export default function Sidebar() {
   const pathname = usePathname();
   const transitionTimeout = useRef<number | null>(null);
+  const [latestAiPath, setLatestAiPath] = useState("/ai");
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(AI_LATEST_PATH_KEY);
+      if (saved && (saved.startsWith("/ai/") || saved === "/ai")) {
+        setLatestAiPath(saved);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (pathname.startsWith("/ai/")) {
+      try {
+        localStorage.setItem(AI_LATEST_PATH_KEY, pathname);
+        setLatestAiPath(pathname);
+      } catch {}
+    } else if (pathname === "/ai") {
+      try {
+        localStorage.setItem(AI_LATEST_PATH_KEY, "/ai");
+        setLatestAiPath("/ai");
+      } catch {}
+    }
+  }, [pathname]);
 
   function toggleTheme() {
     const root = document.documentElement;
@@ -149,18 +175,33 @@ export default function Sidebar() {
         {NAV_SECTIONS.map((section) => (
           <div className="nav-section" key={section.label}>
             <div className="nav-section-label">{section.label}</div>
-            {section.items.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`nav-link ${pathname === item.href ? "active" : ""}`}
-                aria-label={item.label}
-                title={item.label}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </Link>
-            ))}
+            {section.items.map((item) => {
+              const isAi = item.href === "/ai";
+              const href = isAi ? latestAiPath : item.href;
+              const isActive = isAi ? pathname.startsWith("/ai") : pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={href}
+                  className={`nav-link ${isActive ? "active" : ""}`}
+                  aria-label={item.label}
+                  title={item.label}
+                  onClick={() => {
+                    if (isAi) {
+                      try {
+                        const saved = localStorage.getItem(AI_LATEST_PATH_KEY);
+                        if (saved && (saved.startsWith("/ai/") || saved === "/ai")) {
+                          setLatestAiPath(saved);
+                        }
+                      } catch {}
+                    }
+                  }}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
           </div>
         ))}
       </nav>

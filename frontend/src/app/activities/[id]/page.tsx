@@ -71,9 +71,37 @@ interface ActivityDetail {
   threshold_hr_bpm?: number;
   threshold_pace_s_per_km?: number;
   laps: ActivityLap[];
+  swim_lengths?: SwimLength[];
   pauses?: ActivityPause[];
   lap_splits?: Record<string, ActivitySplit[]>;
 }
+
+interface SwimLength {
+  start_time: string;
+  elapsed_s: number;
+  distance_m: number;
+  stroke_count: number;
+  stroke_rate_spm?: number;
+  stroke_type?: string;
+  swolf: number;
+  distance_per_stroke_m: number;
+}
+
+type SwimMetricKey = "stroke_rate_spm" | "swolf" | "distance_per_stroke_m";
+
+interface SwimMetric {
+  key: SwimMetricKey;
+  label: string;
+  unit: string;
+  color: string;
+  decimals: number;
+}
+
+const SWIM_METRICS: SwimMetric[] = [
+  { key: "stroke_rate_spm", label: "Stroke rate", unit: "spm", color: "#ff4f87", decimals: 0 },
+  { key: "swolf", label: "SWOLF", unit: "", color: "#36bed2", decimals: 0 },
+  { key: "distance_per_stroke_m", label: "Distance / stroke", unit: "m", color: "#9d7bff", decimals: 2 },
+];
 
 interface ActivityPause {
   start_elapsed_s: number;
@@ -670,6 +698,8 @@ export default function ActivityDetailPage() {
   const [expandedTriathlonLeg, setExpandedTriathlonLeg] = useState<string | null>(null);
   const [selectedDynamicsMetrics, setSelectedDynamicsMetrics] =
     useState<RunningDynamicsKey[]>(["cadence"]);
+  const [selectedSwimMetrics, setSelectedSwimMetrics] =
+    useState<SwimMetricKey[]>(["stroke_rate_spm"]);
   const [showTelemetryPopup, setShowTelemetryPopup] = useState(true);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
 
@@ -1083,6 +1113,38 @@ export default function ActivityDetailPage() {
   const isHyrox = !isStrength && (activity.subsport === "1200" || activityTitle.includes("hyrox"));
   const strength = isStrength ? activity.strength_detail : undefined;
   const isSwim = activity.sport === "swim";
+  const swimLengths = activity.swim_lengths ?? [];
+  const availableSwimMetrics = SWIM_METRICS.filter((metric) =>
+    swimLengths.some((length) => length[metric.key] != null),
+  );
+  const activeSwimMetrics = availableSwimMetrics.filter((metric) =>
+    selectedSwimMetrics.includes(metric.key),
+  );
+  const visibleSwimMetrics = activeSwimMetrics.length
+    ? activeSwimMetrics
+    : availableSwimMetrics.slice(0, 1);
+  const swimMetricAverages = visibleSwimMetrics.map((metric) => {
+    const values = swimLengths.flatMap((length) => {
+      const value = length[metric.key];
+      return typeof value === "number" && value > 0 ? [value] : [];
+    });
+    return {
+      metric,
+      average: values.length
+        ? values.reduce((total, value) => total + value, 0) / values.length
+        : null,
+    };
+  });
+  const toggleSwimMetric = (key: SwimMetricKey) => {
+    setSelectedSwimMetrics((selected) =>
+      selected.includes(key)
+        ? selected.length === 1
+          ? selected
+          : selected.filter((metric) => metric !== key)
+        : [...selected, key],
+    );
+  };
+  const swimChartData = swimLengths.map((length, index) => ({ length: index + 1, ...length }));
   const triathlonLegs = ["swim", "ride", "run"]
     .map((sport) => ({
       sport,
@@ -1458,6 +1520,77 @@ export default function ActivityDetailPage() {
       </div>
     );
   const telemetryCard = isRun ? runTelemetryCards : combinedTelemetryCard;
+  const swimMetricsCard = isSwim && visibleSwimMetrics.length > 0 && (
+    <section className="card activity-zone-card running-dynamics-card" id="chart-swim-metrics" style={{ marginBottom: "var(--space-6)" }}>
+      <div className="activity-zone-header">
+        <div>
+          <span className="card-title">Swim Metrics</span>
+        </div>
+      </div>
+      <div className="running-dynamics-tabs" role="group" aria-label="Swim metrics">
+        {availableSwimMetrics.map((metric) => (
+          <button
+            type="button"
+            aria-pressed={visibleSwimMetrics.some(({ key }) => key === metric.key)}
+            className={visibleSwimMetrics.some(({ key }) => key === metric.key) ? "active" : ""}
+            style={visibleSwimMetrics.some(({ key }) => key === metric.key) ? { backgroundColor: `${metric.color}18`, borderColor: metric.color, color: metric.color } : undefined}
+            key={metric.key}
+            onClick={() => toggleSwimMetric(metric.key)}
+          >
+            {metric.label}
+          </button>
+        ))}
+      </div>
+      <div className="running-dynamics-legend" aria-label="Selected swim metric averages">
+        {swimMetricAverages.map(({ metric, average }) => (
+          <span key={metric.key}>
+            <i style={{ background: metric.color }} />
+            {metric.label}
+            {average != null && (
+              <strong className="mono">
+                {average.toFixed(metric.decimals)} {metric.unit}
+              </strong>
+            )}
+          </span>
+        ))}
+      </div>
+      <div className="activity-zone-chart running-dynamics-chart">
+        <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 260 }}>
+          <LineChart data={swimChartData} margin={{ top: 16, right: 12, bottom: 8, left: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
+            <XAxis dataKey="length" type="number" domain={[0.5, swimChartData.length + 0.5]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `#${Math.round(value)}`} axisLine={false} />
+            {visibleSwimMetrics.map((metric) => (
+              <YAxis key={metric.key} yAxisId={metric.key} hide domain={["dataMin - 1", "dataMax + 1"]} />
+            ))}
+            <Tooltip
+              formatter={(value, name) => {
+                const metric = SWIM_METRICS.find(({ label }) => label === name);
+                return metric
+                  ? [`${Number(value).toFixed(metric.decimals)} ${metric.unit}`, metric.label]
+                  : [value, name];
+              }}
+              labelFormatter={(value) => `Length ${value}`}
+            />
+            {visibleSwimMetrics.map((metric) => (
+              <Line
+                key={metric.key}
+                yAxisId={metric.key}
+                type="linear"
+                dataKey={metric.key}
+                stroke={metric.color}
+                strokeWidth={2.25}
+                dot={false}
+                activeDot={{ r: 3 }}
+                connectNulls={false}
+                isAnimationActive={false}
+                name={metric.label}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </section>
+  );
 
   return (
     <div className="app-layout">
@@ -1496,6 +1629,7 @@ export default function ActivityDetailPage() {
           ) : (
             telemetryCard
           )}
+          {swimMetricsCard}
 
           {strength && (
             <div className="card breakdown-card" style={{ marginTop: "var(--space-6)", marginBottom: "var(--space-6)" }}>

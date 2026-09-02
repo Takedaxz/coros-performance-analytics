@@ -8,6 +8,7 @@ import pytest
 from src.ai import coach_tools
 from src.ai.coach_tools import (
     _activity_detail,
+    _activity_pace_fields,
     _calendar_change_proposal,
     _execute_tool,
     _health_trend,
@@ -40,6 +41,22 @@ def test_activity_tool_computes_compact_pace() -> None:
     assert _pace_s_km(3.0) == 333
     assert _pace_s_km(None) is None
     assert _lap_pace_s_km(None, 500.0, 150.0) == 300
+
+
+def test_activity_tool_separates_total_and_active_swim_pace() -> None:
+    result = _activity_pace_fields(
+        SimpleNamespace(
+            sport=SportType.SWIM,
+            distance_m=1_000.0,
+            elapsed_time_s=1_800.0,
+        ),
+        [
+            {"elapsed_s": 30.0, "distance_m": 20.0},
+            {"elapsed_s": 30.0, "distance_m": 20.0},
+        ],
+    )
+
+    assert result == {"total_pace_s_100m": 180, "active_pace_s_100m": 150}
 
 
 def test_strength_exercise_search_returns_ranked_coros_identity() -> None:

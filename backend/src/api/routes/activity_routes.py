@@ -294,6 +294,7 @@ from src.sync.api_client import CorosApiClient, CorosApiClientError
 from src.sync.sync_manager import _detail_activity_laps
 from src.metrics.derived import EfficiencyMetrics, compute_efficiency
 from src.parsers.fit_parser import parse_fit_file
+from src.swim_metrics import swim_length_metrics, swim_length_splits_by_lap
 
 logger = logging.getLogger(__name__)
 RUNNING_DYNAMICS_PARSER_VERSION = "0.4.0"
@@ -695,6 +696,42 @@ async def get_activity(
             if isinstance(source_lap_index, int) and source_lap_index < len(source_laps):
                 lap_splits.setdefault(str(source_laps[source_lap_index].lap_index), []).append(split)
 
+    swim_lengths = (
+        swim_length_metrics(get_settings().raw_file_store_path, activity.source_filename)
+        if activity.sport == "swim"
+        else []
+    )
+    if swim_lengths:
+        raw_splits = swim_length_splits_by_lap(
+            swim_lengths,
+            [
+                (
+                    str(lap.lap_index),
+                    _lap_start_elapsed(lap.start_time, lap_origin),
+                    _lap_start_elapsed(lap.start_time, lap_origin) + lap.elapsed_s,
+                )
+                for lap in laps
+                if lap.distance_m is not None and lap.distance_m > 0
+            ],
+        )
+        if raw_splits:
+            for splits in raw_splits.values():
+                for split in splits:
+                    heart_rates = [
+                        record.heart_rate_bpm
+                        for record in records
+                        if (
+                            record.heart_rate_bpm is not None
+                            and record.elapsed_s is not None
+                            and split["start_elapsed_s"] <= record.elapsed_s <= split["end_elapsed_s"]
+                        )
+                    ]
+                    split["avg_hr_bpm"] = (
+                        round(sum(heart_rates) / len(heart_rates)) if heart_rates else None
+                    )
+                    split["max_hr_bpm"] = max(heart_rates) if heart_rates else None
+            lap_splits = {**lap_splits, **raw_splits}
+
     return {
         "id": activity.id,
         "sport": activity.sport,
@@ -738,6 +775,7 @@ async def get_activity(
         ),
         "laps": lap_payload,
         "lap_splits": lap_splits,
+        "swim_lengths": swim_lengths,
     }
 
 

@@ -8944,12 +8944,6 @@ details[open] > .ai-session-group-summary {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-.ai-link-empty-composer .cmd-bar,
-.ai-link-composer .cmd-bar {
-  padding-left: 56px !important;
-  padding-right: 220px !important;
-}
-
 /* Image Preview Lightbox Modal Popup */
 .image-preview-modal-overlay {
   position: fixed;

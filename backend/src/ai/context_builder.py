@@ -146,7 +146,7 @@ def _activity_header(index: int, activity: Activity) -> str:
             if activity.avg_hr_bpm and activity.max_hr_bpm
             else activity.avg_hr_bpm,
         ),
-        _metric("pace", pace),
+        _metric("total_pace" if sport == "swim" else "pace", pace),
         _metric(
             "power",
             f"{activity.avg_power_w}/{activity.max_power_w}W"

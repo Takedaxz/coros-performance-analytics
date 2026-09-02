@@ -17,6 +17,7 @@ from typing_extensions import TypedDict
 
 from src.ai.brave_search import search_live_coaching_sources as search_web
 from src.ai.context_builder import build_plan_context
+from src.config import get_settings
 from src.ai.knowledge import (
     KnowledgeTopic,
     valid_knowledge_topic,
@@ -37,6 +38,7 @@ from src.db.models import (
     SportType,
 )
 from src.strength_exercises import resolve_exercise_name
+from src.swim_metrics import active_swim_pace_s_100m, swim_length_metrics
 from src.sync.api_client import CorosApiClientError
 
 _TREND_DAYS = frozenset({7, 14, 28, 56})
@@ -221,6 +223,35 @@ def _sport_type(value: str | None) -> SportType | None:
 
 def _pace_s_km(speed_mps: float | None) -> int | None:
     return round(1_000 / speed_mps) if speed_mps and speed_mps > 0 else None
+
+
+def _activity_pace_fields(
+    activity: Any,
+    swim_lengths: list[dict[str, float | int | str | None]] | None = None,
+) -> dict[str, int | None]:
+    """Return unambiguous pace fields for the activity's sport."""
+    if activity.sport != SportType.SWIM:
+        return {"pace_s_km": _pace_s_km(getattr(activity, "avg_speed_mps", None))}
+    distance_m = getattr(activity, "distance_m", None)
+    elapsed_time_s = getattr(activity, "elapsed_time_s", None)
+    total_pace_s_100m = (
+        round(elapsed_time_s * 100 / distance_m)
+        if isinstance(distance_m, (int, float))
+        and distance_m > 0
+        and isinstance(elapsed_time_s, (int, float))
+        and elapsed_time_s > 0
+        else None
+    )
+    lengths = swim_lengths
+    if lengths is None:
+        lengths = swim_length_metrics(
+            get_settings().raw_file_store_path,
+            getattr(activity, "source_filename", None),
+        )
+    return {
+        "total_pace_s_100m": total_pace_s_100m,
+        "active_pace_s_100m": active_swim_pace_s_100m(lengths),
+    }
 
 
 def _lap_pace_s_km(speed_mps: float | None, distance_m: float | None, elapsed_s: float | None) -> int | None:
@@ -542,7 +573,7 @@ async def _health_trend(db: Any, user_id: str, days: int) -> dict[str, Any]:
                     "min": round(item.elapsed_time_s / 60, 1)
                     if item.elapsed_time_s is not None
                     else None,
-                    "pace_s_km": _pace_s_km(item.avg_speed_mps),
+                    **_activity_pace_fields(item),
                     "hr": item.avg_hr_bpm,
                     "max_hr": item.max_hr_bpm,
                     "cadence": item.avg_cadence,
@@ -728,7 +759,7 @@ async def _activities(db: Any, user_id: str, arguments: dict[str, Any]) -> dict[
                 "title": a.title,
                 "km": round(a.distance_m / 1000, 2) if a.distance_m else None,
                 "min": round(a.elapsed_time_s / 60, 1) if a.elapsed_time_s else None,
-                "pace_s_km": _pace_s_km(a.avg_speed_mps),
+                **_activity_pace_fields(a),
                 "hr": a.avg_hr_bpm,
                 "load": a.training_load_vendor,
                 "drift": a.cardiac_drift_pct_app,
@@ -848,6 +879,31 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
                         accum_powers = []
                         accum_cadences = []
 
+    swim_lengths = (
+        swim_length_metrics(get_settings().raw_file_store_path, activity.source_filename)
+        if activity.sport == SportType.SWIM
+        else []
+    )
+    swim = None
+    if swim_lengths:
+        def average(key: str) -> float | None:
+            values = [
+                value
+                for length in swim_lengths
+                if isinstance((value := length[key]), (int, float))
+            ]
+            return round(sum(values) / len(values), 2) if values else None
+
+        swim = {
+            "length_count": len(swim_lengths),
+            "pool_length_m": swim_lengths[0]["distance_m"],
+            "avg_stroke_rate_spm": average("stroke_rate_spm"),
+            "avg_swolf": average("swolf"),
+            "avg_distance_per_stroke_m": average("distance_per_stroke_m"),
+            "lengths": swim_lengths,
+        }
+    pace_fields = _activity_pace_fields(activity, swim_lengths)
+
     return {
         "activity": {
             "id": activity.id,
@@ -856,7 +912,7 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
             "title": activity.title,
             "km": round(activity.distance_m / 1000, 2) if getattr(activity, "distance_m", None) else None,
             "min": round(activity.elapsed_time_s / 60, 1) if getattr(activity, "elapsed_time_s", None) else None,
-            "pace_s_km": _pace_s_km(getattr(activity, "avg_speed_mps", None)),
+            **pace_fields,
             "hr": getattr(activity, "avg_hr_bpm", None),
             "max_hr": getattr(activity, "max_hr_bpm", None),
             "cadence": getattr(activity, "avg_cadence", None),
@@ -871,6 +927,7 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
             "elev_gain_m": getattr(activity, "elevation_gain_m", None),
             "elev_loss_m": getattr(activity, "elevation_loss_m", None),
             "strength_detail": strength_detail,
+            "swim": swim,
             **(
                 {"note": activity.activity_note}
                 if getattr(activity, "activity_note", None)

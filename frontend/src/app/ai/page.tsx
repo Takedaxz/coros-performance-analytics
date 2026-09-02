@@ -124,10 +124,24 @@ function calendarChangeActions(tool: ToolCall): CalendarChangeAction[] {
   }];
 }
 
+function formatCalendarChangeDate(dateStr: string): string {
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return dateStr;
+  const parsed = new Date(`${dateStr.slice(0, 10)}T00:00:00`);
+  if (isNaN(parsed.getTime())) return dateStr;
+  return parsed.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function calendarChangeSummary(change: CalendarChangeAction): string {
   if (!change.draft) return `${change.action} COROS workout`;
   const name = typeof change.draft.name === "string" ? change.draft.name : "Workout";
-  const date = typeof change.draft.date === "string" ? change.draft.date : "No date";
+  const rawDate = typeof change.draft.date === "string" ? change.draft.date : "No date";
+  const date = rawDate !== "No date" ? formatCalendarChangeDate(rawDate) : rawDate;
   const sport = typeof change.draft.sport === "string" ? change.draft.sport : "workout";
   const poolLength = typeof change.draft.pool_length_m === "number" ? ` · ${change.draft.pool_length_m} m pool` : "";
   return `${name} · ${date} · ${sport}${poolLength}`;
@@ -1581,6 +1595,11 @@ export default function AiPage() {
 
   useEffect(() => {
     routeSessionIdRef.current = routeSessionId;
+    if (routeSessionId) {
+      try {
+        localStorage.setItem("coros_latest_ai_path", `/ai/${encodeURIComponent(routeSessionId)}`);
+      } catch {}
+    }
   }, [routeSessionId]);
 
   function handleResponseSelection(event: ReactMouseEvent<HTMLDivElement>) {
@@ -1622,7 +1641,7 @@ export default function AiPage() {
   function handleComposerChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
     const textarea = event.currentTarget;
     setInput(textarea.value);
-    setComposerNeedsBottomSpace(textarea.value.length > 0 && textarea.scrollHeight > 80);
+    setComposerNeedsBottomSpace(textarea.value.length > 0 && textarea.clientHeight > 80);
   }
 
   async function confirmCalendarChange(change: CalendarChangeAction, key: string, closeReview = true) {
@@ -2079,6 +2098,9 @@ export default function AiPage() {
     setSelectedResponseExcerpt(null);
     setDraftProjectId(null);
     setSelectedModel(defaultModel);
+    try {
+      localStorage.setItem("coros_latest_ai_path", "/ai");
+    } catch {}
     router.push("/ai");
   }
 
@@ -2089,6 +2111,9 @@ export default function AiPage() {
       if (routeSessionId === id) {
         setMessages([]);
         setSelectedModel(defaultModel);
+        try {
+          localStorage.setItem("coros_latest_ai_path", "/ai");
+        } catch {}
         router.replace("/ai");
       }
       fetchSessions();
@@ -2535,7 +2560,11 @@ export default function AiPage() {
 
   async function handleLandingSend(message: string, sessionId: string) {
     const sendPromise = handleSend(message, sessionId);
-    window.history.pushState(null, "", `/ai/${encodeURIComponent(sessionId)}`);
+    const sessionPath = `/ai/${encodeURIComponent(sessionId)}`;
+    window.history.pushState(null, "", sessionPath);
+    try {
+      localStorage.setItem("coros_latest_ai_path", sessionPath);
+    } catch {}
     await sendPromise;
   }
 
@@ -3891,7 +3920,7 @@ export default function AiPage() {
                         <section className={isBatch ? "calendar-change-workout" : undefined} key={itemKey}>
                           <dl className="calendar-change-summary">
                             <div><dt>Workout</dt><dd>{name}</dd></div>
-                            {date && <div><dt>Date</dt><dd>{date}</dd></div>}
+                            {date && <div><dt>Date</dt><dd title={date}>{formatCalendarChangeDate(date)}</dd></div>}
                             {sport && <div><dt>Sport</dt><dd className="calendar-change-sport">{sport}</dd></div>}
                             {poolLength !== null && <div><dt>Pool</dt><dd>{poolLength} m</dd></div>}
                           </dl>
