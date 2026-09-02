@@ -9,6 +9,7 @@ import CustomDatePicker from "@/components/CustomDatePicker";
 import FileUpload from "@/components/FileUpload";
 import ThemeToggle from "@/components/ThemeToggle";
 import PdfViewer from "@/components/PdfViewer";
+import PdfThumbnail from "@/components/PdfThumbnail";
 import ImageViewer from "@/components/ImageViewer";
 import type { SyncStatus } from "@/lib/types";
 
@@ -44,9 +45,13 @@ interface UserProfile {
   weight_kg: string;
   body_fat_pct: string;
   training_notes: string;
+  gym_equipment: string[];
+  strength_equipment_preference: "balanced" | "machines_first" | "free_weights_first";
+  pool_length_m: string;
   max_hr_bpm: number | null;
   resting_hr_bpm: number | null;
   heart_rate_reserve_bpm: number | null;
+  threshold_hr_bpm: number | null;
 }
 
 const EMPTY_GOAL: UserGoal = {
@@ -71,9 +76,13 @@ const EMPTY_PROFILE: UserProfile = {
   weight_kg: "",
   body_fat_pct: "",
   training_notes: "",
+  gym_equipment: [],
+  strength_equipment_preference: "balanced",
+  pool_length_m: "",
   max_hr_bpm: null,
   resting_hr_bpm: null,
   heart_rate_reserve_bpm: null,
+  threshold_hr_bpm: null,
 };
 
 function formatDocumentSize(bytes: number): string {
@@ -233,9 +242,13 @@ export default function SettingsPage() {
             weight_kg: data.weight_kg?.toString() ?? "",
             body_fat_pct: data.body_fat_pct?.toString() ?? "",
             training_notes: data.training_notes ?? "",
+            gym_equipment: data.gym_equipment ?? [],
+            strength_equipment_preference: data.strength_equipment_preference ?? "balanced",
+            pool_length_m: data.pool_length_m?.toString() ?? "",
             max_hr_bpm: data.max_hr_bpm ?? null,
             resting_hr_bpm: data.resting_hr_bpm ?? null,
             heart_rate_reserve_bpm: data.heart_rate_reserve_bpm ?? null,
+            threshold_hr_bpm: data.threshold_hr_bpm ?? null,
           });
           profileLoaded.current = true;
         }
@@ -323,6 +336,9 @@ export default function SettingsPage() {
             weight_kg: profile.weight_kg ? parseFloat(profile.weight_kg) : null,
             body_fat_pct: profile.body_fat_pct ? parseFloat(profile.body_fat_pct) : null,
             training_notes: profile.training_notes || null,
+            gym_equipment: profile.gym_equipment,
+            strength_equipment_preference: profile.strength_equipment_preference,
+            pool_length_m: profile.pool_length_m ? parseFloat(profile.pool_length_m) : null,
           }),
           signal: controller.signal,
         });
@@ -542,6 +558,15 @@ export default function SettingsPage() {
     setProfileError("");
     setProfileSaved(false);
     setProfile((current) => ({ ...current, [key]: value }));
+  }
+
+  function toggleGymEquipment(equipment: string) {
+    updateProfileField(
+      "gym_equipment",
+      profile.gym_equipment.includes(equipment)
+        ? profile.gym_equipment.filter((item) => item !== equipment)
+        : [...profile.gym_equipment, equipment],
+    );
   }
 
   const [targetHours, targetMinutes, targetSeconds] = targetTimeParts(goalForm.goal_target_time);
@@ -774,6 +799,10 @@ export default function SettingsPage() {
                     <div>
                       <span>Heart rate reserve</span>
                       <strong>{profile.heart_rate_reserve_bpm ?? "--"} bpm</strong>
+                    </div>
+                    <div>
+                      <span>Threshold heart rate</span>
+                      <strong>{profile.threshold_hr_bpm ?? "--"} bpm</strong>
                     </div>
                   </div>
                   {profileError && <p className="settings-feedback is-error">{profileError}</p>}
@@ -1058,6 +1087,11 @@ export default function SettingsPage() {
                               src={`${apiBase}/api/settings/documents/${document.id}/file`}
                               alt={document.original_filename}
                             />
+                          ) : document.content_type === "application/pdf" || document.original_filename.toLowerCase().endsWith(".pdf") ? (
+                            <PdfThumbnail
+                              url={`${apiBase}/api/settings/documents/${document.id}/file`}
+                              filename={document.original_filename}
+                            />
                           ) : (
                             <iframe
                               src={`${apiBase}/api/settings/documents/${document.id}/file#toolbar=0&view=FitH`}
@@ -1110,6 +1144,63 @@ export default function SettingsPage() {
                     <span className="settings-help">Use short, factual notes.</span>
                   </div>
                   {profileError && <p className="settings-feedback is-error">{profileError}</p>}
+                </div>
+
+                <div className="settings-subsection" id="settings-training-setup">
+                  <div className="settings-subsection-heading settings-training-setup-heading">
+                    <div>
+                      <h3>Training setup</h3>
+                      <p>AI Coach uses these defaults when creating strength and pool workouts.</p>
+                    </div>
+                  </div>
+                  <div className="settings-field">
+                    <label>Available gym equipment</label>
+                    <div className="settings-equipment-options">
+                      {[
+                        ["machines", "Machines"],
+                        ["barbell_rack", "Barbell & rack"],
+                        ["dumbbells", "Dumbbells"],
+                        ["cable", "Cable"],
+                        ["kettlebells", "Kettlebells"],
+                        ["bodyweight", "Bodyweight"],
+                      ].map(([value, label]) => (
+                        <label className="settings-equipment-option" key={value}>
+                          <input type="checkbox" checked={profile.gym_equipment.includes(value)} onChange={() => toggleGymEquipment(value)} />
+                          <span>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="settings-training-setup-controls">
+                    <div className="settings-field">
+                      <label id="strength-equipment-preference-label">Strength workout style</label>
+                      <SingleSelect
+                        ariaLabel="Strength workout style"
+                        id="strength-equipment-preference"
+                        value={profile.strength_equipment_preference}
+                        options={[
+                          { value: "balanced", label: "Balanced equipment" },
+                          { value: "machines_first", label: "Machines & cable first" },
+                          { value: "free_weights_first", label: "Free weights first" },
+                        ]}
+                        onChange={(value) => updateProfileField("strength_equipment_preference", value as UserProfile["strength_equipment_preference"])}
+                      />
+                    </div>
+                    <div className="settings-field">
+                      <label htmlFor="default-pool-length">Default pool length <span>m</span></label>
+                      <NumberStepper
+                        ariaLabel="Default pool length in metres"
+                        id="default-pool-length"
+                        min={10}
+                        max={100}
+                        step={1}
+                        placeholder="25"
+                        value={profile.pool_length_m}
+                        onChange={(value) => updateProfileField("pool_length_m", value)}
+                      />
+                    </div>
+                  </div>
+                  <span className="settings-help">Leave pool length blank when you use different pools. AI Coach will ask before scheduling a swim.</span>
                 </div>
               </section>
 

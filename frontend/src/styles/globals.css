@@ -2200,6 +2200,46 @@ a:hover {
   letter-spacing: 0.06em;
 }
 
+.chart-insight-pills-group {
+  align-items: center;
+  display: inline-flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chart-insight-pill {
+  align-items: center;
+  background: var(--color-surface-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  box-sizing: border-box;
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  gap: 7px;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.chart-insight-pill .pill-label {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.chart-insight-pill strong {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
 .card-value {
   align-items: baseline;
   display: flex;
@@ -4073,11 +4113,80 @@ table.data-table .lap-split-table tr:hover td {
 .plan-day-workout-step, .plan-day-workout-repeat { background: var(--color-surface-secondary); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px; }
 .plan-day-workout-step strong, .plan-day-workout-repeat strong { color: var(--color-text-primary); display: block; font-size: 12px; }
 .plan-day-workout-step small { color: var(--color-text-muted); display: block; font-size: 10px; margin-top: 2px; }
-.plan-day-workout-step b { color: var(--color-text-primary); font-size: 13px; }
+.plan-day-workout-step b { color: var(--color-text-primary); font-size: 13px; white-space: nowrap; }
 .plan-day-workout-repeat { display: grid; gap: 7px; }
 .plan-day-workout-step.is-nested { background: transparent; border: 0; border-left: 2px solid color-mix(in srgb, var(--color-accent-primary) 50%, transparent); border-radius: 0; margin-left: 4px; padding: 7px 0 7px 9px; }
 .plan-day-workout-step.is-nested.is-rest { border-left-color: #8d99ac; }
 .plan-day-workout-step.is-nested.is-rest strong { color: #8d99ac; }
+.plan-day-workout-step.is-nested.is-warmup { border-left-color: #e7a225; }
+.plan-day-workout-step.is-nested.is-cooldown { border-left-color: #35b9d5; }
+
+.plan-day-workout-step-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-day-workout-step > div:first-child {
+  flex: 1;
+  min-width: 0;
+  padding-right: var(--space-2);
+}
+
+.plan-day-workout-step-meta {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.plan-day-workout-video-btn {
+  align-items: center;
+  background: var(--color-surface-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  transition: all var(--transition-fast);
+  width: 24px;
+}
+
+.plan-day-workout-video-btn:hover {
+  background: var(--color-surface-interactive);
+  border-color: var(--border-color-hover);
+  color: var(--color-text-primary);
+}
+
+.plan-day-workout-video-btn.is-active {
+  background: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+  color: #ffffff;
+}
+
+.plan-day-workout-exercise-video {
+  background: var(--color-bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  margin-top: 6px;
+  overflow: hidden;
+  padding: 6px;
+}
+
+.plan-day-workout-exercise-video.is-nested {
+  margin-left: 13px;
+}
+
+.plan-day-workout-exercise-video video {
+  aspect-ratio: 16 / 9;
+  border-radius: calc(var(--radius-md) - 2px);
+  display: block;
+  width: 100%;
+}
 
 .plan-workout-actions {
   display: flex;
@@ -10090,6 +10199,10 @@ details[open] > .ai-session-group-summary {
   overflow-wrap: anywhere;
 }
 
+.calendar-change-summary dd.calendar-change-sport {
+  text-transform: capitalize;
+}
+
 .calendar-change-description {
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
@@ -11289,6 +11402,121 @@ details[open] > .ai-session-group-summary {
   font-size: 11px;
 }
 
+.settings-equipment-options {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-width: 720px;
+}
+
+.settings-equipment-option {
+  align-items: center;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: var(--text-sm);
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 12px;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-equipment-option:hover {
+  background: var(--color-surface-secondary);
+  border-color: var(--border-color-hover);
+}
+
+.settings-equipment-option:has(input:checked) {
+  background: color-mix(in srgb, var(--color-accent-primary) 8%, var(--color-bg-primary));
+  border-color: color-mix(in srgb, var(--color-accent-primary) 52%, var(--border-color));
+  color: var(--color-text-primary);
+}
+
+.settings-equipment-option input {
+  appearance: none;
+  accent-color: var(--color-accent-primary);
+  border: 1px solid var(--color-text-muted);
+  border-radius: 4px;
+  display: grid;
+  height: 14px;
+  place-content: center;
+  margin: 0;
+  width: 14px;
+}
+
+.settings-equipment-option input::before {
+  background: var(--color-bg-primary);
+  content: "";
+  height: 6px;
+  transform: scale(0);
+  transition: transform var(--transition-fast);
+  width: 6px;
+}
+
+.settings-equipment-option input:checked {
+  background: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+}
+
+.settings-equipment-option input:checked::before {
+  transform: scale(1);
+}
+
+.settings-equipment-option input:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+.settings-training-setup-heading {
+  align-items: flex-start;
+}
+
+.settings-training-setup-status {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  padding-top: 2px;
+  white-space: nowrap;
+}
+
+.settings-training-setup-controls {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 0.45fr);
+  margin-top: var(--space-5);
+  max-width: 720px;
+}
+
+#settings-training-setup .settings-field {
+  gap: 10px;
+}
+
+#settings-training-setup .settings-help {
+  display: block;
+  margin-top: var(--space-4);
+}
+
+#settings-training-setup .single-select-menu {
+  bottom: calc(100% + 4px);
+  top: auto;
+}
+
+@media (max-width: 700px) {
+  .settings-equipment-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-training-setup-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-training-setup-status {
+    display: none;
+  }
+}
+
 .settings-document-link {
   align-items: center;
   background: none;
@@ -11429,9 +11657,11 @@ details[open] > .ai-session-group-summary {
   width: 100%;
 }
 
-.settings-doc-card-thumb img {
+.settings-doc-card-thumb img,
+.settings-doc-card-thumb canvas {
   height: 100%;
   object-fit: cover;
+  object-position: top center;
   width: 100%;
 }
 
@@ -11439,7 +11669,41 @@ details[open] > .ai-session-group-summary {
   border: none;
   height: 100%;
   pointer-events: none;
+  scrollbar-width: none;
   width: 100%;
+}
+
+.settings-doc-card-thumb iframe::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-doc-card-fallback {
+  align-items: center;
+  color: var(--color-text-muted);
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  gap: var(--space-1);
+  justify-content: center;
+}
+
+.settings-doc-card-loading {
+  align-items: center;
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  position: absolute;
+  width: 100%;
+}
+
+.settings-thumb-spinner {
+  animation: spin 0.8s linear infinite;
+  border: 2px solid var(--border-color);
+  border-radius: 50%;
+  border-top-color: var(--color-accent-primary);
+  height: 20px;
+  width: 20px;
 }
 
 .settings-doc-card-info {
@@ -11860,6 +12124,7 @@ details[open] > .ai-session-group-summary {
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-width: max-content;
   width: 100%;
   gap: 20px;
 }
@@ -11872,8 +12137,7 @@ details[open] > .ai-session-group-summary {
 
 .pdf-page-canvas {
   display: block;
-  max-width: 100%;
-  height: auto;
+  max-width: none;
   background: #ffffff;
   border-radius: var(--radius-sm);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);

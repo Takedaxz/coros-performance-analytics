@@ -94,6 +94,15 @@ def _stream_text(chunk: AIMessageChunk, thinking_open: bool) -> tuple[str, bool]
     return "", thinking_open
 
 
+def _tool_activity(response: AIMessage) -> str:
+    names = [
+        str(call.get("name", "")).removeprefix("get_").replace("_", " ")
+        for call in response.tool_calls
+    ]
+    readable_names = [name for name in names if name]
+    return f"Checking {', '.join(readable_names) or 'training data'}."
+
+
 def _tool_result(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"), default=str)
 
@@ -254,7 +263,6 @@ def ask_coach_with_tools_stream(
 
     for _ in range(MAX_TOOL_CALLS):
         response: AIMessageChunk | None = None
-        tool_round_has_text = False
         for chunk in model_with_tools.stream(messages):
             if response is None:
                 response = cast("AIMessageChunk", chunk)
@@ -262,7 +270,6 @@ def ask_coach_with_tools_stream(
                 response = cast("AIMessageChunk", response + chunk)
             text, thinking_open = _stream_text(chunk, thinking_open)
             if text:
-                tool_round_has_text = True
                 yield text
 
         if response is None or not response.tool_calls:
@@ -270,8 +277,11 @@ def ask_coach_with_tools_stream(
                 yield "</think>\n"
             return
 
-        if tool_round_has_text:
-            yield "<tool-thought>\n"
+        activity = _tool_activity(_streamed_tool_response(response))
+        if thinking_open:
+            yield f"\n{activity}</think>\n<tool-thought>\n"
+        else:
+            yield f"<think>{activity}</think>\n<tool-thought>\n"
         thinking_open = False
 
         _append_tool_results(_streamed_tool_response(response), tools_by_name, messages, tool_calls)

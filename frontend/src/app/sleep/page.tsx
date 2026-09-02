@@ -18,6 +18,7 @@ import PageTitle from "@/components/PageTitle";
 import MetricCard from "@/components/MetricCard";
 import SingleSelect from "@/components/SingleSelect";
 import { FEELING_OPTIONS, type DailyFeeling, type FeelingLevel } from "@/components/DailyFeelingCheckIn";
+import { ChartInsightPill, computeSeriesStats, formatSleepHours } from "@/components/ChartInsightPill";
 import type { HealthDay, SleepSummary } from "@/lib/types";
 
 interface SleepTooltipEntry {
@@ -449,6 +450,28 @@ export default function SleepPage() {
     readiness: h.readiness_score_app || 0,
   }));
 
+  const hrvStats = useMemo(() => {
+    return computeSeriesStats(hrvData.map((d) => (d.hrv > 0 ? d.hrv : null)));
+  }, [hrvData]);
+
+  const sleepStats = useMemo(() => {
+    return computeSeriesStats(
+      sleepData.map((d) => {
+        const sleepHours = d.deep + d.rem + d.light + d.nap;
+        return sleepHours > 0 ? sleepHours : null;
+      }),
+      2,
+    );
+  }, [sleepData]);
+
+  const readinessStats = useMemo(() => {
+    return computeSeriesStats(readinessData.map((d) => (d.readiness > 0 ? d.readiness : null)));
+  }, [readinessData]);
+
+  const rhrStats = useMemo(() => {
+    return computeSeriesStats(rhrData.map((d) => (d.rhr > 0 ? d.rhr : null)));
+  }, [rhrData]);
+
   const average = (values: number[]): number | null => (
     values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null
   );
@@ -809,6 +832,15 @@ export default function SleepPage() {
           <div className="card" style={{ marginBottom: "var(--space-6)" }} id="chart-hrv-trend">
             <div className="card-header">
               <span className="card-title">Heart Rate Variability</span>
+              {hrvStats.sevenDayAvg !== null && (
+                <ChartInsightPill
+                  sevenDayAvg={hrvStats.sevenDayAvg}
+                  windowAvg={hrvStats.windowAvg}
+                  unit="ms"
+                  sevenDayTooltip={`7-day average: ${hrvStats.sevenDayAvg} ms`}
+                  windowTooltip={`Visible window average: ${hrvStats.windowAvg ?? "--"} ms`}
+                />
+              )}
             </div>
             <ResponsiveContainer width="100%" height={240}>
               <AreaChart data={hrvData}>
@@ -833,6 +865,14 @@ export default function SleepPage() {
             <div className="card" id="chart-sleep-stages">
               <div className="card-header">
                 <span className="card-title">Sleep Stage Breakdown</span>
+                {sleepStats.sevenDayAvg !== null && (
+                  <ChartInsightPill
+                    sevenDayAvg={formatSleepHours(sleepStats.sevenDayAvg)}
+                    windowAvg={sleepStats.windowAvg !== null ? formatSleepHours(sleepStats.windowAvg) : null}
+                    sevenDayTooltip={`7-day sleep average: ${formatSleepHours(sleepStats.sevenDayAvg)}`}
+                    windowTooltip={`Visible window sleep average: ${sleepStats.windowAvg !== null ? formatSleepHours(sleepStats.windowAvg) : "--"}`}
+                  />
+                )}
               </div>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={sleepData}>
@@ -857,6 +897,15 @@ export default function SleepPage() {
             <div className="card" id="chart-recovery">
               <div className="card-header">
                 <span className="card-title">Daily Readiness</span>
+                {readinessStats.sevenDayAvg !== null && (
+                  <ChartInsightPill
+                    sevenDayAvg={readinessStats.sevenDayAvg}
+                    windowAvg={readinessStats.windowAvg}
+                    unit="%"
+                    sevenDayTooltip={`7-day readiness average: ${readinessStats.sevenDayAvg}%`}
+                    windowTooltip={`Visible window readiness average: ${readinessStats.windowAvg ?? "--"}%`}
+                  />
+                )}
               </div>
               <ResponsiveContainer width="100%" height={220}>
                 <AreaChart data={readinessData}>
@@ -880,6 +929,15 @@ export default function SleepPage() {
           <div className="card" id="chart-rhr">
             <div className="card-header">
               <span className="card-title">Resting Heart Rate History</span>
+              {rhrStats.sevenDayAvg !== null && (
+                <ChartInsightPill
+                  sevenDayAvg={rhrStats.sevenDayAvg}
+                  windowAvg={rhrStats.windowAvg}
+                  unit="bpm"
+                  sevenDayTooltip={`7-day RHR average: ${rhrStats.sevenDayAvg} bpm`}
+                  windowTooltip={`Visible window RHR average: ${rhrStats.windowAvg ?? "--"} bpm`}
+                />
+              )}
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={rhrData}>

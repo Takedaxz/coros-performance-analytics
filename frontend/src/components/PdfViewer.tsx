@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { loadPdfJs } from "@/lib/pdfjs";
 
 interface PdfViewerProps {
   url: string;
@@ -9,8 +10,15 @@ interface PdfViewerProps {
 
 export default function PdfViewer({ url, filename }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const userAdjustedRef = useRef<boolean>(false);
   const [numPages, setNumPages] = useState<number>(0);
-  const [scale, setScale] = useState<number>(1.15);
+  const [scale, setScale] = useState<number>(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      const available = Math.max(280, window.innerWidth - 32);
+      return parseFloat(Math.min(1.0, Math.max(0.35, available / 595)).toFixed(2));
+    }
+    return 1.15;
+  });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,34 +30,7 @@ export default function PdfViewer({ url, filename }: PdfViewerProps) {
       setError(null);
 
       try {
-        if (!(window as unknown as { pdfjsLib?: unknown }).pdfjsLib) {
-          await new Promise<void>((resolve, reject) => {
-            const script = document.createElement("script");
-            script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-            script.async = true;
-            script.onload = () => resolve();
-            script.onerror = () => reject(new Error("Failed to load PDF engine"));
-            document.head.appendChild(script);
-          });
-        }
-
-        const pdfjs = (window as unknown as {
-          pdfjsLib: {
-            GlobalWorkerOptions: { workerSrc: string };
-            getDocument: (options: { url: string; withCredentials?: boolean }) => {
-              promise: Promise<{
-                numPages: number;
-                getPage: (num: number) => Promise<{
-                  getViewport: (options: { scale: number }) => { width: number; height: number };
-                  render: (options: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => { promise: Promise<void> };
-                }>;
-              }>;
-            };
-          };
-        }).pdfjsLib;
-
-        pdfjs.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        const pdfjs = await loadPdfJs();
 
         const loadingTask = pdfjs.getDocument({
           url,
@@ -60,10 +41,26 @@ export default function PdfViewer({ url, filename }: PdfViewerProps) {
         if (isCancelled) return;
 
         setNumPages(pdf.numPages);
-        setLoading(false);
 
         const container = containerRef.current;
         if (!container) return;
+
+        // Auto-fit to mobile viewport width on first load if user hasn't zoomed
+        if (!userAdjustedRef.current && typeof window !== "undefined" && window.innerWidth < 768 && pdf.numPages > 0) {
+          const firstPage = await pdf.getPage(1);
+          if (isCancelled) return;
+          const unscaled = firstPage.getViewport({ scale: 1.0 });
+          const available = (container.parentElement?.clientWidth || window.innerWidth) - 32;
+          if (unscaled.width > 0 && available > 0) {
+            const idealScale = parseFloat(Math.min(1.0, Math.max(0.35, available / unscaled.width)).toFixed(2));
+            if (Math.abs(idealScale - scale) > 0.04) {
+              setScale(idealScale);
+              return;
+            }
+          }
+        }
+
+        setLoading(false);
         container.innerHTML = "";
 
         const dpr = typeof window !== "undefined" ? Math.max(window.devicePixelRatio || 1, 2) : 2;
@@ -89,6 +86,7 @@ export default function PdfViewer({ url, filename }: PdfViewerProps) {
           canvas.height = Math.floor(viewport.height);
           canvas.style.width = `${displayWidth}px`;
           canvas.style.height = `${displayHeight}px`;
+          canvas.style.maxWidth = "none";
           canvas.style.boxShadow = "0 8px 30px rgba(0, 0, 0, 0.25)";
           canvas.style.borderRadius = "4px";
           canvas.style.background = "#FFFFFF";
@@ -120,6 +118,12 @@ export default function PdfViewer({ url, filename }: PdfViewerProps) {
     };
   }, [url, scale]);
 
+  const handleFit = () => {
+    userAdjustedRef.current = true;
+    const available = (containerRef.current?.parentElement?.clientWidth || (typeof window !== "undefined" ? window.innerWidth : 600)) - 32;
+    setScale(parseFloat(Math.min(1.5, Math.max(0.35, available / 595)).toFixed(2)));
+  };
+
   return (
     <div className="pdf-viewer-root">
       <div className="pdf-viewer-toolbar">
@@ -130,7 +134,10 @@ export default function PdfViewer({ url, filename }: PdfViewerProps) {
           <button
             type="button"
             className="pdf-tool-btn"
-            onClick={() => setScale((s) => Math.max(0.6, parseFloat((s - 0.15).toFixed(2))))}
+            onClick={() => {
+              userAdjustedRef.current = true;
+              setScale((s) => Math.max(0.3, parseFloat((s - 0.15).toFixed(2))));
+            }}
             title="Zoom out"
             aria-label="Zoom out"
           >
@@ -142,7 +149,10 @@ export default function PdfViewer({ url, filename }: PdfViewerProps) {
           <button
             type="button"
             className="pdf-tool-btn"
-            onClick={() => setScale((s) => Math.min(3.0, parseFloat((s + 0.15).toFixed(2))))}
+            onClick={() => {
+              userAdjustedRef.current = true;
+              setScale((s) => Math.min(3.0, parseFloat((s + 0.15).toFixed(2))));
+            }}
             title="Zoom in"
             aria-label="Zoom in"
           >
@@ -154,7 +164,18 @@ export default function PdfViewer({ url, filename }: PdfViewerProps) {
           <button
             type="button"
             className="pdf-tool-btn"
-            onClick={() => setScale(1.0)}
+            onClick={handleFit}
+            title="Fit to screen width"
+          >
+            Fit
+          </button>
+          <button
+            type="button"
+            className="pdf-tool-btn"
+            onClick={() => {
+              userAdjustedRef.current = true;
+              setScale(1.0);
+            }}
             title="Reset Zoom to 100%"
           >
             100%

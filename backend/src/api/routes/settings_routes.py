@@ -9,7 +9,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +20,7 @@ from src.db.credential_store import (
     save_coros_credentials,
 )
 from src.db.engine import get_db_session
-from src.db.models import Document, Goal, User
+from src.db.models import DailyHealth, Document, FitnessEstimate, Goal, User
 from src.db.owner import get_owner_id
 
 router = APIRouter()
@@ -105,6 +105,12 @@ class DocumentResponse(BaseModel):
         from_attributes = True
 
 
+GymEquipment = Literal["machines", "barbell_rack", "dumbbells", "cable", "kettlebells", "bodyweight"]
+StrengthEquipmentPreference = Literal["balanced", "machines_first", "free_weights_first"]
+_GYM_EQUIPMENT = {"machines", "barbell_rack", "dumbbells", "cable", "kettlebells", "bodyweight"}
+_STRENGTH_EQUIPMENT_PREFERENCES = {"balanced", "machines_first", "free_weights_first"}
+
+
 class UserProfile(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
@@ -115,9 +121,13 @@ class UserProfile(BaseModel):
     weight_kg: float | None = None
     body_fat_pct: float | None = None
     training_notes: str | None = None
+    gym_equipment: list[GymEquipment] = Field(default_factory=list)
+    strength_equipment_preference: StrengthEquipmentPreference = "balanced"
+    pool_length_m: float | None = Field(default=None, ge=10, le=100)
     max_hr_bpm: int | None = None
     resting_hr_bpm: int | None = None
     heart_rate_reserve_bpm: int | None = None
+    threshold_hr_bpm: int | None = None
 
 
 @router.get("/sync-config")
@@ -189,6 +199,68 @@ async def get_profile(db: AsyncSession = Depends(get_db_session)) -> UserProfile
     user = res.scalar_one_or_none()
     if not user:
         return UserProfile()
+
+    training_setup = user.device_preferences.get("ai_training_setup", {}) if user.device_preferences else {}
+    if not isinstance(training_setup, dict):
+        training_setup = {}
+    raw_equipment = training_setup.get("gym_equipment")
+    gym_equipment = (
+        [item for item in raw_equipment if isinstance(item, str) and item in _GYM_EQUIPMENT]
+        if isinstance(raw_equipment, list)
+        else []
+    )
+    raw_preference = training_setup.get("strength_equipment_preference")
+    strength_equipment_preference = (
+        raw_preference if raw_preference in _STRENGTH_EQUIPMENT_PREFERENCES else "balanced"
+    )
+    raw_pool_length = training_setup.get("pool_length_m")
+    pool_length_m = (
+        float(raw_pool_length)
+        if isinstance(raw_pool_length, (int, float)) and 10 <= raw_pool_length <= 100
+        else None
+    )
+
+    max_hr = user.max_hr_bpm
+    if max_hr is None and user.device_preferences and isinstance(user.device_preferences.get("coros_running_fitness"), dict):
+        rf_max = user.device_preferences["coros_running_fitness"].get("fitnessMaxHr")
+        if isinstance(rf_max, (int, float)) and rf_max > 0:
+            max_hr = round(rf_max)
+
+    resting_hr = user.resting_hr_bpm
+    if resting_hr is None:
+        latest_daily = await db.scalar(
+            select(DailyHealth.resting_hr_bpm)
+            .where(DailyHealth.user_id == user.id, DailyHealth.resting_hr_bpm.is_not(None))
+            .order_by(DailyHealth.date.desc())
+            .limit(1)
+        )
+        if latest_daily:
+            resting_hr = latest_daily
+
+    hrr = (
+        max_hr - resting_hr
+        if max_hr is not None and resting_hr is not None and max_hr > resting_hr
+        else None
+    )
+
+    threshold_hr = user.threshold_hr_bpm
+    if threshold_hr is None:
+        fitness = await db.scalar(
+            select(FitnessEstimate.lactate_threshold_hr)
+            .where(
+                FitnessEstimate.user_id == user.id,
+                FitnessEstimate.lactate_threshold_hr.is_not(None),
+            )
+            .order_by(FitnessEstimate.date.desc())
+            .limit(1)
+        )
+        if fitness:
+            threshold_hr = fitness
+        elif user.device_preferences and isinstance(user.device_preferences.get("coros_running_fitness"), dict):
+            rf_lthr = user.device_preferences["coros_running_fitness"].get("lthr")
+            if isinstance(rf_lthr, (int, float)) and rf_lthr > 0:
+                threshold_hr = round(rf_lthr)
+
     return UserProfile(
         first_name=user.first_name,
         last_name=user.last_name,
@@ -199,15 +271,13 @@ async def get_profile(db: AsyncSession = Depends(get_db_session)) -> UserProfile
         weight_kg=user.weight_kg,
         body_fat_pct=user.body_fat_pct,
         training_notes=user.training_notes,
-        max_hr_bpm=user.max_hr_bpm,
-        resting_hr_bpm=user.resting_hr_bpm,
-        heart_rate_reserve_bpm=(
-            user.max_hr_bpm - user.resting_hr_bpm
-            if user.max_hr_bpm is not None
-            and user.resting_hr_bpm is not None
-            and user.max_hr_bpm > user.resting_hr_bpm
-            else None
-        ),
+        gym_equipment=gym_equipment,
+        strength_equipment_preference=strength_equipment_preference,
+        pool_length_m=pool_length_m,
+        max_hr_bpm=max_hr,
+        resting_hr_bpm=resting_hr,
+        heart_rate_reserve_bpm=hrr,
+        threshold_hr_bpm=threshold_hr,
     )
 
 
@@ -235,10 +305,31 @@ async def update_profile(
     user.weight_kg = payload.weight_kg
     user.body_fat_pct = payload.body_fat_pct
     user.training_notes = payload.training_notes
+    preferences = dict(user.device_preferences or {})
+    preferences["ai_training_setup"] = {
+        "gym_equipment": payload.gym_equipment,
+        "strength_equipment_preference": payload.strength_equipment_preference,
+        "pool_length_m": payload.pool_length_m,
+    }
+    user.device_preferences = preferences
+    if payload.max_hr_bpm is not None:
+        user.max_hr_bpm = payload.max_hr_bpm
+    if payload.resting_hr_bpm is not None:
+        user.resting_hr_bpm = payload.resting_hr_bpm
+    if payload.threshold_hr_bpm is not None:
+        user.threshold_hr_bpm = payload.threshold_hr_bpm
     user.updated_at = datetime.datetime.utcnow()
 
     await db.commit()
     await db.refresh(user)
+
+    hrr = (
+        user.max_hr_bpm - user.resting_hr_bpm
+        if user.max_hr_bpm is not None
+        and user.resting_hr_bpm is not None
+        and user.max_hr_bpm > user.resting_hr_bpm
+        else None
+    )
 
     return UserProfile(
         first_name=user.first_name,
@@ -250,15 +341,13 @@ async def update_profile(
         weight_kg=user.weight_kg,
         body_fat_pct=user.body_fat_pct,
         training_notes=user.training_notes,
+        gym_equipment=payload.gym_equipment,
+        strength_equipment_preference=payload.strength_equipment_preference,
+        pool_length_m=payload.pool_length_m,
         max_hr_bpm=user.max_hr_bpm,
         resting_hr_bpm=user.resting_hr_bpm,
-        heart_rate_reserve_bpm=(
-            user.max_hr_bpm - user.resting_hr_bpm
-            if user.max_hr_bpm is not None
-            and user.resting_hr_bpm is not None
-            and user.max_hr_bpm > user.resting_hr_bpm
-            else None
-        ),
+        heart_rate_reserve_bpm=hrr,
+        threshold_hr_bpm=user.threshold_hr_bpm,
     )
 
 

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import SingleSelect from "@/components/SingleSelect";
 import CustomDatePicker from "@/components/CustomDatePicker";
+import { ChartInsightPill, computeSeriesStats, formatCompactNumber } from "@/components/ChartInsightPill";
 import {
   Area,
   AreaChart,
@@ -141,7 +142,6 @@ function ChartLegendTooltip({
 const SPORT_OPTIONS = [
   { value: "", label: "All Sports" },
   { value: "run", label: "Run" },
-  { value: "treadmill", label: "Treadmill Run" },
   { value: "trail_run", label: "Trail Run" },
   { value: "ride", label: "Ride" },
   { value: "swim", label: "Swim" },
@@ -427,6 +427,15 @@ export default function TrendsPage() {
   const invalidTrainingVolumeRange = trainingVolumeRange.start > trainingVolumeRange.end;
   const trendHistoryDays = visibleTrendDays + 6;
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 768px)");
+    setIsMobile(mql.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
 
   useEffect(() => {
     if (window.matchMedia("(max-width: 700px)").matches) {
@@ -533,6 +542,15 @@ export default function TrendsPage() {
     .slice(-visibleTrendDays);
   const caloriesChartData = addSevenDayAverage(dailyHealthData, (day) => day.active_calories_kcal)
     .slice(-visibleTrendDays);
+  const loadStats = useMemo(() => {
+    return computeSeriesStats(loadChartData.map((d) => d.total_load));
+  }, [loadChartData]);
+  const stepsStats = useMemo(() => {
+    return computeSeriesStats(stepsChartData.map((d) => d.steps));
+  }, [stepsChartData]);
+  const caloriesStats = useMemo(() => {
+    return computeSeriesStats(caloriesChartData.map((d) => d.active_calories_kcal));
+  }, [caloriesChartData]);
   const trainingVolumeMaxima = TRAINING_VOLUME_METRICS.reduce(
     (maxima, metric) => ({
       ...maxima,
@@ -567,6 +585,32 @@ export default function TrendsPage() {
     };
   });
   const trainingVolumeIsRelative = trainingVolumeMetrics.length > 1;
+  const trainingVolumeBarSize = useMemo(() => {
+    const metricCount = trainingVolumeMetrics.length;
+    const dataPoints = Math.max(1, trainingVolumeChartData.length);
+
+    if (isMobile) {
+      if (metricCount === 1) return dataPoints > 20 ? 8 : 16;
+      if (metricCount === 2) return dataPoints > 20 ? 5 : 9;
+      return dataPoints > 20 ? 4 : 7;
+    }
+
+    // Non-mobile (desktop / tablet): significantly wider bars for clear visual weight
+    if (dataPoints > 30) {
+      if (metricCount === 1) return 16;
+      if (metricCount === 2) return 9;
+      return 6;
+    }
+    if (dataPoints > 15) {
+      if (metricCount === 1) return 28;
+      if (metricCount === 2) return 16;
+      return 12;
+    }
+    // <= 15 data points (e.g. 12 months in annual view)
+    if (metricCount === 1) return 46;
+    if (metricCount === 2) return 28;
+    return 20;
+  }, [isMobile, trainingVolumeMetrics.length, trainingVolumeChartData.length]);
   const toggleTrainingVolumeMetric = (metric: TrainingVolumeMetric) => {
     setTrainingVolumeMetrics((current) => {
       if (current.includes(metric)) return current.length === 1 ? current : current.filter((item) => item !== metric);
@@ -642,7 +686,7 @@ export default function TrendsPage() {
             ) : (
               <div className="training-volume-chart">
                 <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 300 }}>
-                  <BarChart data={trainingVolumeChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={1}>
+                  <BarChart data={trainingVolumeChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={isMobile ? 1 : 2}>
                     <CartesianGrid strokeDasharray="2 6" stroke="var(--color-chart-grid)" />
                     <XAxis dataKey="label" tick={{ fill: "var(--color-text-muted)", fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} dy={4} interval="equidistantPreserveStart" />
                     <YAxis domain={trainingVolumeIsRelative ? [0, 100] : [0, "auto"]} tick={trainingVolumeIsRelative ? false : { fill: "var(--color-text-muted)", fontSize: 10 }} tickFormatter={(value: number) => trainingVolumeMetrics[0] === "distance" ? value.toFixed(value >= 10 ? 0 : 1) : trainingVolumeMetrics[0] === "duration" ? `${value.toFixed(1)}h` : `${Math.round(value)}`} axisLine={false} tickLine={false} width={trainingVolumeIsRelative ? 8 : 40} />
@@ -657,7 +701,7 @@ export default function TrendsPage() {
                         dataKey={trainingVolumeIsRelative ? `${metric}Relative` : metric}
                         name={TRAINING_VOLUME_CONFIG[metric].label}
                         radius={[4, 4, 0, 0]}
-                        barSize={trainingVolumeMetrics.length === 1 ? 30 : 8}
+                        barSize={trainingVolumeBarSize}
                         isAnimationActive={false}
                       >
                         {trainingVolumeChartData.map((bucket) => (
@@ -684,7 +728,16 @@ export default function TrendsPage() {
               {isLoading ? (
                 <span className="skeleton" style={{ width: "140px", height: "26px", borderRadius: "999px" }} />
               ) : (
-                <div className="acwr-badge-container">
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)", flexWrap: "wrap" }}>
+                  {loadStats.sevenDayAvg !== null && (
+                    <ChartInsightPill
+                      sevenDayAvg={loadStats.sevenDayAvg}
+                      windowAvg={loadStats.windowAvg}
+                      sevenDayTooltip={`7-day load average: ${loadStats.sevenDayAvg}`}
+                      windowTooltip={`Visible window load average: ${loadStats.windowAvg ?? "--"}`}
+                    />
+                  )}
+                  <div className="acwr-badge-container">
                   <span
                     style={{
                       display: "inline-flex",
@@ -788,9 +841,10 @@ export default function TrendsPage() {
                     </div>
                   </div>
                 </div>
+                </div>
               )}
             </div>
-            <div className="trend-chart-container" style={{ marginTop: "var(--space-3)", height: "300px" }}>
+            <div className="trend-chart-container" style={{ marginTop: "var(--space-4)", height: "300px" }}>
               {isLoading ? (
                 <div className="skeleton" style={{ width: "100%", height: "100%", borderRadius: 12 }} />
               ) : (
@@ -800,7 +854,7 @@ export default function TrendsPage() {
                     <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                     <YAxis stroke="var(--color-text-muted)" fontSize={11} width={40} axisLine={false} />
                     <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip />} />
-                    <Area type="monotone" dataKey="total_load" name="Training Load" stroke="var(--color-accent-exertion)" fill="var(--color-accent-exertion)" fillOpacity={0.4} strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-exertion)" }} />
+                    <Area type="monotone" dataKey="total_load" name="Training Load" stroke="var(--color-accent-primary)" fill="var(--color-accent-primary)" fillOpacity={0.4} strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-primary)" }} />
                     <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -816,6 +870,14 @@ export default function TrendsPage() {
               <section className="card" id="chart-daily-steps" style={{ minWidth: 0 }}>
                 <div className="card-header">
                   <span className="card-title">Daily Steps</span>
+                  {!isHealthLoading && stepsStats.sevenDayAvg !== null && (
+                    <ChartInsightPill
+                      sevenDayAvg={formatCompactNumber(stepsStats.sevenDayAvg)}
+                      windowAvg={stepsStats.windowAvg !== null ? formatCompactNumber(stepsStats.windowAvg) : null}
+                      sevenDayTooltip={`7-day average: ${stepsStats.sevenDayAvg.toLocaleString()} steps`}
+                      windowTooltip={`Visible window average: ${stepsStats.windowAvg?.toLocaleString() ?? "--"} steps`}
+                    />
+                  )}
                 </div>
                 <div className="trend-chart-container" style={{ marginTop: "var(--space-4)", height: "260px" }}>
                   {isHealthLoading ? (
@@ -841,6 +903,15 @@ export default function TrendsPage() {
               <section className="card" id="chart-active-calories" style={{ minWidth: 0 }}>
                 <div className="card-header">
                   <span className="card-title">Active Calories</span>
+                  {!isHealthLoading && caloriesStats.sevenDayAvg !== null && (
+                    <ChartInsightPill
+                      sevenDayAvg={caloriesStats.sevenDayAvg.toLocaleString()}
+                      windowAvg={caloriesStats.windowAvg !== null ? caloriesStats.windowAvg.toLocaleString() : null}
+                      unit="kcal"
+                      sevenDayTooltip={`7-day average: ${caloriesStats.sevenDayAvg} kcal`}
+                      windowTooltip={`Visible window average: ${caloriesStats.windowAvg ?? "--"} kcal`}
+                    />
+                  )}
                 </div>
                 <div className="trend-chart-container" style={{ marginTop: "var(--space-4)", height: "260px" }}>
                   {isHealthLoading ? (

@@ -214,3 +214,15 @@ def test_message_item_validates_web_search_sources() -> None:
     )
     assert item.tool_calls is not None
     assert item.tool_calls[0]["display_result"]["sources"][0]["title"] == "HYROX Guide"
+
+
+def test_message_item_exposes_an_in_progress_assistant_response() -> None:
+    item = ai_routes.MessageItem(
+        id="msg-1",
+        role="assistant",
+        content="",
+        status="streaming",
+        created_at="2026-09-02T13:20:00Z",
+    )
+
+    assert item.status == "streaming"

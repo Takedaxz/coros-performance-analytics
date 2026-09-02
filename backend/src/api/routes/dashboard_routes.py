@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.engine import get_db_session
 from src.activity_laps import training_time_s
-from src.db.models import Activity, ActivityLap, DailyHealth, FitnessEstimate, SleepSession, User
+from src.db.models import Activity, ActivityLap, DailyHealth, FitnessEstimate, SleepSession, SportType, User
 from src.metrics.derived import compute_cardio_fitness_age
 
 router = APIRouter()
@@ -222,7 +222,16 @@ async def training_volume_trend(
     start, end = _training_volume_bounds(resolved_start_date, resolved_end_date)
 
     conditions = [Activity.start_time >= start, Activity.start_time < end]
-    if sport == "treadmill":
+    if sport == "run":
+        conditions.append(
+            or_(
+                Activity.sport == SportType.RUN,
+                Activity.subsport == "101",
+                Activity.title.ilike("%treadmill%"),
+                Activity.title.ilike("%indoor run%"),
+            )
+        )
+    elif sport == "treadmill":
         conditions.append(
             or_(
                 Activity.subsport == "101",

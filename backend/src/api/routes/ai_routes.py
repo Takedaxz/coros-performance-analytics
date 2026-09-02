@@ -7,7 +7,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -807,6 +807,7 @@ class MessageItem(BaseModel):
     csv_filename: str | None = None
     csv_content: str | None = None
     tool_calls: list[ToolCallRecord | str] | None = None
+    status: str = "completed"
     created_at: str
 
 
@@ -1111,6 +1112,7 @@ async def get_session_messages(
             csv_filename=message.csv_filename,
             csv_content=message.csv_content,
             tool_calls=tool_calls_by_message.get(message.id) or message.tool_calls,
+            status=message.status,
             created_at=message.created_at.replace(tzinfo=datetime.UTC).isoformat(),
         )
         for message in msgs
@@ -1169,12 +1171,22 @@ async def session_ask_stream(
     if req.user_message_id:
         user_msg.id = str(req.user_message_id)
     db.add(user_msg)
+    assistant_message_id = str(req.assistant_message_id or uuid4())
+    db.add(
+        DBChatMessage(
+            id=assistant_message_id,
+            session_id=session_id,
+            role="assistant",
+            content="",
+            status="streaming",
+        )
+    )
 
     # Auto-title from first message (truncated to 60 chars)
     if session.title == "New Chat":
         session.title = _capitalize_title(req.question[:60])
 
-    # Commit immediately so the user message + title are durable before streaming starts.
+    # Commit immediately so a reload can find the user message and streaming placeholder.
     # get_db_session commits on exit, but for StreamingResponse that exit is delayed until
     # the stream closes — and a client disconnect raises CancelledError (BaseException),
     # which bypasses the except Exception handler and rolls the transaction back.
@@ -1233,12 +1245,24 @@ async def session_ask_stream(
         finally:
             # Keep the stream open until the response is durable so message actions cannot
             # race a pending assistant-message write.
-            await _persist_ai_response(
-                session_id, req.question, accumulated, producer, tool_calls
+            persist_task = asyncio.create_task(
+                _persist_ai_response(
+                    session_id,
+                    assistant_message_id,
+                    req.question,
+                    accumulated,
+                    producer,
+                    tool_calls,
+                )
             )
+            try:
+                await asyncio.shield(persist_task)
+            except asyncio.CancelledError:
+                logger.info("AI response continues after stream disconnect", extra={"session_id": session_id})
 
     async def _persist_ai_response(
         sid: str,
+        assistant_id: str,
         question: str,
         accumulated: list[str],
         producer: asyncio.Task,
@@ -1249,14 +1273,21 @@ async def session_ask_stream(
         async with async_session_factory() as persist_db:
             from datetime import datetime
 
-            ai_msg = DBChatMessage(
-                session_id=sid,
-                role="assistant",
-                content=full_response,
-                tool_calls=_unique_tool_calls(tool_calls),
-            )
-            if req.assistant_message_id:
-                ai_msg.id = str(req.assistant_message_id)
+            ai_msg = await persist_db.get(DBChatMessage, assistant_id)
+            if ai_msg is None:
+                ai_msg = DBChatMessage(
+                    id=assistant_id,
+                    session_id=sid,
+                    role="assistant",
+                    content=full_response,
+                    tool_calls=_unique_tool_calls(tool_calls),
+                    status="completed",
+                )
+                persist_db.add(ai_msg)
+            else:
+                ai_msg.content = full_response
+                ai_msg.tool_calls = _unique_tool_calls(tool_calls)
+                ai_msg.status = "completed"
             sess_res = await persist_db.execute(
                 select(DBChatSession).where(DBChatSession.id == sid)
             )
@@ -1265,7 +1296,6 @@ async def session_ask_stream(
                 s.updated_at = datetime.utcnow()
                 if s.title == "New Chat":
                     s.title = question[:60]
-            persist_db.add(ai_msg)
             await persist_db.commit()
 
     return StreamingResponse(

@@ -150,14 +150,218 @@ function calendarStepTarget(step: Record<string, unknown>): string | null {
   return `${value} ${target.replaceAll("_", " ")}`;
 }
 
-function calendarStepIntensity(step: Record<string, unknown>): string | null {
+function formatPaceDuration(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(total / 60);
+  const remainder = total % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+interface HeartRateProfile {
+  max_hr: number | null;
+  resting_hr: number | null;
+  hrr: number | null;
+  threshold_hr: number | null;
+}
+
+function calculateStepHeartRateFromMap(
+  lowPct: number | null,
+  highPct: number | null,
+  basis: string,
+  profile?: HeartRateProfile | null
+): { low: number; high: number } | number | null {
+  if (!profile || (lowPct === null && highPct === null)) return null;
+  let calcBpm: ((pct: number) => number | null) | null = null;
+
+  if (basis === "max_hr") {
+    const maxHr = profile.max_hr;
+    if (maxHr) calcBpm = (pct) => Math.round((pct / 100) * maxHr);
+  } else if (basis === "lthr") {
+    const thresholdHr = profile.threshold_hr;
+    if (thresholdHr) calcBpm = (pct) => Math.round((pct / 100) * thresholdHr);
+  } else if (basis === "reserve") {
+    const hrr = profile.hrr ?? (profile.max_hr && profile.resting_hr ? profile.max_hr - profile.resting_hr : null);
+    const restingHr = profile.resting_hr ?? (profile.max_hr && hrr ? profile.max_hr - hrr : null);
+    if (hrr && restingHr !== null) {
+      calcBpm = (pct) => Math.round(restingHr + (pct / 100) * hrr);
+    } else if (profile.max_hr) {
+      const maxHr = profile.max_hr;
+      calcBpm = (pct) => Math.round((pct / 100) * maxHr);
+    }
+  }
+
+  if (!calcBpm) return null;
+
+  const lowBpm = lowPct !== null ? calcBpm(lowPct) : null;
+  const highBpm = highPct !== null ? calcBpm(highPct) : null;
+
+  if (lowBpm !== null && highBpm !== null) {
+    return lowBpm === highBpm ? lowBpm : { low: lowBpm, high: highBpm };
+  }
+  return lowBpm ?? highBpm ?? null;
+}
+
+function calendarStepIntensity(step: Record<string, unknown>, profile?: HeartRateProfile | null): string {
   const intensity = typeof step.intensity === "string" ? step.intensity : "none";
   const low = typeof step.intensity_low === "number" ? step.intensity_low : null;
   const high = typeof step.intensity_high === "number" ? step.intensity_high : null;
-  if (intensity === "none" || low === null) return null;
-  const label = intensity === "heart_rate_percent" ? "Threshold HR" : intensity.replaceAll("_", " ");
-  const range = high === null || high === low ? String(low) : `${low}\u2013${high}`;
-  return `${label} ${range}${intensity.endsWith("percent") ? "%" : intensity === "heart_rate" ? " bpm" : ""}`;
+  if (intensity === "none" || low === null) return "Not set";
+
+  const isSingleValue = high === null || high === low;
+
+  if (intensity === "pace" || intensity === "effort_pace") {
+    const label = intensity === "effort_pace" ? "Effort Pace" : "Pace";
+    const paceRange = isSingleValue ? formatPaceDuration(low) : `${formatPaceDuration(low)}\u2013${formatPaceDuration(high)}`;
+    return `${label} ${paceRange} /km`;
+  }
+
+  if (intensity === "heart_rate_percent") {
+    const basis = typeof step.intensity_basis === "string" ? step.intensity_basis : "max_hr";
+    const basisAbbr = basis === "reserve" ? "HRR" : basis === "lthr" ? "LTHR" : "Max HR";
+    const pctRange = isSingleValue ? `${low}%` : `${low}\u2013${high}%`;
+    if (profile) {
+      const hr = calculateStepHeartRateFromMap(low, high, basis, profile);
+      if (hr !== null) {
+        const bpmText = typeof hr === "number" ? `${hr} bpm` : `${hr.low}\u2013${hr.high} bpm`;
+        return `% Heart Rate ${pctRange} (${bpmText} · ${basisAbbr})`;
+      }
+    }
+    return `% Heart Rate ${pctRange} (${basisAbbr})`;
+  }
+
+  const label = intensity.replaceAll("_", " ");
+  const range = isSingleValue ? String(low) : `${low}\u2013${high}`;
+  const unit = intensity === "heart_rate" ? " bpm" : intensity.endsWith("percent") ? "%" : intensity === "power" ? " W" : intensity === "cadence" ? " rpm" : intensity === "weight" ? " kg" : intensity === "speed" ? " km/h" : "";
+  return `${label} ${range}${unit}`;
+}
+
+interface NormalizedStepBlock {
+  type: "single" | "repeat";
+  repeatCount?: number;
+  steps: Array<Record<string, unknown>>;
+}
+
+function groupCalendarSteps(steps: Array<Record<string, unknown>>): NormalizedStepBlock[] {
+  const blocks: NormalizedStepBlock[] = [];
+  const processedGroups = new Set<unknown>();
+
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const repeatGroup = step.repeat_group;
+    const repeatCount = typeof step.repeat_count === "number"
+      ? step.repeat_count
+      : typeof step.repeats === "number"
+        ? step.repeats
+        : 1;
+
+    // 1. Group by explicit repeat_group
+    if (repeatGroup !== null && repeatGroup !== undefined) {
+      if (processedGroups.has(repeatGroup)) continue;
+      processedGroups.add(repeatGroup);
+      const groupSteps = steps.filter((s) => s.repeat_group === repeatGroup);
+      const count = typeof groupSteps[0]?.repeat_count === "number"
+        ? groupSteps[0].repeat_count
+        : typeof groupSteps[0]?.repeats === "number"
+          ? groupSteps[0].repeats
+          : repeatCount;
+      blocks.push({
+        type: "repeat",
+        repeatCount: count,
+        steps: groupSteps,
+      });
+      continue;
+    }
+
+    // 2. Group consecutive steps with the same repeatCount > 1
+    if (repeatCount > 1) {
+      const repeatSteps: Array<Record<string, unknown>> = [step];
+      while (i + 1 < steps.length) {
+        const nextStep = steps[i + 1];
+        const nextGroup = nextStep.repeat_group;
+        const nextCount = typeof nextStep.repeat_count === "number"
+          ? nextStep.repeat_count
+          : typeof nextStep.repeats === "number"
+            ? nextStep.repeats
+            : 1;
+        if ((nextGroup === null || nextGroup === undefined) && nextCount === repeatCount) {
+          repeatSteps.push(nextStep);
+          i++;
+        } else {
+          break;
+        }
+      }
+      blocks.push({
+        type: "repeat",
+        repeatCount,
+        steps: repeatSteps,
+      });
+      continue;
+    }
+
+    // 3. Regular single step
+    blocks.push({
+      type: "single",
+      steps: [step],
+    });
+  }
+
+  return blocks;
+}
+
+function exerciseVideo(
+  name: string,
+  videos: Record<string, string>,
+  exerciseCode?: string | null
+): string | null {
+  const keys = [
+    name.toLowerCase().replace(/[^a-z0-9]+/g, ""),
+    resolveExerciseName(name, name).toLowerCase().replace(/[^a-z0-9]+/g, ""),
+    exerciseCode ? exerciseCode.toLowerCase().replace(/[^a-z0-9]+/g, "") : "",
+    exerciseCode ? resolveExerciseName(exerciseCode, exerciseCode).toLowerCase().replace(/[^a-z0-9]+/g, "") : "",
+  ].filter(Boolean);
+
+  for (const k of keys) {
+    if (videos[k]) return videos[k];
+  }
+  return null;
+}
+
+function WorkoutVideoIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 6h11v12H4zM15 10l5-3v10l-5-3z" />
+    </svg>
+  );
+}
+
+function formatSportLabel(rawSport: string): string {
+  if (!rawSport) return "";
+  const normalized = rawSport.trim().toLowerCase();
+  const mapping: Record<string, string> = {
+    run: "Run",
+    ride: "Ride",
+    bike: "Bike",
+    indoor_bike: "Indoor Bike",
+    swim: "Pool Swim",
+    pool_swim: "Pool Swim",
+    open_water_swim: "Open Water Swim",
+    strength: "Strength",
+    trail_run: "Trail Run",
+    indoor_climb: "Indoor Climb",
+    bouldering: "Bouldering",
+    xc_ski: "XC Ski",
+    hyrox: "HYROX",
+    walk: "Walk",
+    hike: "Hike",
+    row: "Row",
+    indoor_row: "Indoor Row",
+  };
+  if (mapping[normalized]) return mapping[normalized];
+  return rawSport
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function getDomainFromUrl(urlStr: string): string {
@@ -1096,6 +1300,7 @@ type Message = {
   csvName?: string;
   csvContent?: string;
   tools?: (ToolCall | string)[];
+  status?: "streaming" | "completed";
   createdAt?: string;
 };
 
@@ -1107,6 +1312,7 @@ type DBMessage = {
   csv_filename?: string;
   csv_content?: string;
   tool_calls?: (ToolCall | string)[];
+  status: "streaming" | "completed";
   created_at: string;
 };
 
@@ -1240,6 +1446,9 @@ export default function AiPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(routeSessionId !== null);
   const [goals, setGoals] = useState<any[]>([]);
+  const [hrProfile, setHrProfile] = useState<HeartRateProfile | null>(null);
+  const [exerciseVideos, setExerciseVideos] = useState<Record<string, string>>({});
+  const [activeCalendarVideoKey, setActiveCalendarVideoKey] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [composerNeedsBottomSpace, setComposerNeedsBottomSpace] = useState(false);
   const [selectedResponseExcerpt, setSelectedResponseExcerpt] = useState<string | null>(null);
@@ -1536,13 +1745,52 @@ export default function AiPage() {
   }, [responseSelection]);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/settings/profile`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
+    async function loadProfileAndFitness() {
+      try {
+        const [profileRes, fitnessRes] = await Promise.all([
+          fetch(`${API_BASE}/api/settings/profile`).catch(() => null),
+          fetch(`${API_BASE}/api/dashboard/running-fitness`).catch(() => null),
+        ]);
+        const data = profileRes?.ok ? await profileRes.json() : null;
         if (data?.nickname) setNickname(data.nickname);
         else if (data?.first_name) setNickname(data.first_name);
-      })
-      .catch(() => { });
+
+        const fitnessData = fitnessRes?.ok ? await fitnessRes.json() : null;
+        let thresholdHr: number | null = (fitnessData?.lthr ? Math.round(fitnessData.lthr) : null) ?? data?.threshold_hr_bpm ?? null;
+        if (!thresholdHr) {
+          const trendRes = await fetch(`${API_BASE}/api/dashboard/fitness-trend?days=180`).catch(() => null);
+          if (trendRes?.ok) {
+            const trendData = await trendRes.json();
+            const latestTrend = Array.isArray(trendData)
+              ? [...trendData].reverse().find((d: { lthr?: number | null }) => d.lthr != null)
+              : null;
+            if (latestTrend?.lthr) thresholdHr = Math.round(latestTrend.lthr);
+          }
+        }
+
+        const maxHr: number | null = data?.max_hr_bpm ?? (fitnessData?.fitnessMaxHr ? Math.round(fitnessData.fitnessMaxHr) : null);
+        const restingHr: number | null = data?.resting_hr_bpm ?? null;
+        const hrr: number | null = data?.heart_rate_reserve_bpm ?? (
+          maxHr && restingHr && maxHr > restingHr ? maxHr - restingHr : null
+        );
+
+        setHrProfile({
+          max_hr: maxHr,
+          resting_hr: restingHr,
+          hrr,
+          threshold_hr: thresholdHr,
+        });
+      } catch { }
+
+      try {
+        const videoRes = await fetch(`${API_BASE}/api/training-plan/coros/exercise-videos`);
+        if (videoRes.ok) {
+          const videos = (await videoRes.json()) as Record<string, string>;
+          setExerciseVideos(videos);
+        }
+      } catch { }
+    }
+    void loadProfileAndFitness();
   }, []);
 
   const processImageFiles = useCallback((files: FileList | File[]) => {
@@ -1744,6 +1992,7 @@ export default function AiPage() {
           csvName: m.csv_filename,
           csvContent: m.csv_content,
           tools: m.tool_calls,
+          status: m.status,
           createdAt: m.created_at,
         })));
       } catch (err) {
@@ -1756,6 +2005,32 @@ export default function AiPage() {
     })();
     return () => controller.abort();
   }, [routeSessionId, streamingSessionIds]);
+
+  const isPersistedStream = messages.at(-1)?.role === "ai" && messages.at(-1)?.status === "streaming";
+
+  useEffect(() => {
+    if (!routeSessionId || !isPersistedStream || inFlightStreamsRef.current.has(routeSessionId)) return;
+
+    const refreshMessages = async () => {
+      const res = await fetch(`${API_BASE}/api/ai/sessions/${routeSessionId}/messages`);
+      if (!res.ok) return;
+      const dbMsgs: DBMessage[] = await res.json();
+      setMessages(dbMsgs.map((m) => ({
+        id: m.id,
+        role: m.role === "assistant" ? "ai" : "user",
+        content: m.content,
+        images: m.images,
+        csvName: m.csv_filename,
+        csvContent: m.csv_content,
+        tools: m.tool_calls,
+        status: m.status,
+        createdAt: m.created_at,
+      })));
+    };
+
+    const intervalId = window.setInterval(() => void refreshMessages(), 1_000);
+    return () => window.clearInterval(intervalId);
+  }, [isPersistedStream, routeSessionId]);
 
 
   async function createRealSession(projectIdOverride?: string | null): Promise<Session | null> {
@@ -2030,7 +2305,7 @@ export default function AiPage() {
       csvContent: currentCsv?.content,
       createdAt: new Date().toISOString(),
     };
-    const initialAiMsg: Message = { id: assistantMessageId, role: "ai", content: "" };
+    const initialAiMsg: Message = { id: assistantMessageId, role: "ai", content: "", status: "streaming" };
     const initialStreamMsgs = [...baseHistory, userMsgObj, initialAiMsg];
 
     inFlightStreamsRef.current.set(sid, initialStreamMsgs);
@@ -2156,7 +2431,7 @@ export default function AiPage() {
       if (streamMsgs && streamMsgs.length > 0) {
         const updated = [...streamMsgs];
         const last = updated.at(-1);
-        if (last?.role === "ai") updated[updated.length - 1] = { ...last, createdAt: new Date().toISOString() };
+        if (last?.role === "ai") updated[updated.length - 1] = { ...last, status: "completed", createdAt: new Date().toISOString() };
         inFlightStreamsRef.current.set(sid, updated);
         if (routeSessionIdRef.current === sid) setMessages(updated);
       }
@@ -2186,6 +2461,7 @@ export default function AiPage() {
               csvName: m.csv_filename,
               csvContent: m.csv_content,
               tools: m.tool_calls,
+              status: m.status,
               createdAt: m.created_at,
             })));
           }
@@ -3123,7 +3399,8 @@ export default function AiPage() {
                         const hasThinkingMarker = msg.content.includes("<think>") || msg.content.includes("<tool-thought>");
                         const isCurrentSessionStreaming =
                           (routeSessionId ? streamingSessionIds.has(routeSessionId) : false) ||
-                          (isLoading && idx === messages.length - 1);
+                          (isLoading && idx === messages.length - 1) ||
+                          (msg.status === "streaming" && idx === messages.length - 1);
                         const isAwaitingAnswer = isCurrentSessionStreaming && idx === messages.length - 1 && !answer;
                         const displayAnswer = removeLegacyEvidenceUsed(answer);
                         const tools = msg.tools ? uniqueToolCalls(msg.tools) : [];
@@ -3607,7 +3884,7 @@ export default function AiPage() {
                       const result = calendarChangeResults[itemKey];
                       const name = typeof draft?.name === "string" ? draft.name : "Workout";
                       const date = typeof draft?.date === "string" ? draft.date : change.date;
-                      const sport = typeof draft?.sport === "string" ? draft.sport.replaceAll("_", " ") : "";
+                      const sport = typeof draft?.sport === "string" ? formatSportLabel(draft.sport) : "";
                       const poolLength = typeof draft?.pool_length_m === "number" ? draft.pool_length_m : null;
                       const description = typeof draft?.description === "string" ? draft.description : "";
                       return (
@@ -3615,30 +3892,82 @@ export default function AiPage() {
                           <dl className="calendar-change-summary">
                             <div><dt>Workout</dt><dd>{name}</dd></div>
                             {date && <div><dt>Date</dt><dd>{date}</dd></div>}
-                            {sport && <div><dt>Sport</dt><dd>{sport}</dd></div>}
+                            {sport && <div><dt>Sport</dt><dd className="calendar-change-sport">{sport}</dd></div>}
                             {poolLength !== null && <div><dt>Pool</dt><dd>{poolLength} m</dd></div>}
                           </dl>
                           {description && <p className="calendar-change-description">{description}</p>}
                           {steps.length > 0 && (
-                            <ol className="calendar-change-steps">
-                              {steps.map((step, index) => {
-                                const stepName = resolveExerciseName(
-                                  typeof step.exercise_code === "string" ? step.exercise_code : null,
-                                  typeof step.name === "string" ? step.name : "Step",
-                                );
-                                const target = calendarStepTarget(step);
-                                const repeats = typeof step.repeat_count === "number" ? step.repeat_count : step.repeats;
-                                const intensity = calendarStepIntensity(step);
+                            <div className="plan-day-workout-steps" style={{ marginTop: "var(--space-4)" }}>
+                              {groupCalendarSteps(steps).map((block, blockIndex) => {
+                                const renderStepCard = (stepItem: Record<string, unknown>, key: string, nested = false) => {
+                                  const exerciseCode = typeof stepItem.exercise_code === "string" ? stepItem.exercise_code : null;
+                                  const stepName = resolveExerciseName(
+                                    exerciseCode,
+                                    typeof stepItem.name === "string" ? stepItem.name : "Step",
+                                  );
+                                  const target = calendarStepTarget(stepItem);
+                                  const intensity = calendarStepIntensity(stepItem, hrProfile);
+                                  const kind = typeof stepItem.kind === "string" ? stepItem.kind : "training";
+                                  const video = exerciseVideo(stepName, exerciseVideos, exerciseCode);
+                                  const isVideoOpen = activeCalendarVideoKey === key;
+
+                                  return (
+                                    <div className={`plan-day-workout-step-card${nested ? " is-nested" : ""}`} key={key}>
+                                      <div className={`plan-day-workout-step is-${kind}${nested ? " is-nested" : ""}`}>
+                                        <div>
+                                          <strong>{stepName}</strong>
+                                          <small>{intensity}</small>
+                                        </div>
+                                        <div className="plan-day-workout-step-meta">
+                                          {target && <b>{target}</b>}
+                                          {video && (
+                                            <button
+                                              type="button"
+                                              className={`plan-day-workout-video-btn${isVideoOpen ? " is-active" : ""}`}
+                                              aria-label={`${isVideoOpen ? "Hide" : "Show"} ${stepName} technique video`}
+                                              title={`${isVideoOpen ? "Hide" : "Show"} technique video`}
+                                              aria-pressed={isVideoOpen}
+                                              onClick={() => setActiveCalendarVideoKey(isVideoOpen ? null : key)}
+                                            >
+                                              <WorkoutVideoIcon size={13} />
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {video && isVideoOpen && (
+                                        <aside
+                                          className={`plan-day-workout-exercise-video${nested ? " is-nested" : ""}`}
+                                          aria-label={`${stepName} technique preview`}
+                                        >
+                                          <video src={video} controls loop muted playsInline preload="metadata" />
+                                        </aside>
+                                      )}
+                                    </div>
+                                  );
+                                };
+
+                                if (block.type === "single") {
+                                  return renderStepCard(block.steps[0], `block-${blockIndex}`);
+                                }
+
+                                const summaryTargets = block.steps
+                                  .map((s) => calendarStepTarget(s))
+                                  .filter(Boolean)
+                                  .join(" · ");
+
                                 return (
-                                  <li key={`${stepName}-${index}`}>
-                                    <strong>{stepName}</strong>
-                                    {target && <span>{target}</span>}
-                                    {intensity && <span>{intensity}</span>}
-                                    {typeof repeats === "number" && repeats > 1 && <span>Repeat {repeats}×</span>}
-                                  </li>
+                                  <div className="plan-day-workout-repeat" key={`block-${blockIndex}`}>
+                                    <header>
+                                      <strong>Repeat ×{block.repeatCount ?? 1}</strong>
+                                      {summaryTargets && <span>{summaryTargets}</span>}
+                                    </header>
+                                    {block.steps.map((childStep, childIndex) =>
+                                      renderStepCard(childStep, `block-${blockIndex}-${childIndex}`, true)
+                                    )}
+                                  </div>
                                 );
                               })}
-                            </ol>
+                            </div>
                           )}
                           {result && !result.success && <p className="calendar-change-dialog-error" role="alert">{result.text}</p>}
                           {isBatch && (

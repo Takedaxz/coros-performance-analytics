@@ -524,6 +524,21 @@ async def _fetch_user_goal(db: AsyncSession, user_id: str) -> str:
             + "\n"
         )
 
+    training_setup = user.device_preferences.get("ai_training_setup", {}) if user.device_preferences else {}
+    if isinstance(training_setup, dict):
+        equipment = training_setup.get("gym_equipment")
+        preference = training_setup.get("strength_equipment_preference")
+        pool_length = training_setup.get("pool_length_m")
+        setup_lines: list[str] = []
+        if isinstance(equipment, list) and all(isinstance(item, str) for item in equipment) and equipment:
+            setup_lines.append(f"**Available gym equipment:** {', '.join(item.replace('_', ' ') for item in equipment)}")
+        if preference in {"machines_first", "free_weights_first"}:
+            setup_lines.append(f"**Strength preference:** {str(preference).replace('_', ' ')}")
+        if isinstance(pool_length, (int, float)) and 10 <= pool_length <= 100:
+            setup_lines.append(f"**Default pool length:** {pool_length:g} m")
+        if setup_lines:
+            parts.append("### Training Setup (User Preferences & Constraints)\n" + "\n".join(setup_lines) + "\n")
+
     today = _today_local()
     # Goals within the 30-day post-race recovery window are still surfaced to the AI
     # so it can advise on recovery, deload, and next cycle planning.

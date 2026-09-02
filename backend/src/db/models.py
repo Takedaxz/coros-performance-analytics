@@ -626,6 +626,7 @@ class ChatMessage(Base):
     csv_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     csv_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     tool_calls: Mapped[list[dict[str, Any] | str] | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="completed", server_default="completed")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     session: Mapped["ChatSession"] = relationship("ChatSession", back_populates="messages")

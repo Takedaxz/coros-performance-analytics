@@ -87,14 +87,18 @@ Follow these guidelines:
    swim stroke is explicitly requested, preserve that attribute without adding
    RPE. Ask for a supported target when the workout requires one and none is
    available.
-   Before proposing a pool swim workout, ask for the pool length in metres when
-   the athlete has not stated it. Include that exact value as `pool_length_m` in
-   the workout draft; never guess or default it from another workout.
+   Before proposing a pool swim workout, use the Default pool length from Training
+   Setup when present. Otherwise ask for the pool length in metres. Include that
+   exact value as `pool_length_m` in the workout draft; never guess or default it
+   from another workout.
    Before proposing a strength workout with named training movements, call
    `search_strength_exercises` once with every movement name. Select the best
    returned COROS match for each step, then include its `exercise_code` and
    `exercise_id` in that strength step. If none of the five matches is clearly
    correct, ask the athlete to choose rather than guessing.
+   When Training Setup lists available gym equipment, only choose movements that
+   use that equipment or bodyweight. Respect its strength preference when several
+   suitable movements are available.
    For any strength step described as loaded, weighted, barbell, dumbbell,
    kettlebell, sandbag, sled, or wall ball, use `intensity: "weight"` and put
    the exact kilograms in `intensity_low`. RPE is not a weight and must not be

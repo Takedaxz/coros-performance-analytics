@@ -242,7 +242,67 @@ function structureValue(step: WorkoutStepForm): string {
   return step.target === "open" ? "Open" : String(step.value);
 }
 
-function intensityValue(step: WorkoutStepForm): string {
+interface HeartRateProfile {
+  max_hr: number | null;
+  resting_hr: number | null;
+  hrr: number | null;
+  threshold_hr: number | null;
+}
+
+function calculateStepHeartRate(
+  step: WorkoutStepForm,
+  profile?: HeartRateProfile | null
+): { low: number; high: number } | number | null {
+  if (step.intensity !== "heart_rate_percent" || !profile) return null;
+  const lowPct = step.intensity_low;
+  const highPct = step.intensity_high;
+  if (lowPct === null && highPct === null) return null;
+
+  const basis = step.intensity_basis ?? "max_hr";
+  let calcBpm: ((pct: number) => number | null) | null = null;
+
+  if (basis === "max_hr") {
+    const maxHr = profile.max_hr;
+    if (maxHr) calcBpm = (pct) => Math.round((pct / 100) * maxHr);
+  } else if (basis === "lthr") {
+    const thresholdHr = profile.threshold_hr;
+    if (thresholdHr) calcBpm = (pct) => Math.round((pct / 100) * thresholdHr);
+  } else if (basis === "reserve") {
+    // Karvonen formula: Target HR = Resting HR + (% Intensity * HRR)
+    const hrr = profile.hrr ?? (profile.max_hr && profile.resting_hr ? profile.max_hr - profile.resting_hr : null);
+    const restingHr = profile.resting_hr ?? (profile.max_hr && hrr ? profile.max_hr - hrr : null);
+    if (hrr && restingHr !== null) {
+      calcBpm = (pct) => Math.round(restingHr + (pct / 100) * hrr);
+    } else if (profile.max_hr) {
+      const maxHr = profile.max_hr;
+      calcBpm = (pct) => Math.round((pct / 100) * maxHr);
+    }
+  }
+
+  if (!calcBpm) return null;
+
+  const lowBpm = lowPct !== null ? calcBpm(lowPct) : null;
+  const highBpm = highPct !== null ? calcBpm(highPct) : null;
+
+  if (lowBpm !== null && highBpm !== null) {
+    return lowBpm === highBpm ? lowBpm : { low: lowBpm, high: highBpm };
+  }
+  return lowBpm ?? highBpm ?? null;
+}
+
+function hrBasisAbbreviation(basis: WorkoutIntensityBasis): string {
+  switch (basis) {
+    case "reserve":
+      return "HRR";
+    case "lthr":
+      return "LTHR";
+    case "max_hr":
+    default:
+      return "Max HR";
+  }
+}
+
+function intensityValue(step: WorkoutStepForm, profile?: HeartRateProfile | null): string {
   const label = INTENSITY_OPTIONS.find((item) => item.value === step.intensity)?.label ?? "Open intensity";
   if (step.intensity === "none" || step.intensity_low === null || step.intensity_low === undefined) return label;
   if (step.intensity === "stroke") return STROKE_OPTIONS.find((item) => item.value === String(step.intensity_low))?.label ?? label;
@@ -250,12 +310,25 @@ function intensityValue(step: WorkoutStepForm): string {
   if (step.intensity === "pace" || step.intensity === "effort_pace") return `${label} ${formatDuration(step.intensity_low)}${isSingleValue ? "" : `\u2013${formatDuration(step.intensity_high!)}`} /km`;
   const value = isSingleValue ? step.intensity_low : `${step.intensity_low}\u2013${step.intensity_high}`;
   const unit = step.intensity === "heart_rate" ? " bpm" : step.intensity.endsWith("percent") ? "%" : step.intensity === "power" ? " W" : step.intensity === "cadence" ? " rpm" : step.intensity === "weight" ? " kg" : step.intensity === "speed" ? " km/h" : "";
+
+  if (step.intensity === "heart_rate_percent") {
+    const basisAbbr = hrBasisAbbreviation(step.intensity_basis ?? "max_hr");
+    if (profile) {
+      const hr = calculateStepHeartRate(step, profile);
+      if (hr !== null) {
+        const bpmText = typeof hr === "number" ? `${hr} bpm` : `${hr.low}\u2013${hr.high} bpm`;
+        return `${label} ${value}${unit} (${bpmText} · ${basisAbbr})`;
+      }
+    }
+    return `${label} ${value}${unit} (${basisAbbr})`;
+  }
+
   return `${label} ${value}${unit}`;
 }
 
-function stepSummary(step: WorkoutStepForm): string {
+function stepSummary(step: WorkoutStepForm, profile?: HeartRateProfile | null): string {
   const summary = [step.target === "open" ? targetLabel(step.target) : `${targetLabel(step.target)} · ${structureValue(step)}`];
-  if (step.intensity !== "none" && step.intensity_low !== null && step.intensity_low !== undefined) summary.push(intensityValue(step));
+  if (step.intensity !== "none" && step.intensity_low !== null && step.intensity_low !== undefined) summary.push(intensityValue(step, profile));
   if (step.kind === "training" && step.sets > 1) summary.push(`${step.sets} sets`);
   if (step.kind === "training" && step.rest_seconds > 0) summary.push(`${formatDuration(step.rest_seconds)} rest`);
   return summary.join(" · ");
@@ -276,27 +349,6 @@ function formatEventNote(event: TrainingEvent): string {
   return event.description;
 }
 
-function WorkoutStructure({ steps }: { steps: WorkoutStepForm[] }) {
-  const groups = new Set<number>();
-  const totalDistance = steps.reduce((total, step) => total + (step.target === "distance" ? step.value * (step.repeat_count ?? 1) : 0), 0);
-  const barGroups = new Set<number>();
-  const barSteps = steps.flatMap((step) => {
-    if (step.repeat_group === null || step.repeat_group === undefined) return [step];
-    if (barGroups.has(step.repeat_group)) return [];
-    barGroups.add(step.repeat_group);
-    const children = steps.filter((item) => item.repeat_group === step.repeat_group);
-    return Array.from({ length: step.repeat_count ?? 1 }, () => children).flat();
-  });
-  const card = (step: WorkoutStepForm, key: string, nested = false) => <div className={`plan-day-workout-step is-${step.kind}${nested ? " is-nested" : ""}`} key={key}><div><strong>{displayStepName(step)}</strong><small>{intensityValue(step)}</small></div><b>{structureValue(step)}</b></div>;
-  return <section className="plan-day-workout-structure"><header><strong>Workout structure</strong>{totalDistance > 0 && <span>{formatKilometers(totalDistance)} total</span>}</header><div className="plan-day-workout-bar" aria-hidden="true">{barSteps.map((step, index) => <i key={`${step.kind}-${index}`} data-kind={step.kind} style={{ flexGrow: Math.max(1, step.value) }} />)}</div><div className="plan-day-workout-legend"><span data-kind="warmup">Warm-up</span><span data-kind="training">Main</span><span data-kind="rest">Rest</span><span data-kind="cooldown">Cool-down</span></div><div className="plan-day-workout-steps">{steps.map((step, index) => {
-    if (step.repeat_group === null || step.repeat_group === undefined) return card(step, `step-${index}`);
-    if (groups.has(step.repeat_group)) return null;
-    groups.add(step.repeat_group);
-    const children = steps.filter((item) => item.repeat_group === step.repeat_group);
-    return <div className="plan-day-workout-repeat" key={`repeat-${step.repeat_group}`}><header><strong>Repeat ×{step.repeat_count ?? 1}</strong><span>{children.map(structureValue).join(" · ")}</span></header>{children.map((item, childIndex) => card(item, `repeat-${step.repeat_group}-${childIndex}`, true))}</div>;
-  })}</div></section>;
-}
-
 function friendlyStepName(kind: WorkoutStepForm["kind"]): string {
   return { warmup: "Warm Up", training: "Training", rest: "Rest", cooldown: "Cool Down" }[kind];
 }
@@ -307,15 +359,137 @@ function displayStepName(step: WorkoutStepForm): string {
     : step.name.trim() || friendlyStepName(step.kind);
 }
 
-function exerciseVideo(name: string, videos: Record<string, string>, options: ExerciseOption[] = []): string | null {
-  const key = name.toLowerCase().replace(/[^a-z0-9]+/g, "");
-  if (videos[key]) return videos[key];
-  const matched = options.find(
-    (opt) =>
-      opt.name.toLowerCase().replace(/[^a-z0-9]+/g, "") === key ||
-      resolveExerciseName(opt.name, opt.name).toLowerCase().replace(/[^a-z0-9]+/g, "") === key
-  );
+function exerciseVideo(
+  name: string,
+  videos: Record<string, string>,
+  options: ExerciseOption[] = [],
+  exerciseCode?: string | null
+): string | null {
+  const keys = [
+    name.toLowerCase().replace(/[^a-z0-9]+/g, ""),
+    resolveExerciseName(name, name).toLowerCase().replace(/[^a-z0-9]+/g, ""),
+    exerciseCode ? exerciseCode.toLowerCase().replace(/[^a-z0-9]+/g, "") : "",
+    exerciseCode ? resolveExerciseName(exerciseCode, exerciseCode).toLowerCase().replace(/[^a-z0-9]+/g, "") : "",
+  ].filter(Boolean);
+
+  for (const k of keys) {
+    if (videos[k]) return videos[k];
+  }
+
+  const matched = options.find((opt) => {
+    const optKeys = [
+      opt.name.toLowerCase().replace(/[^a-z0-9]+/g, ""),
+      resolveExerciseName(opt.name, opt.name).toLowerCase().replace(/[^a-z0-9]+/g, ""),
+      opt.id ? opt.id.toLowerCase().replace(/[^a-z0-9]+/g, "") : "",
+    ];
+    return keys.some((k) => optKeys.includes(k));
+  });
+
   return matched?.video_url ?? null;
+}
+
+function WorkoutStructure({
+  steps,
+  profile,
+  videos = {},
+  options = [],
+}: {
+  steps: WorkoutStepForm[];
+  profile?: HeartRateProfile | null;
+  videos?: Record<string, string>;
+  options?: ExerciseOption[];
+}) {
+  const [activeVideoKey, setActiveVideoKey] = useState<string | null>(null);
+  const groups = new Set<number>();
+  const totalDistance = steps.reduce(
+    (total, step) => total + (step.target === "distance" ? step.value * (step.repeat_count ?? 1) : 0),
+    0
+  );
+  const barGroups = new Set<number>();
+  const barSteps = steps.flatMap((step) => {
+    if (step.repeat_group === null || step.repeat_group === undefined) return [step];
+    if (barGroups.has(step.repeat_group)) return [];
+    barGroups.add(step.repeat_group);
+    const children = steps.filter((item) => item.repeat_group === step.repeat_group);
+    return Array.from({ length: step.repeat_count ?? 1 }, () => children).flat();
+  });
+
+  const card = (step: WorkoutStepForm, key: string, nested = false) => {
+    const stepTitle = displayStepName(step);
+    const video = exerciseVideo(stepTitle, videos, options, step.exercise_code);
+    const isVideoOpen = activeVideoKey === key;
+
+    return (
+      <div className={`plan-day-workout-step-card${nested ? " is-nested" : ""}`} key={key}>
+        <div className={`plan-day-workout-step is-${step.kind}${nested ? " is-nested" : ""}`}>
+          <div>
+            <strong>{stepTitle}</strong>
+            <small>{intensityValue(step, profile)}</small>
+          </div>
+          <div className="plan-day-workout-step-meta">
+            <b>{structureValue(step)}</b>
+            {video && (
+              <button
+                type="button"
+                className={`plan-day-workout-video-btn${isVideoOpen ? " is-active" : ""}`}
+                aria-label={`${isVideoOpen ? "Hide" : "Show"} ${stepTitle} technique video`}
+                title={`${isVideoOpen ? "Hide" : "Show"} technique video`}
+                aria-pressed={isVideoOpen}
+                onClick={() => setActiveVideoKey(isVideoOpen ? null : key)}
+              >
+                <WorkoutIcon name="video" size={13} />
+              </button>
+            )}
+          </div>
+        </div>
+        {video && isVideoOpen && (
+          <aside
+            className={`plan-day-workout-exercise-video${nested ? " is-nested" : ""}`}
+            aria-label={`${stepTitle} technique preview`}
+          >
+            <video src={video} controls loop muted playsInline preload="metadata" />
+          </aside>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <section className="plan-day-workout-structure">
+      <header>
+        <strong>Workout structure</strong>
+        {totalDistance > 0 && <span>{formatKilometers(totalDistance)} total</span>}
+      </header>
+      <div className="plan-day-workout-bar" aria-hidden="true">
+        {barSteps.map((step, index) => (
+          <i key={`${step.kind}-${index}`} data-kind={step.kind} style={{ flexGrow: Math.max(1, step.value) }} />
+        ))}
+      </div>
+      <div className="plan-day-workout-legend">
+        <span data-kind="warmup">Warm-up</span>
+        <span data-kind="training">Main</span>
+        <span data-kind="rest">Rest</span>
+        <span data-kind="cooldown">Cool-down</span>
+      </div>
+      <div className="plan-day-workout-steps">
+        {steps.map((step, index) => {
+          if (step.repeat_group === null || step.repeat_group === undefined) return card(step, `step-${index}`);
+          if (groups.has(step.repeat_group)) return null;
+          groups.add(step.repeat_group);
+          const children = steps.filter((item) => item.repeat_group === step.repeat_group);
+          return (
+            <div className="plan-day-workout-repeat" key={`repeat-${step.repeat_group}`}>
+              <header>
+                <strong>Repeat ×{step.repeat_count ?? 1}</strong>
+                <span>{children.map(structureValue).join(" · ")}</span>
+              </header>
+              {children.map((item, childIndex) => card(item, `repeat-${step.repeat_group}-${childIndex}`, true))}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function normalizeLoadedDraft(draft: WorkoutEditorData): WorkoutDraftForm {
@@ -416,12 +590,56 @@ export default function TrainingPlanPage() {
   const [exerciseOptionsLoading, setExerciseOptionsLoading] = useState(false);
   const [exerciseOptionsLoaded, setExerciseOptionsLoaded] = useState(false);
   const [workoutError, setWorkoutError] = useState("");
+  const [hrProfile, setHrProfile] = useState<HeartRateProfile | null>(null);
   const editRequestRef = useRef<AbortController | null>(null);
 
   const days = useMemo(() => calendarDays(anchor), [anchor]);
   const firstDate = days[0];
   const lastDate = days[days.length - 1];
   const todayKey = localDateKey(today);
+
+  useEffect(() => {
+    async function fetchHeartRateProfile() {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+      try {
+        const [profileRes, fitnessRes] = await Promise.all([
+          fetch(`${apiBase}/api/settings/profile`).catch(() => null),
+          fetch(`${apiBase}/api/dashboard/running-fitness`).catch(() => null),
+        ]);
+
+        const profileData = profileRes?.ok ? await profileRes.json() : null;
+        const fitnessData = fitnessRes?.ok ? await fitnessRes.json() : null;
+
+        let thresholdHr: number | null = (fitnessData?.lthr ? Math.round(fitnessData.lthr) : null) ?? profileData?.threshold_hr_bpm ?? null;
+        if (!thresholdHr) {
+          const trendRes = await fetch(`${apiBase}/api/dashboard/fitness-trend?days=180`).catch(() => null);
+          if (trendRes?.ok) {
+            const trendData = await trendRes.json();
+            const latestTrend = Array.isArray(trendData)
+              ? [...trendData].reverse().find((d: { lthr?: number | null }) => d.lthr != null)
+              : null;
+            if (latestTrend?.lthr) thresholdHr = Math.round(latestTrend.lthr);
+          }
+        }
+
+        const maxHr: number | null = profileData?.max_hr_bpm ?? (fitnessData?.fitnessMaxHr ? Math.round(fitnessData.fitnessMaxHr) : null);
+        const restingHr: number | null = profileData?.resting_hr_bpm ?? null;
+        const hrr: number | null = profileData?.heart_rate_reserve_bpm ?? (
+          maxHr && restingHr && maxHr > restingHr ? maxHr - restingHr : null
+        );
+
+        setHrProfile({
+          max_hr: maxHr,
+          resting_hr: restingHr,
+          hrr,
+          threshold_hr: thresholdHr,
+        });
+      } catch {
+        // Fallback gracefully
+      }
+    }
+    void fetchHeartRateProfile();
+  }, []);
 
   useEffect(() => {
     async function fetchCalendarData() {
@@ -454,7 +672,7 @@ export default function TrainingPlanPage() {
   }, [calendarMoveNotice]);
 
   useEffect(() => {
-    if (!workoutDraft || exerciseVideosLoaded) return;
+    if (exerciseVideosLoaded) return;
     const controller = new AbortController();
     void fetch(`${apiBase}/api/training-plan/coros/exercise-videos`, { signal: controller.signal })
       .then((response) => response.ok ? response.json() as Promise<Record<string, string>> : {})
@@ -462,15 +680,9 @@ export default function TrainingPlanPage() {
       .catch(() => undefined)
       .finally(() => setExerciseVideosLoaded(true));
     return () => controller.abort();
-  }, [apiBase, exerciseVideosLoaded, workoutDraft]);
+  }, [apiBase, exerciseVideosLoaded]);
 
   useEffect(() => {
-    if (workoutDraft?.sport !== "strength") {
-      setExerciseOptions([]);
-      setExerciseOptionsLoaded(false);
-      setExerciseOptionsLoading(false);
-      return;
-    }
     if (exerciseOptionsLoaded) return;
     let active = true;
     setExerciseOptionsLoading(true);
@@ -491,7 +703,7 @@ export default function TrainingPlanPage() {
     return () => {
       active = false;
     };
-  }, [apiBase, exerciseOptionsLoaded, workoutDraft?.sport]);
+  }, [apiBase, exerciseOptionsLoaded]);
 
   const eventsByDate = useMemo(() => {
     const grouped: Record<string, TrainingEvent[]> = {};
@@ -843,7 +1055,7 @@ export default function TrainingPlanPage() {
   const stepEditor = (step: WorkoutStepForm, index: number, nested = false) => {
     if (!workoutDraft) return null;
     const targets = targetsFor(workoutDraft.sport, step.kind, step.exercise_code ?? step.name);
-    const video = exerciseVideo(step.name, exerciseVideos, exerciseOptions);
+    const video = exerciseVideo(step.name, exerciseVideos, exerciseOptions, step.exercise_code);
     const isVideoOpen = activeExerciseVideoStep === index;
     const isActive = activeWorkoutStep === index;
     const dragItem: WorkoutDragItem = { scope: nested ? "repeat" : "block", index };
@@ -853,7 +1065,7 @@ export default function TrainingPlanPage() {
     const hasCustomStepTitle = workoutDraft.sport !== "strength" && workoutDraft.sport !== "hyrox";
     const supportsSetRest = step.kind === "training" && (workoutDraft.sport === "strength" || workoutDraft.sport === "hyrox" && isHyroxFunctionalStation(step.name));
     return <article className={`plan-workout-step${isActive ? " is-active" : " is-collapsed"}${isDragging ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`} data-step-kind={step.kind} key={`${index}-${step.name}`} onDragOver={(event) => allowWorkoutDrop(event, dragItem)} onDrop={(event) => finishWorkoutDrop(event, dragItem)}>
-      <header className="plan-workout-step-title"><WorkoutDragHandle onDragStart={(event) => beginWorkoutDrag(event, dragItem)} onDragEnd={endWorkoutDrag} /><span className="plan-workout-step-index">{String(index + 1).padStart(2, "0")}</span><button className="plan-workout-step-toggle" type="button" aria-expanded={isActive} onClick={() => setActiveWorkoutStep(isActive ? null : index)}><small>Step {index + 1}</small><strong>{displayStepName(step)}</strong><em>{stepSummary(step)}</em></button><div className="plan-workout-step-header-actions">{video && <button type="button" aria-label={`${isVideoOpen ? "Hide" : "Show"} ${displayStepName(step)} technique video`} title={`${isVideoOpen ? "Hide" : "Show"} technique video`} aria-pressed={isVideoOpen} onClick={() => setActiveExerciseVideoStep(isVideoOpen ? null : index)}><WorkoutIcon name="video" size={15} /></button>}<button type="button" aria-label="Duplicate step" title="Duplicate step" onClick={() => duplicateStep(index)}><WorkoutIcon name="copy" size={15} /></button><button type="button" aria-label="Delete step" title="Delete step" disabled={workoutDraft.steps.length === 1} onClick={() => setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.filter((_, position) => position !== index) })}><WorkoutIcon name="trash" size={15} /></button></div></header>
+      <header className="plan-workout-step-title"><WorkoutDragHandle onDragStart={(event) => beginWorkoutDrag(event, dragItem)} onDragEnd={endWorkoutDrag} /><span className="plan-workout-step-index">{String(index + 1).padStart(2, "0")}</span><button className="plan-workout-step-toggle" type="button" aria-expanded={isActive} onClick={() => setActiveWorkoutStep(isActive ? null : index)}><small>Step {index + 1}</small><strong>{displayStepName(step)}</strong><em>{stepSummary(step, hrProfile)}</em></button><div className="plan-workout-step-header-actions">{video && <button type="button" aria-label={`${isVideoOpen ? "Hide" : "Show"} ${displayStepName(step)} technique video`} title={`${isVideoOpen ? "Hide" : "Show"} technique video`} aria-pressed={isVideoOpen} onClick={() => setActiveExerciseVideoStep(isVideoOpen ? null : index)}><WorkoutIcon name="video" size={15} /></button>}<button type="button" aria-label="Duplicate step" title="Duplicate step" onClick={() => duplicateStep(index)}><WorkoutIcon name="copy" size={15} /></button><button type="button" aria-label="Delete step" title="Delete step" disabled={workoutDraft.steps.length === 1} onClick={() => setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.filter((_, position) => position !== index) })}><WorkoutIcon name="trash" size={15} /></button></div></header>
       {video && isVideoOpen && <aside className="plan-workout-exercise-video" aria-label={`${displayStepName(step)} technique preview`}><video src={video} controls loop muted playsInline preload="metadata" /></aside>}
        {isActive && <div className="plan-workout-step-fields">
          {isStrengthMovement && <label><span>Movement</span><ExerciseCombobox value={step.name} options={exerciseOptions} loading={exerciseOptionsLoading} onChange={(selectedName, option) => updateStep(index, { name: resolveExerciseName(selectedName, selectedName), exercise_code: selectedName, exercise_id: option?.id ?? null })} /></label>}
@@ -867,13 +1079,29 @@ export default function TrainingPlanPage() {
         {step.intensity === "stroke" ? <label><span>Stroke</span><SingleSelect ariaLabel="Stroke" value={String(step.intensity_low ?? 1)} onChange={(value) => updateStep(index, { intensity_low: Number(value), intensity_high: null })} options={STROKE_OPTIONS} /></label> : null}
         {(() => {
           const zones = intensityZones(step.intensity, step.intensity_basis);
-          return zones ? <label><span>Range</span><SingleSelect ariaLabel="Intensity range" value={String(step.intensity_zone ?? "custom")} onChange={(value) => { const zone = zones.find((item) => item.id === Number(value)); updateStep(index, zone ? { intensity_zone: zone.id, intensity_low: zone.low, intensity_high: zone.high } : { intensity_zone: null }); }} options={[{ value: "custom", label: "Custom range" }, ...zones.map((zone) => ({ value: String(zone.id), label: `${zone.label} (${zone.low}%–${zone.high}%)` }))]} /></label> : null;
+          return zones ? <label><span>Range</span><SingleSelect ariaLabel="Intensity range" value={String(step.intensity_zone ?? "custom")} onChange={(value) => { const zone = zones.find((item) => item.id === Number(value)); updateStep(index, zone ? { intensity_zone: zone.id, intensity_low: zone.low, intensity_high: zone.high } : { intensity_zone: null }); }} options={[{ value: "custom", label: "Custom range" }, ...zones.map((zone) => {
+            let bpmSuffix = "";
+            if (step.intensity === "heart_rate_percent" && hrProfile) {
+              const hr = calculateStepHeartRate({ ...step, intensity_low: zone.low, intensity_high: zone.high }, hrProfile);
+              if (hr !== null) {
+                bpmSuffix = typeof hr === "number" ? ` · ${hr} bpm` : ` · ${hr.low}–${hr.high} bpm`;
+              }
+            }
+            return { value: String(zone.id), label: `${zone.label} (${zone.low}%–${zone.high}%${bpmSuffix})` };
+          })]} /></label> : null;
         })()}
         {INTENSITY_RANGE[step.intensity] && step.intensity_zone === null ? (() => {
           const range = INTENSITY_RANGE[step.intensity]!;
           const isPace = step.intensity === "pace" || step.intensity === "effort_pace";
           return <><label><span>{range.low}</span>{isPace ? <DurationInput key={step.intensity_low} seconds={step.intensity_low ?? 0} ariaLabel={range.low} onChange={(value) => updateStep(index, { intensity_zone: null, intensity_low: value })} /> : <NumberStepper ariaLabel={range.low} min={range.min} max={range.max} step={range.step} value={step.intensity_low ?? ""} onChange={(value) => updateStep(index, { intensity_zone: null, intensity_low: value === "" ? null : Number(value) })} />}</label>{range.high ? <label><span>{range.high}</span>{isPace ? <DurationInput key={step.intensity_high} seconds={step.intensity_high ?? 0} ariaLabel={range.high} onChange={(value) => updateStep(index, { intensity_zone: null, intensity_high: value })} /> : <NumberStepper ariaLabel={range.high} min={range.min} max={range.max} step={range.step} value={step.intensity_high ?? ""} onChange={(value) => updateStep(index, { intensity_zone: null, intensity_high: value === "" ? null : Number(value) })} />}</label> : null}</>;
         })() : null}
+        {step.intensity === "heart_rate_percent" && hrProfile && (() => {
+          const hr = calculateStepHeartRate(step, hrProfile);
+          if (!hr) return null;
+          const bpmText = typeof hr === "number" ? `${hr} bpm` : `${hr.low}–${hr.high} bpm`;
+          const basisAbbr = hrBasisAbbreviation(step.intensity_basis ?? "max_hr");
+          return <span style={{ gridColumn: "1 / -1", fontSize: "11px", color: "var(--color-text-muted)", marginTop: "2px" }}>Target HR: <strong style={{ color: "var(--color-text-primary)" }}>{bpmText}</strong> ({basisAbbr})</span>;
+        })()}
       </div>}
     </article>;
   };
@@ -1048,7 +1276,7 @@ export default function TrainingPlanPage() {
                       </div>
                     )}
                     {event.description && <div className="plan-workout-note"><span>Workout notes</span><p>{formatEventNote(event)}</p></div>}
-                    {event.workout_steps?.length ? <WorkoutStructure steps={event.workout_steps} /> : null}
+                    {event.workout_steps?.length ? <WorkoutStructure steps={event.workout_steps} profile={hrProfile} videos={exerciseVideos} options={exerciseOptions} /> : null}
                     {source === "coros" && (
                       <div className="plan-workout-actions">
                         <button className="btn btn-secondary btn-sm" type="button" onClick={() => setDuplicateTarget({ uid: event.uid, name: event.summary, date: selectedDate })}>Duplicate</button>

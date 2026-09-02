@@ -44,6 +44,8 @@ def test_calendar_questions_require_the_training_plan_tool() -> None:
 def test_calendar_changes_use_coros_workouts_and_require_update_uid() -> None:
     assert "It reads COROS Calendar,\n   not iCal." in COACH_SYSTEM_PROMPT
     assert "ask for the pool length" in COACH_SYSTEM_PROMPT
+    assert "Default pool length from Training\n   Setup" in COACH_SYSTEM_PROMPT
+    assert "available gym equipment" in COACH_SYSTEM_PROMPT
     assert "pool_length_m" in COACH_SYSTEM_PROMPT
     assert "make exactly one plural proposal call" in COACH_SYSTEM_PROMPT
     assert '`kind: "rest"` step' in COACH_SYSTEM_PROMPT
@@ -351,7 +353,7 @@ def test_controlled_tool_loop_streams_the_final_answer(monkeypatch) -> None:
         )
     )
 
-    assert answer == "Streaming works"
+    assert answer == "<think>Checking activities.</think>\n<tool-thought>\nStreaming works"
 
 
 def test_streams_a_direct_answer_without_a_non_streaming_model_call(monkeypatch) -> None:
@@ -436,7 +438,7 @@ def test_tool_round_preamble_is_streamed_as_thinking(monkeypatch) -> None:
     assert chunks == [
         "I’ll check the planned sessions ",
         "first.",
-        "<tool-thought>\n",
+        "<think>Checking activities.</think>\n<tool-thought>\n",
         "# Coach’s call",
     ]
 

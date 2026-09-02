@@ -71,6 +71,17 @@ test("moves streamed pre-tool text into active thinking without delaying it", ()
   );
 });
 
+test("keeps the current tool activity visible while the agent waits for its result", () => {
+  assert.deepEqual(
+    parseThinkingAndAnswer("<think>Checking activities.</think>\n<tool-thought>\n"),
+    {
+      thinking: "Checking activities.",
+      answer: "",
+      isThinkingActive: true,
+    },
+  );
+});
+
 test("marks an empty think marker as active immediately", () => {
   assert.deepEqual(parseThinkingAndAnswer("<think>"), {
     thinking: null,

@@ -19,7 +19,7 @@ from src.activity_laps import (
     training_time_s as _training_time_s,
 )
 from src.db.engine import get_db_session
-from src.db.models import Activity, ActivityLap, ActivityPause, ActivityRecord, FitnessEstimate
+from src.db.models import Activity, ActivityLap, ActivityPause, ActivityRecord, FitnessEstimate, SportType
 from src.db.owner import get_owner_id
 
 if TYPE_CHECKING:
@@ -187,7 +187,16 @@ async def list_activities(
 
     conditions: list[ColumnElement[bool]] = []
     if sport:
-        if sport == "treadmill":
+        if sport == "run":
+            conditions.append(
+                or_(
+                    Activity.sport == SportType.RUN,
+                    Activity.subsport == "101",
+                    Activity.title.ilike("%treadmill%"),
+                    Activity.title.ilike("%indoor run%"),
+                )
+            )
+        elif sport == "treadmill":
             conditions.append(
                 or_(
                     Activity.subsport == "101",
