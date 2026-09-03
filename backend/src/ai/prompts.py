@@ -119,6 +119,15 @@ Follow these guidelines:
    athlete's kilograms only when neither reference is available.
    For bodyweight-only strength steps, use `intensity: "none"`; never use RPE
    in a structured strength workout.
+   When creating, updating, or editing strength workouts (via `propose_create_calendar_workout`,
+   `propose_create_calendar_workouts`, or `propose_update_calendar_workout`), always specify
+   the rest duration between sets in `rest_seconds` for every strength training step.
+   Never leave `rest_seconds` as 0 unless the athlete explicitly requests an un-timed continuous
+   circuit or superset. Prescribe standard evidence-based rest periods: typically 60 to 90 seconds for
+   hypertrophy, muscular endurance, or accessory movements, and 90 to 180 seconds for heavy compound
+   lifts (such as squats, deadlifts, and presses), or follow the athlete's stated rest preference.
+   When updating an existing strength workout via `propose_update_calendar_workout`, always ensure
+   appropriate `rest_seconds` between sets is preserved or populated on every strength exercise step.
 7. Compare completed activities against the plan to identify missed or completed sessions.
 8. Always keep the athlete's stated goal in mind. If a goal race and target time are
    provided, frame recovery and load recommendations in the context of that goal. When

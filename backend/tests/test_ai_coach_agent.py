@@ -59,6 +59,11 @@ def test_calendar_changes_use_coros_workouts_and_require_update_uid() -> None:
     assert 'intensity: "none"' in COACH_SYSTEM_PROMPT
     assert "Never use RPE as a default or fallback for any activity" in COACH_SYSTEM_PROMPT
     assert 'Do not submit\n   `intensity: "rpe"` in a structured workout.' in COACH_SYSTEM_PROMPT
+    assert "rest duration between sets in `rest_seconds`" in COACH_SYSTEM_PROMPT
+    assert (
+        "Never leave `rest_seconds` as 0 unless the athlete explicitly requests"
+        in COACH_SYSTEM_PROMPT
+    )
     loop = asyncio.new_event_loop()
     try:
         tools = {tool.name: tool for tool in coach_agent._tools("owner", loop)}
@@ -71,6 +76,7 @@ def test_calendar_changes_use_coros_workouts_and_require_update_uid() -> None:
     assert "steps" in str(create_schema)
     assert "drafts" in batch_create_schema["properties"]
     assert "intervals need a separate rest step" in str(batch_create_schema)
+    assert "Rest between sets in seconds" in str(batch_create_schema)
     assert update_schema["required"] == ["uid", "draft"]
     assert "names" in tools["search_strength_exercises"].args_schema.model_json_schema()["properties"]
 
@@ -301,7 +307,9 @@ def test_controlled_tool_loop_ignores_duplicate_calls(monkeypatch) -> None:
 
     assert answer == "Race plan ready"
     assert executed == [{"start_date": "2026-08-16", "end_date": "2026-08-16"}]
-    assert tool_calls == [{"name": "get_training_plan", "arguments": executed[0]}]
+    assert tool_calls == [
+        {"name": "get_training_plan", "arguments": executed[0], "result": {"session": "race"}}
+    ]
 
 
 def test_controlled_tool_loop_streams_the_final_answer(monkeypatch) -> None:

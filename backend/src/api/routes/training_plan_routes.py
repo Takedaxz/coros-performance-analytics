@@ -185,7 +185,7 @@ class CorosWorkoutStep(BaseModel):
         default=0,
         ge=0,
         le=3_600,
-        description="Recovery after a non-repeated step; intervals need a separate rest step.",
+        description="Rest between sets in seconds for strength and HYROX training (e.g. 60-180s); for interval repeats, intervals need a separate rest step.",
     )
     repeats: int = Field(default=1, ge=1, le=99)
     intensity: WorkoutIntensity = "none"
