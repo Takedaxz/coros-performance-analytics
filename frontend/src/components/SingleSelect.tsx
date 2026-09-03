@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 interface SingleSelectOption {
   value: string;
   label: string;
@@ -22,10 +24,56 @@ export default function SingleSelect({
   options,
   value,
 }: SingleSelectProps) {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
   const selectedLabel = options.find((option) => option.value === value)?.label ?? value;
 
+  useEffect(() => {
+    const details = detailsRef.current;
+    if (!details) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!details.open) return;
+      if (!details.contains(event.target as Node)) {
+        details.removeAttribute("open");
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && details.open) {
+        details.removeAttribute("open");
+        details.querySelector<HTMLElement>(".single-select-trigger")?.focus();
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  const handleToggle = (event: React.SyntheticEvent<HTMLDetailsElement>) => {
+    const current = event.currentTarget;
+    if (current.open) {
+      const allOpen = document.querySelectorAll<HTMLDetailsElement>("details.single-select[open]");
+      allOpen.forEach((element) => {
+        if (element !== current) {
+          element.removeAttribute("open");
+        }
+      });
+    }
+  };
+
   return (
-    <details className="single-select" id={id} name={detailsName}>
+    <details
+      ref={detailsRef}
+      className="single-select"
+      id={id}
+      name={detailsName ?? "single-select-group"}
+      onToggle={handleToggle}
+    >
       <summary className="single-select-trigger" aria-label={ariaLabel}>
         <span className="single-select-trigger-label">{selectedLabel}</span>
         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none">

@@ -6064,6 +6064,8 @@ table.data-table .lap-split-table tr:hover td {
 
 .activity-filter-menu > .activity-filter-sport-select .single-select-menu {
   left: 0;
+  max-height: 250px;
+  overflow-y: auto;
   right: auto;
   width: 100%;
 }
@@ -6079,15 +6081,15 @@ table.data-table .lap-split-table tr:hover td {
   z-index: 50;
 }
 
-.activity-filter-sport-select span {
-  color: var(--color-text-muted);
-  font-size: 10px;
-  font-weight: var(--weight-bold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.activity-filter-sport-select .single-select-trigger {
+  background: var(--color-surface-secondary);
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: var(--weight-medium);
+  height: 38px;
+  justify-content: space-between;
+  padding: 0 10px;
 }
-
-.activity-filter-sport-select .single-select-trigger { background: var(--color-surface-secondary); }
 
 .activity-name-filter {
   display: grid;

@@ -149,13 +149,18 @@ export default function CustomDatePicker({
 
   const handleToggle = () => {
     if (disabled) return;
-    if (!isOpen && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      setIsDropUp(spaceBelow < 340);
-      if (mode === "year") setViewMode("years");
-      else if (mode === "month") setViewMode("months");
-      else setViewMode("days");
+    if (!isOpen) {
+      document.querySelectorAll<HTMLDetailsElement>("details.single-select[open]").forEach((element) => {
+        element.removeAttribute("open");
+      });
+      if (triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        setIsDropUp(spaceBelow < 340);
+        if (mode === "year") setViewMode("years");
+        else if (mode === "month") setViewMode("months");
+        else setViewMode("days");
+      }
     }
     setIsOpen((prev) => !prev);
   };
