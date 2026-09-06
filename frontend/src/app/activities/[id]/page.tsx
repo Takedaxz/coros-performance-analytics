@@ -219,6 +219,7 @@ interface RecordPoint {
   elapsed_s?: number;
   heart_rate_bpm?: number;
   speed_mps?: number;
+  effort_speed_mps?: number;
   altitude_m?: number;
   power_w?: number;
   cadence?: number;
@@ -229,6 +230,8 @@ interface RecordPoint {
   stride_ratio_pct?: number;
   stride_height_cm?: number;
 }
+
+type PaceMode = "normal" | "effort";
 
 type RunningDynamicsKey =
   | "cadence"
@@ -698,6 +701,7 @@ export default function ActivityDetailPage() {
   const [expandedTriathlonLeg, setExpandedTriathlonLeg] = useState<string | null>(null);
   const [selectedDynamicsMetrics, setSelectedDynamicsMetrics] =
     useState<RunningDynamicsKey[]>(["cadence"]);
+  const [paceMode, setPaceMode] = useState<PaceMode>("normal");
   const [selectedSwimMetrics, setSelectedSwimMetrics] =
     useState<SwimMetricKey[]>(["stroke_rate_spm"]);
   const [showTelemetryPopup, setShowTelemetryPopup] = useState(true);
@@ -1006,14 +1010,20 @@ export default function ActivityDetailPage() {
   const paceZones = isRun && activity.threshold_pace_s_per_km
     ? buildPaceZones(activity.threshold_pace_s_per_km)
     : [];
-  const paceChartCeiling = paceZones[0]?.min
-    ? paceZones[0].min * 1.45
-    : 720;
-  const paceValues = records.flatMap((record) =>
-    record.speed_mps != null && record.speed_mps > 0 && 1000 / record.speed_mps <= paceChartCeiling
-      ? [1000 / record.speed_mps]
-      : [],
-  );
+  const hasEffortPaceData = records.some((record) => (record.effort_speed_mps ?? 0) > 0);
+  const selectedPaceLabel = paceMode === "effort" ? "Effort Pace" : "Pace";
+  const selectedPaceSpeed = (record: RecordPoint): number | undefined =>
+    paceMode === "effort" ? record.effort_speed_mps : record.speed_mps;
+  const paceValues = records.flatMap((record) => {
+    const paceSpeed = selectedPaceSpeed(record);
+    return paceSpeed != null && paceSpeed > 0 ? [1000 / paceSpeed] : [];
+  });
+  const selectedAverageSpeed = paceMode === "effort"
+    ? records.reduce(
+      (total, record) => total + (record.effort_speed_mps ?? 0),
+      0,
+    ) / Math.max(1, records.filter((record) => (record.effort_speed_mps ?? 0) > 0).length)
+    : activity.avg_speed_mps;
   const sortedPaceValues = [...paceValues].sort((a, b) => a - b);
   const paceChartDomain: [number, number] = sortedPaceValues.length > 4
     ? (() => {
@@ -1022,17 +1032,18 @@ export default function ActivityDetailPage() {
       const padding = Math.max(10, (upper - lower) * 0.2);
       return [Math.max(0, lower - padding), upper + padding];
     })()
-    : [0, paceChartCeiling];
+    : [0, 720];
   const heartRateZoneSummary = summarizeTrainingZones(heartRateValues, heartRateZones);
   const paceZoneSummary = summarizeTrainingZones(paceValues, paceZones);
   const sampleRate = Math.max(1, Math.floor(records.length / 300));
   const chartData = records
     .filter((_, i) => i % sampleRate === 0 || i === records.length - 1)
     .map((record) => {
-      const pace = record.speed_mps != null && record.speed_mps > 0
-        && 1000 / record.speed_mps >= paceChartDomain[0]
-        && 1000 / record.speed_mps <= paceChartDomain[1]
-        ? 1000 / record.speed_mps
+      const paceSpeed = selectedPaceSpeed(record);
+      const pace = paceSpeed != null && paceSpeed > 0
+        && 1000 / paceSpeed >= paceChartDomain[0]
+        && 1000 / paceSpeed <= paceChartDomain[1]
+        ? 1000 / paceSpeed
         : undefined;
       const point: Record<string, number | undefined> = {
         time: record.elapsed_s ? record.elapsed_s / 60 : 0,
@@ -1371,29 +1382,49 @@ export default function ActivityDetailPage() {
             <section className="card activity-zone-card">
               <div className="activity-zone-header">
                 <div>
-                  <span className="card-title">Pace</span>
+                  <span className="card-title">{selectedPaceLabel}</span>
                   <span className="activity-zone-unit">min/km</span>
                 </div>
                 <div className="activity-zone-stats">
                   {activity.threshold_pace_s_per_km != null && (
                     <span>Threshold <strong className="mono">{formatPaceSeconds(activity.threshold_pace_s_per_km)}</strong></span>
                   )}
-                  {activity.avg_speed_mps != null && activity.avg_speed_mps > 0 && (
-                    <span>Average <strong className="mono">{formatPace(activity.avg_speed_mps)}</strong></span>
+                  {selectedAverageSpeed != null && selectedAverageSpeed > 0 && (
+                    <span>Average <strong className="mono">{formatPace(selectedAverageSpeed)}</strong></span>
                   )}
                 </div>
               </div>
+              {hasEffortPaceData && (
+                <div className="running-dynamics-tabs" role="group" aria-label="Pace type">
+                  <button
+                    type="button"
+                    aria-pressed={paceMode === "normal"}
+                    className={paceMode === "normal" ? "active" : ""}
+                    onClick={() => setPaceMode("normal")}
+                  >
+                    Normal Pace
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={paceMode === "effort"}
+                    className={paceMode === "effort" ? "active" : ""}
+                    onClick={() => setPaceMode("effort")}
+                  >
+                    Effort Pace
+                  </button>
+                </div>
+              )}
               <div className="activity-zone-chart">
                 <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 220 }}>
                   <LineChart data={chartData} margin={{ top: 16, right: 12, bottom: 8, left: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                     <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
                     <YAxis width={56} reversed domain={paceChartDomain} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => formatPaceSeconds(value)} axisLine={false} />
-                    <Tooltip formatter={(value) => [formatPaceSeconds(Number(value)), "Pace"]} labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`} />
-                    {activity.avg_speed_mps != null && activity.avg_speed_mps > 0 && (
-                      <ReferenceLine y={1000 / activity.avg_speed_mps} stroke="var(--color-status-critical)" strokeDasharray="4 4" />
+                    <Tooltip formatter={(value) => [formatPaceSeconds(Number(value)), selectedPaceLabel]} labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`} />
+                    {selectedAverageSpeed != null && selectedAverageSpeed > 0 && (
+                      <ReferenceLine y={1000 / selectedAverageSpeed} stroke="var(--color-status-critical)" strokeDasharray="4 4" />
                     )}
-                    {paceZones.length > 0 && <Line type="linear" dataKey="pace" stroke="var(--color-text-muted)" strokeWidth={2} dot={false} name="Pace" tooltipType="none" />}
+                    {paceZones.length > 0 && <Line type="linear" dataKey="pace" stroke="var(--color-text-muted)" strokeWidth={2} dot={false} name={selectedPaceLabel} tooltipType="none" />}
                     {paceZones.length ? paceZones.map((zone) => (
                       <Line key={zone.key} type="linear" dataKey={`pace_${zone.key}`} stroke={zone.color} strokeWidth={2.5} dot={false} connectNulls={false} name={zone.label} />
                     )) : (

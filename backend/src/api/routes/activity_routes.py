@@ -287,6 +287,7 @@ async def list_activities(
 import logging
 import os
 from io import BytesIO
+from pathlib import Path
 from zipfile import ZipFile, is_zipfile
 from src.config import get_settings
 from src.db.credential_store import load_coros_credentials
@@ -802,6 +803,38 @@ async def update_activity_note(
     return {"activity_note": activity.activity_note}
 
 
+def _effort_speeds_from_fit(activity: Activity) -> dict[datetime, float]:
+    """Read COROS's native effort-speed channel from the stored FIT export."""
+    if not activity.source_filename or Path(activity.source_filename).name != activity.source_filename:
+        return {}
+
+    path = Path(get_settings().raw_file_store_path) / activity.source_filename
+    try:
+        raw_fit = path.read_bytes()
+        fit_files = [raw_fit]
+        if is_zipfile(BytesIO(raw_fit)):
+            with ZipFile(BytesIO(raw_fit)) as archive:
+                fit_files = [
+                    archive.read(name)
+                    for name in archive.namelist()
+                    if name.lower().endswith(".fit")
+                ]
+    except OSError as exc:
+        logger.warning("activity_effort_pace: unable to read activity=%s error=%s", activity.id, exc)
+        return {}
+
+    return {
+        (
+            record.timestamp.replace(tzinfo=None)
+            if record.timestamp.tzinfo
+            else record.timestamp
+        ): record.effort_speed_mps
+        for fit_file in fit_files
+        for record in parse_fit_file(fit_file).records
+        if record.effort_speed_mps is not None and record.effort_speed_mps > 0
+    }
+
+
 @router.get("/{activity_id}/records")
 async def get_activity_records(
     activity_id: str,
@@ -823,6 +856,8 @@ async def get_activity_records(
     )
     records = result.scalars().all()
 
+    effort_speeds = _effort_speeds_from_fit(activity)
+
     return {
         "activity_id": activity_id,
         "record_count": len(records),
@@ -833,6 +868,7 @@ async def get_activity_records(
                 "distance_m": r.distance_m,
                 "altitude_m": r.altitude_m,
                 "speed_mps": r.speed_mps,
+                "effort_speed_mps": effort_speeds.get(r.timestamp),
                 "heart_rate_bpm": r.heart_rate_bpm,
                 "cadence": r.cadence,
                 "power_w": r.power_w,

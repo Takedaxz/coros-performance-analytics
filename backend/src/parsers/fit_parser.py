@@ -22,6 +22,7 @@ class ParsedRecord:
     distance_m: float | None = None
     altitude_m: float | None = None
     speed_mps: float | None = None
+    effort_speed_mps: float | None = None
     heart_rate_bpm: int | None = None
     cadence: int | None = None
     power_w: int | None = None
@@ -296,6 +297,7 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
                             distance_m=_get_field_value(frame, "distance"),
                             altitude_m=_get_field_value(frame, "altitude"),
                             speed_mps=_get_field_value(frame, "speed"),
+                            effort_speed_mps=_get_field_value(frame, "Effort Pace"),
                             heart_rate_bpm=_get_field_value(frame, "heart_rate"),
                             cadence=_get_field_value(frame, "cadence"),
                             power_w=_get_field_value(frame, "power"),
