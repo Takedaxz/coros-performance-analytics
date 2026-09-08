@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { CircleMarker, LatLngBounds, Map as LeafletMap, Polyline } from "leaflet";
+import type { GeoJSONSource, Map as MapLibreMap, Marker, Popup } from "maplibre-gl";
 import { routePositionAt, type TimedRoutePoint } from "./routeReplay";
 import { openFreeMapStyleUrl, type Theme } from "@/lib/theme";
 
@@ -16,6 +17,8 @@ interface RoutePoint {
 interface MapProps {
   points: RoutePoint[];
   showTelemetryPopup?: boolean;
+  terrain3D?: boolean;
+  onTerrain3DChange?: (value: boolean) => void;
   onExpand?: () => void;
 }
 
@@ -31,6 +34,18 @@ interface PlaybackState {
 
 function isTimedPoint(point: RoutePoint): point is TimedRoutePoint {
   return typeof point.elapsed_s === "number" && Number.isFinite(point.elapsed_s);
+}
+
+function normalizedTimedRoutePoints(points: RoutePoint[]): TimedRoutePoint[] {
+  const timedPoints = points.filter(isTimedPoint);
+  const firstElapsed = timedPoints[0]?.elapsed_s ?? 0;
+  return timedPoints.map((point) => ({ ...point, elapsed_s: point.elapsed_s - firstElapsed }));
+}
+
+function terrainMarkerElement(kind: "start" | "finish" | "runner"): HTMLDivElement {
+  const element = document.createElement("div");
+  element.className = `activity-route-terrain-marker is-${kind}`;
+  return element;
 }
 
 function formatReplayTime(seconds: number): string {
@@ -53,11 +68,24 @@ function formatPacePopup(speedMps?: number): string {
   return `${min}:${sec.toString().padStart(2, "0")} /km`;
 }
 
-export default function Map({ points, showTelemetryPopup = true, onExpand }: MapProps) {
+function telemetryPopupHtml(speedMps?: number, heartRateBpm?: number): string {
+  const pace = formatPacePopup(speedMps);
+  const heartRate = heartRateBpm != null ? `${heartRateBpm} bpm` : "--";
+  return `<div class="runner-telemetry-content"><div class="runner-telemetry-item"><span class="runner-telemetry-label">Pace</span><strong class="runner-telemetry-value">${pace}</strong></div><div class="runner-telemetry-item"><span class="runner-telemetry-label">HR</span><strong class="runner-telemetry-value">${heartRate}</strong></div></div>`;
+}
+
+export default function Map({ points, showTelemetryPopup = true, terrain3D = false, onTerrain3DChange, onExpand }: MapProps) {
+  const isTerrain3D = terrain3D;
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const elapsedLabelRef = useRef<HTMLSpanElement>(null);
   const progressInputRef = useRef<HTMLInputElement>(null);
   const mapInstanceRef = useRef<LeafletMap | null>(null);
+  const terrainMapRef = useRef<MapLibreMap | null>(null);
+  const terrainStartMarkerRef = useRef<Marker | null>(null);
+  const terrainFinishMarkerRef = useRef<Marker | null>(null);
+  const terrainRunnerMarkerRef = useRef<Marker | null>(null);
+  const terrainRunnerPopupRef = useRef<Popup | null>(null);
+  const terrainBoundsRef = useRef<[[number, number], [number, number]] | null>(null);
   const routeBoundsRef = useRef<LatLngBounds | null>(null);
   const progressLineRef = useRef<Polyline | null>(null);
   const runnerMarkerRef = useRef<CircleMarker | null>(null);
@@ -72,9 +100,12 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
     speed: 25,
     playing: false,
   });
+  const preservePlaybackOnMapChangeRef = useRef(false);
+  const resumePlaybackOnMapChangeRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<PlaybackSpeed>(25);
   const showTelemetryPopupRef = useRef(showTelemetryPopup);
+
 
   const timedPoints = points.filter(isTimedPoint);
   const replayDuration = timedPoints.length > 1
@@ -84,10 +115,12 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
 
   useEffect(() => {
     showTelemetryPopupRef.current = showTelemetryPopup;
-    if (runnerMarkerRef.current) {
+    if (terrainRunnerMarkerRef.current || runnerMarkerRef.current) {
       if (showTelemetryPopup) {
         renderPlayback(playbackRef.current.elapsedSeconds);
-      } else {
+      } else if (terrainRunnerPopupRef.current) {
+        terrainRunnerPopupRef.current.remove();
+      } else if (runnerMarkerRef.current) {
         runnerMarkerRef.current.closePopup();
       }
     }
@@ -95,7 +128,7 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
 
   const renderPlayback = (elapsedSeconds: number): void => {
     const replayPoints = timedPointsRef.current;
-    if (replayPoints.length < 2 || !progressLineRef.current || !runnerMarkerRef.current) return;
+    if (replayPoints.length < 2) return;
 
     const position = routePositionAt(replayPoints, elapsedSeconds, segmentIndexRef.current);
     segmentIndexRef.current = position.segmentIndex;
@@ -104,30 +137,52 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
       .slice(0, position.segmentIndex + 1)
       .map((point): [number, number] => [point.lat, point.lng]);
 
-    progressLineRef.current.setLatLngs([...completedPoints, currentPoint]);
-    runnerMarkerRef.current.setLatLng(currentPoint);
-
-    if (showTelemetryPopupRef.current) {
-      const paceStr = formatPacePopup(position.speed_mps);
-      const hrStr = position.heart_rate_bpm != null ? `${position.heart_rate_bpm} bpm` : "--";
-      const popupHtml = `<div class="runner-telemetry-content"><div class="runner-telemetry-item"><span class="runner-telemetry-label">Pace</span><strong class="runner-telemetry-value">${paceStr}</strong></div><div class="runner-telemetry-item"><span class="runner-telemetry-label">HR</span><strong class="runner-telemetry-value">${hrStr}</strong></div></div>`;
-
-      if (!runnerMarkerRef.current.getPopup()) {
-        runnerMarkerRef.current.bindPopup(popupHtml, {
-          autoPan: false,
-          closeButton: false,
-          closeOnClick: false,
-          className: "runner-telemetry-popup",
-          offset: [0, -8],
-        });
+    const terrainProgressSource = terrainMapRef.current?.getSource("activity-route-progress");
+    if (terrainProgressSource && terrainRunnerMarkerRef.current) {
+      (terrainProgressSource as GeoJSONSource).setData({
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "LineString",
+          coordinates: [...completedPoints, currentPoint].map(([lat, lng]) => [lng, lat]),
+        },
+      });
+      terrainRunnerMarkerRef.current.setLngLat([currentPoint[1], currentPoint[0]]);
+      const popup = terrainRunnerPopupRef.current;
+      if (popup && showTelemetryPopupRef.current) {
+        popup
+          .setLngLat([currentPoint[1], currentPoint[0]])
+          .setHTML(telemetryPopupHtml(position.speed_mps, position.heart_rate_bpm));
+        if (!popup.isOpen()) popup.addTo(terrainMapRef.current!);
       } else {
-        runnerMarkerRef.current.setPopupContent(popupHtml);
+        popup?.remove();
       }
-      if (!runnerMarkerRef.current.isPopupOpen()) {
-        runnerMarkerRef.current.openPopup();
+    } else if (progressLineRef.current && runnerMarkerRef.current) {
+      progressLineRef.current.setLatLngs([...completedPoints, currentPoint]);
+      runnerMarkerRef.current.setLatLng(currentPoint);
+
+      if (showTelemetryPopupRef.current) {
+        const popupHtml = telemetryPopupHtml(position.speed_mps, position.heart_rate_bpm);
+
+        if (!runnerMarkerRef.current.getPopup()) {
+          runnerMarkerRef.current.bindPopup(popupHtml, {
+            autoPan: false,
+            closeButton: false,
+            closeOnClick: false,
+            className: "runner-telemetry-popup",
+            offset: [0, -8],
+          });
+        } else {
+          runnerMarkerRef.current.setPopupContent(popupHtml);
+        }
+        if (!runnerMarkerRef.current.isPopupOpen()) {
+          runnerMarkerRef.current.openPopup();
+        }
+      } else {
+        runnerMarkerRef.current.closePopup();
       }
     } else {
-      runnerMarkerRef.current.closePopup();
+      return;
     }
 
     if (elapsedLabelRef.current) {
@@ -166,7 +221,11 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
   };
 
   const play = (): void => {
-    if (!canReplay || !progressLineRef.current || !runnerMarkerRef.current || playbackRef.current.playing) return;
+    const hasReplayRenderer = Boolean(
+      (progressLineRef.current && runnerMarkerRef.current)
+      || (terrainMapRef.current && terrainRunnerMarkerRef.current),
+    );
+    if (!canReplay || !hasReplayRenderer || playbackRef.current.playing) return;
     if (playbackRef.current.elapsedSeconds >= durationRef.current) {
       playbackRef.current.elapsedSeconds = 0;
       segmentIndexRef.current = 0;
@@ -178,6 +237,24 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
     playbackRef.current.playing = true;
     setIsPlaying(true);
     animationFrameRef.current = requestAnimationFrame(animate);
+  };
+
+  const resumePlaybackAfterMapChange = (): void => {
+    if (!resumePlaybackOnMapChangeRef.current) return;
+    resumePlaybackOnMapChangeRef.current = false;
+    playbackRef.current.startedAtMs = 0;
+    playbackRef.current.startedElapsedSeconds = playbackRef.current.elapsedSeconds;
+    playbackRef.current.playing = true;
+    setIsPlaying(true);
+    animationFrameRef.current = requestAnimationFrame(animate);
+  };
+
+  const toggleTerrain = (): void => {
+    preservePlaybackOnMapChangeRef.current = true;
+    resumePlaybackOnMapChangeRef.current = playbackRef.current.playing;
+    cancelAnimation();
+    setIsPlaying(false);
+    onTerrain3DChange?.(!isTerrain3D);
   };
 
   const pause = (): void => {
@@ -218,6 +295,16 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
   };
 
   const resetMapView = (): void => {
+    if (terrainMapRef.current && terrainBoundsRef.current) {
+      terrainMapRef.current.fitBounds(terrainBoundsRef.current, {
+        animate: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+        duration: 350,
+        padding: 40,
+        pitch: 65,
+      });
+      return;
+    }
+
     const map = mapInstanceRef.current;
     const bounds = routeBoundsRef.current;
     if (!map || !bounds) return;
@@ -241,9 +328,204 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
 
     let isMounted = true;
     let themeObserver: MutationObserver | null = null;
+    const preservePlayback = preservePlaybackOnMapChangeRef.current;
+    preservePlaybackOnMapChangeRef.current = false;
     cancelAnimation();
-    playbackRef.current.elapsedSeconds = 0;
-    segmentIndexRef.current = 0;
+    if (!preservePlayback) {
+      playbackRef.current.elapsedSeconds = 0;
+      segmentIndexRef.current = 0;
+    }
+
+    if (isTerrain3D) {
+      import("maplibre-gl").then((maplibregl) => {
+        const container = mapContainerRef.current;
+        if (!isMounted || !container || !document.body.contains(container)) return;
+
+        const validPoints = points.filter(
+          (point) => Number.isFinite(point.lat) && Number.isFinite(point.lng),
+        );
+        if (validPoints.length === 0) return;
+
+        const normalizedTimedPoints = normalizedTimedRoutePoints(validPoints);
+        timedPointsRef.current = normalizedTimedPoints;
+        durationRef.current = normalizedTimedPoints.length > 1
+          ? normalizedTimedPoints[normalizedTimedPoints.length - 1].elapsed_s
+          : 0;
+
+        const coordinates = validPoints.map((point): [number, number] => [point.lng, point.lat]);
+        const lngs = coordinates.map(([lng]) => lng);
+        const lats = coordinates.map(([, lat]) => lat);
+        const bounds: [[number, number], [number, number]] = [
+          [Math.min(...lngs), Math.min(...lats)],
+          [Math.max(...lngs), Math.max(...lats)],
+        ];
+        terrainBoundsRef.current = bounds;
+
+        const currentTheme = (): Theme =>
+          document.documentElement.dataset.theme === "light" ? "light" : "dark";
+        const map = new maplibregl.Map({
+          container,
+          style: openFreeMapStyleUrl(currentTheme()),
+          center: coordinates[0],
+          zoom: 12,
+          pitch: 65,
+          bearing: -18,
+          maxPitch: 85,
+        });
+        terrainMapRef.current = map;
+
+        // Mirror the 2D map's theme observer so style updates without a remount
+        themeObserver = new MutationObserver(() => {
+          map.setStyle(openFreeMapStyleUrl(currentTheme()));
+          // Re-add route sources/layers after style reload
+          map.once("style.load", () => {
+            if (!isMounted) return;
+            map.addSource("terrain-dem", {
+              type: "raster-dem",
+              url: "https://tiles.mapterhorn.com/tilejson.json",
+            });
+            map.setTerrain({ source: "terrain-dem", exaggeration: 1.2 });
+            map.addSource("activity-route", {
+              type: "geojson",
+              data: {
+                type: "Feature",
+                properties: {},
+                geometry: { type: "LineString", coordinates },
+              },
+            });
+            map.addLayer({
+              id: "activity-route",
+              type: "line",
+              source: "activity-route",
+              paint: {
+                "line-color": "#21E6A5",
+                "line-width": 5,
+                "line-opacity": normalizedTimedPoints.length > 1 ? 0.24 : 0.95,
+              },
+            });
+            if (normalizedTimedPoints.length > 1) {
+              const completedCoords = timedPointsRef.current
+                .slice(0, segmentIndexRef.current + 1)
+                .map((p): [number, number] => [p.lng, p.lat]);
+              map.addSource("activity-route-progress", {
+                type: "geojson",
+                data: {
+                  type: "Feature",
+                  properties: {},
+                  geometry: {
+                    type: "LineString",
+                    coordinates: completedCoords.length > 0 ? completedCoords : [coordinates[0]],
+                  },
+                },
+              });
+              map.addLayer({
+                id: "activity-route-progress",
+                type: "line",
+                source: "activity-route-progress",
+                paint: { "line-color": "#21E6A5", "line-width": 5, "line-opacity": 0.95 },
+              });
+            }
+          });
+        });
+        themeObserver.observe(document.documentElement, {
+          attributeFilter: ["data-theme"],
+          attributes: true,
+        });
+
+        map.on("load", () => {
+          if (!isMounted) return;
+          map.addSource("terrain-dem", {
+            type: "raster-dem",
+            url: "https://tiles.mapterhorn.com/tilejson.json",
+          });
+          map.setTerrain({ source: "terrain-dem", exaggeration: 1.2 });
+          map.addSource("activity-route", {
+            type: "geojson",
+            data: {
+              type: "Feature",
+              properties: {},
+              geometry: { type: "LineString", coordinates },
+            },
+          });
+          map.addLayer({
+            id: "activity-route",
+            type: "line",
+            source: "activity-route",
+            paint: {
+              "line-color": "#21E6A5",
+              "line-width": 5,
+              "line-opacity": normalizedTimedPoints.length > 1 ? 0.24 : 0.95,
+            },
+          });
+          terrainStartMarkerRef.current = new maplibregl.Marker({
+            element: terrainMarkerElement("start"),
+            anchor: "center",
+          })
+            .setLngLat(coordinates[0])
+            .addTo(map);
+          terrainFinishMarkerRef.current = new maplibregl.Marker({
+            element: terrainMarkerElement("finish"),
+            anchor: "center",
+          })
+            .setLngLat(coordinates[coordinates.length - 1])
+            .addTo(map);
+          if (normalizedTimedPoints.length > 1) {
+            map.addSource("activity-route-progress", {
+              type: "geojson",
+              data: {
+                type: "Feature",
+                properties: {},
+                geometry: { type: "LineString", coordinates: [coordinates[0]] },
+              },
+            });
+            map.addLayer({
+              id: "activity-route-progress",
+              type: "line",
+              source: "activity-route-progress",
+              paint: { "line-color": "#21E6A5", "line-width": 5, "line-opacity": 0.95 },
+            });
+            terrainRunnerMarkerRef.current = new maplibregl.Marker({
+              element: terrainMarkerElement("runner"),
+              anchor: "center",
+            })
+              .setLngLat(coordinates[0])
+              .addTo(map);
+            terrainRunnerPopupRef.current = new maplibregl.Popup({
+              closeButton: false,
+              closeOnClick: false,
+              className: "runner-telemetry-popup",
+              offset: 8,
+            })
+              .setLngLat(coordinates[0])
+              .setHTML(telemetryPopupHtml(normalizedTimedPoints[0].speed_mps, normalizedTimedPoints[0].heart_rate_bpm));
+            renderPlayback(playbackRef.current.elapsedSeconds);
+            resumePlaybackAfterMapChange();
+          }
+          map.fitBounds(bounds, { padding: 40, pitch: 65, duration: 0 });
+          map.once("idle", () => {
+            if (!isMounted) return;
+            terrainStartMarkerRef.current?.setLngLat(coordinates[0]);
+            terrainFinishMarkerRef.current?.setLngLat(coordinates[coordinates.length - 1]);
+            renderPlayback(playbackRef.current.elapsedSeconds);
+            map.triggerRepaint();
+          });
+        });
+      }).catch(() => onTerrain3DChange?.(false));
+
+      return () => {
+        isMounted = false;
+        themeObserver?.disconnect();
+        terrainBoundsRef.current = null;
+        terrainStartMarkerRef.current = null;
+        terrainFinishMarkerRef.current = null;
+        terrainRunnerMarkerRef.current = null;
+        terrainRunnerPopupRef.current?.remove();
+        terrainRunnerPopupRef.current = null;
+        terrainMapRef.current?.remove();
+        terrainMapRef.current = null;
+      };
+    }
+
 
     Promise.all([
       import("leaflet"),
@@ -269,12 +551,7 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
       if (validPoints.length === 0) return;
 
       const latLngs = validPoints.map((point): [number, number] => [point.lat, point.lng]);
-      const timedRoutePoints = validPoints.filter(isTimedPoint);
-      const firstElapsed = timedRoutePoints[0]?.elapsed_s ?? 0;
-      const normalizedTimedPoints = timedRoutePoints.map((point) => ({
-        ...point,
-        elapsed_s: point.elapsed_s - firstElapsed,
-      }));
+      const normalizedTimedPoints = normalizedTimedRoutePoints(validPoints);
       timedPointsRef.current = normalizedTimedPoints;
       durationRef.current = normalizedTimedPoints.length > 1
         ? normalizedTimedPoints[normalizedTimedPoints.length - 1].elapsed_s
@@ -357,7 +634,8 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
           color: "#131A1E",
           weight: 3,
         }).addTo(map);
-        renderPlayback(0);
+        renderPlayback(playbackRef.current.elapsedSeconds);
+        resumePlaybackAfterMapChange();
       }
 
       requestAnimationFrame(() => {
@@ -390,7 +668,7 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
         mapInstanceRef.current = null;
       }
     };
-  }, [points]);
+  }, [points, isTerrain3D]);
 
   return (
     <div className={canReplay ? "activity-route-shell has-replay" : "activity-route-shell"}>
@@ -399,6 +677,16 @@ export default function Map({ points, showTelemetryPopup = true, onExpand }: Map
         className="activity-route-map"
       />
       <div className="activity-route-map-actions">
+        <button
+          aria-label={isTerrain3D ? "Switch to flat map" : "Show 3D terrain map"}
+          aria-pressed={isTerrain3D}
+          className={`activity-route-terrain-toggle${isTerrain3D ? " is-active" : ""}`}
+          onClick={toggleTerrain}
+          title={isTerrain3D ? "Flat map" : "3D terrain (experimental)"}
+          type="button"
+        >
+          3D
+        </button>
         <button
           aria-label="Reset map view"
           className="activity-route-reset"

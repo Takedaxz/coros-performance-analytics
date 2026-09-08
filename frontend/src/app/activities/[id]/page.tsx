@@ -706,6 +706,7 @@ export default function ActivityDetailPage() {
     useState<SwimMetricKey[]>(["stroke_rate_spm"]);
   const [showTelemetryPopup, setShowTelemetryPopup] = useState(true);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
+  const [isTerrain3D, setIsTerrain3D] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1745,7 +1746,7 @@ export default function ActivityDetailPage() {
                     </button>
                   </div>
                   <div style={{ flex: 1, position: "relative", minHeight: "260px", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-                    <Map key={activityId} points={sampledRoutePoints} showTelemetryPopup={showTelemetryPopup} onExpand={() => setIsMapExpanded(true)} />
+                    <Map key={activityId} points={sampledRoutePoints} showTelemetryPopup={showTelemetryPopup} terrain3D={isTerrain3D} onTerrain3DChange={setIsTerrain3D} onExpand={() => setIsMapExpanded(true)} />
                   </div>
                 </div>
               )}
@@ -1792,7 +1793,7 @@ export default function ActivityDetailPage() {
                       </div>
                     </div>
                     <div className="map-expanded-modal-body">
-                      <Map key={`${activityId}-expanded`} points={sampledRoutePoints} showTelemetryPopup={showTelemetryPopup} />
+                      <Map key={`${activityId}-expanded`} points={sampledRoutePoints} showTelemetryPopup={showTelemetryPopup} terrain3D={isTerrain3D} onTerrain3DChange={setIsTerrain3D} />
                     </div>
                   </div>
                 </div>

@@ -2357,6 +2357,63 @@ a:hover {
   z-index: 900;
 }
 
+.activity-route-terrain-toggle {
+  align-items: center;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  height: 30px;
+  justify-content: center;
+  letter-spacing: 0.04em;
+  padding: 0;
+  width: 30px;
+}
+
+.activity-route-terrain-toggle:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text-primary);
+}
+
+.activity-route-terrain-toggle.is-active {
+  background: color-mix(in srgb, var(--color-accent-primary) 12%, var(--color-bg-secondary));
+  border-color: var(--border-color-active);
+  color: var(--color-accent-primary);
+}
+
+.activity-route-terrain-toggle:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+.activity-route-terrain-marker {
+  background: var(--color-accent-primary);
+  border: 3px solid #131a1e;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 45%);
+  box-sizing: border-box;
+  height: 14px;
+  width: 14px;
+}
+
+.activity-route-terrain-marker.is-start {
+  background: #2d9bf0;
+}
+
+.activity-route-terrain-marker.is-finish {
+  background: #f0d348;
+}
+
+.activity-route-terrain-marker.is-runner {
+  height: 16px;
+  width: 16px;
+}
+
 .activity-route-reset {
   align-items: center;
   background: var(--color-bg-secondary);
@@ -2564,6 +2621,17 @@ a:hover {
   padding: 2px 6px;
 }
 
+/* maplibre injects its CSS dynamically at runtime, after globals.css, so !important is
+   required here to override the default background: #fff that wins by source order. */
+.maplibregl-popup.runner-telemetry-popup .maplibregl-popup-content {
+  background: var(--color-bg-card, #131a1e) !important;
+  color: var(--color-text-primary, #ffffff) !important;
+  border: none !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45) !important;
+  padding: 6px 8px !important;
+}
+
 .leaflet-popup.runner-telemetry-popup .leaflet-popup-content {
   margin: 4px 6px;
   line-height: 1.3;
@@ -2571,6 +2639,28 @@ a:hover {
 
 .leaflet-popup.runner-telemetry-popup .leaflet-popup-tip {
   background: var(--color-bg-card, #131a1e);
+}
+
+/* The maplibre tip is a zero-size box drawn with CSS borders — background has no effect.
+   Override every anchor-specific border-color so the triangle matches the card background. */
+.maplibregl-popup.runner-telemetry-popup.maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.maplibregl-popup.runner-telemetry-popup.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-popup.runner-telemetry-popup.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: var(--color-bg-card, #131a1e);
+}
+
+.maplibregl-popup.runner-telemetry-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.maplibregl-popup.runner-telemetry-popup.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.maplibregl-popup.runner-telemetry-popup.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: var(--color-bg-card, #131a1e);
+}
+
+.maplibregl-popup.runner-telemetry-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: var(--color-bg-card, #131a1e);
+}
+
+.maplibregl-popup.runner-telemetry-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: var(--color-bg-card, #131a1e);
 }
 
 .runner-telemetry-content {
