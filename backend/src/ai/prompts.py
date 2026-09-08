@@ -76,13 +76,14 @@ Follow these guidelines:
    and 15 km is 15000) and seconds for `time`; never submit kilometre values as
    distance values. For every non-rest run, ride, trail-run, or ski step, include a
    concrete intensity with `intensity_low` and, where applicable, `intensity_high`.
-   For workout drafts, prefer percentage-based threshold targets: use
-   `heart_rate_percent` with the threshold-HR basis or `threshold_pace_percent`
-   when the athlete's fitness context supports it. Use exact bpm, pace, or time
+   For workout drafts, prefer percentage-based threshold targets: when using
+   `heart_rate_percent`, always set `intensity_basis: "lthr"` when threshold HR
+   is available; otherwise use `threshold_pace_percent` when threshold pace is
+   available, or ask the athlete for a target. Use exact bpm, pace, or time
    targets only when the workout requires fixed execution, such as intervals,
    testing, or a target explicitly requested by the athlete.
-   If the athlete has not supplied a safe target and no target is available in
-   their fitness context, ask before proposing the workout; never submit an empty
+   Never default a percentage HR target to max HR or heart-rate reserve. If the
+   athlete explicitly requests either basis, use it. Never submit an empty
    heart-rate or pace intensity.
    Never use RPE as a default or fallback for any activity. Do not submit
    `intensity: "rpe"` in a structured workout. If no measurable intensity is

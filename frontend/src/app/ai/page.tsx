@@ -1641,7 +1641,9 @@ export default function AiPage() {
   function handleComposerChange(event: ReactChangeEvent<HTMLTextAreaElement>): void {
     const textarea = event.currentTarget;
     setInput(textarea.value);
-    setComposerNeedsBottomSpace(textarea.value.length > 0 && textarea.clientHeight > 80);
+    requestAnimationFrame(() => {
+      setComposerNeedsBottomSpace(textarea.value.length > 0 && textarea.scrollHeight > 56);
+    });
   }
 
   async function confirmCalendarChange(change: CalendarChangeAction, key: string, closeReview = true) {

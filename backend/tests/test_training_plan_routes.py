@@ -589,7 +589,6 @@ def test_structured_workout_encodes_coros_percentage_intensity() -> None:
             steps=[
                 CorosWorkoutStep(
                     intensity="heart_rate_percent",
-                    intensity_basis="lthr",
                     intensity_low=96,
                     intensity_high=102,
                     intensity_zone=3,

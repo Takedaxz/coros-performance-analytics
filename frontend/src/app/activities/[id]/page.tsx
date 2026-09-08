@@ -1380,11 +1380,33 @@ export default function ActivityDetailPage() {
         <div className="activity-zone-overview-grid">
           {hasPaceData && (
             <section className="card activity-zone-card">
-              <div className="activity-zone-header">
-                <div>
-                  <span className="card-title">{selectedPaceLabel}</span>
-                  <span className="activity-zone-unit">min/km</span>
-                </div>
+              <div className="activity-zone-header pace-zone-header">
+                {hasEffortPaceData ? (
+                  <div className="pace-title-row">
+                    <div className="pace-mode-tabs" role="group" aria-label="Pace type">
+                      <button
+                        type="button"
+                        aria-pressed={paceMode === "normal"}
+                        onClick={() => setPaceMode("normal")}
+                      >
+                        Pace
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={paceMode === "effort"}
+                        onClick={() => setPaceMode("effort")}
+                      >
+                        Effort Pace
+                      </button>
+                    </div>
+                    <span className="activity-zone-unit">min/km</span>
+                  </div>
+                ) : (
+                  <div>
+                    <span className="card-title">{selectedPaceLabel}</span>
+                    <span className="activity-zone-unit">min/km</span>
+                  </div>
+                )}
                 <div className="activity-zone-stats">
                   {activity.threshold_pace_s_per_km != null && (
                     <span>Threshold <strong className="mono">{formatPaceSeconds(activity.threshold_pace_s_per_km)}</strong></span>
@@ -1394,26 +1416,6 @@ export default function ActivityDetailPage() {
                   )}
                 </div>
               </div>
-              {hasEffortPaceData && (
-                <div className="running-dynamics-tabs" role="group" aria-label="Pace type">
-                  <button
-                    type="button"
-                    aria-pressed={paceMode === "normal"}
-                    className={paceMode === "normal" ? "active" : ""}
-                    onClick={() => setPaceMode("normal")}
-                  >
-                    Normal Pace
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={paceMode === "effort"}
-                    className={paceMode === "effort" ? "active" : ""}
-                    onClick={() => setPaceMode("effort")}
-                  >
-                    Effort Pace
-                  </button>
-                </div>
-              )}
               <div className="activity-zone-chart">
                 <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 220 }}>
                   <LineChart data={chartData} margin={{ top: 16, right: 12, bottom: 8, left: 8 }}>

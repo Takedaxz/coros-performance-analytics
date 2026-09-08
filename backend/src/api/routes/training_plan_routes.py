@@ -191,7 +191,7 @@ class CorosWorkoutStep(BaseModel):
     intensity: WorkoutIntensity = "none"
     intensity_low: float | None = Field(default=None, ge=-8, le=1_000_000)
     intensity_high: float | None = Field(default=None, ge=-8, le=1_000_000)
-    intensity_basis: WorkoutIntensityBasis = "max_hr"
+    intensity_basis: WorkoutIntensityBasis = "lthr"
     intensity_zone: int | None = Field(default=None, ge=1, le=7)
     repeat_group: int | None = Field(
         default=None,
