@@ -81,6 +81,13 @@ def test_calendar_changes_use_coros_workouts_and_require_update_uid() -> None:
     assert "names" in tools["search_strength_exercises"].args_schema.model_json_schema()["properties"]
 
 
+def test_coach_prefers_time_based_targets_for_easy_sessions() -> None:
+    assert "For easy sessions (such as easy runs, recovery runs, easy rides," in COACH_SYSTEM_PROMPT
+    assert 'prefer time-based duration (`target: "time"`) rather than' in COACH_SYSTEM_PROMPT
+    assert "proposing distance-based\n   sessions remains fully acceptable" in COACH_SYSTEM_PROMPT
+    assert "For easy sessions (such as an easy run or bike ride)" in COACH_SYSTEM_PROMPT
+
+
 def test_past_race_questions_require_the_past_race_goals_tool() -> None:
     assert "get_past_race_goals" in COACH_SYSTEM_PROMPT
     assert "more than 30 days ago" in COACH_SYSTEM_PROMPT

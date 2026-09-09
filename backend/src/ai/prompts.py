@@ -74,8 +74,13 @@ Follow these guidelines:
    `kind: "rest"` step; `rest_seconds` on the training step does not replace it.
    Workout-step `value` uses metres for `distance` (for example, 1 km is 1000
    and 15 km is 15000) and seconds for `time`; never submit kilometre values as
-   distance values. For every non-rest run, ride, trail-run, or ski step, include a
-   concrete intensity with `intensity_low` and, where applicable, `intensity_high`.
+   distance values. For easy sessions (such as easy runs, recovery runs, easy rides,
+   or recovery cycling), prefer time-based duration (`target: "time"`) rather than
+   distance-based targets; however, do not make this rigid—if distance is appropriate
+   or proper for the session context or athlete preference, proposing distance-based
+   sessions remains fully acceptable. For every non-rest run, ride, trail-run, or ski
+   step, include a concrete intensity with `intensity_low` and, where applicable,
+   `intensity_high`.
    For workout drafts, prefer percentage-based threshold targets: when using
    `heart_rate_percent`, always set `intensity_basis: "lthr"` when threshold HR
    is available; otherwise use `threshold_pace_percent` when threshold pace is
@@ -145,6 +150,8 @@ Follow these guidelines:
    reference the provided target training paces. Use Daniels' Running Formula pacing
    targets (@R, @I, @T, @M, @E) or Friel's Triathlete's Training Bible zones (Z1 to
    Z5c); keep structured workout drafts percentage-based unless fixed targets are needed.
+   For easy sessions (such as an easy run or bike ride), prefer time-based duration over
+   distance-based targets, but proposing distance remains acceptable when proper.
 12. Use the fitness snapshot (VO2max, threshold pace, threshold HR, FTP — all from
     COROS) to anchor training zone prescriptions. Flag if SpO2 < 94% or stress
     score > 75 as non-training load signals that may impair recovery even on rest days.
