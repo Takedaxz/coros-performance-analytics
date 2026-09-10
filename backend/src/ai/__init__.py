@@ -266,26 +266,24 @@ def generate_briefing(context: str, model: str | None = None) -> str:
     return openai_compat_client.generate_briefing(context, provider=provider, model=clean_model)
 
 
-def generate_postmortem(context: str, activity_context: str, model: str | None = None) -> str:
+def generate_postmortem(activity_context: str, model: str | None = None) -> str:
     provider, clean_model = resolve_model(model)
     if provider == "gemini":
-        return gemini_client.generate_postmortem(context, activity_context, model=clean_model)
+        return gemini_client.generate_postmortem(activity_context, model=clean_model)
     return openai_compat_client.generate_postmortem(
-        context, activity_context, model=clean_model, provider=provider
+        activity_context, model=clean_model, provider=provider
     )
 
 
 def generate_postmortem_stream(
-    context: str, activity_context: str, model: str | None = None
+    activity_context: str, model: str | None = None
 ) -> Iterator[str]:
     provider, clean_model = resolve_model(model)
     if provider == "gemini":
-        yield from gemini_client.generate_postmortem_stream(
-            context, activity_context, model=clean_model
-        )
+        yield from gemini_client.generate_postmortem_stream(activity_context, model=clean_model)
     else:
         yield from openai_compat_client.generate_postmortem_stream(
-            context, activity_context, model=clean_model, provider=provider
+            activity_context, model=clean_model, provider=provider
         )
 
 

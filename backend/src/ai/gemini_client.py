@@ -375,13 +375,13 @@ def generate_briefing(context: str, model: str | None = None) -> str:
         return f"Error: {str(e)}"
 
 
-def generate_postmortem(context: str, activity_context: str, model: str | None = None) -> str:
+def generate_postmortem(activity_context: str, model: str | None = None) -> str:
     """Generate a postmortem for a specific activity."""
     client = get_client()
     if not client:
         return "AI features are disabled."
 
-    prompt = f"{context}\n\nActivity Details:\n{activity_context}"
+    prompt = f"Activity Details:\n{activity_context}"
     target_model = model or settings.gemini_model
 
     def build_request(m: str) -> types.GenerateContentResponse:
@@ -402,7 +402,7 @@ def generate_postmortem(context: str, activity_context: str, model: str | None =
 
 
 def generate_postmortem_stream(
-    context: str, activity_context: str, model: str | None = None
+    activity_context: str, model: str | None = None
 ) -> Iterator[str]:
     """Stream a postmortem analysis chunk by chunk."""
     client = get_client()
@@ -410,7 +410,7 @@ def generate_postmortem_stream(
         yield "AI features are disabled."
         return
 
-    prompt = f"{context}\n\nActivity Details:\n{activity_context}"
+    prompt = f"Activity Details:\n{activity_context}"
     target_model = model or settings.gemini_model
 
     def build_request(m: str) -> Iterator[types.GenerateContentResponse]:
@@ -431,4 +431,3 @@ def generate_postmortem_stream(
                 yield chunk.text
     except Exception as e:
         yield f"Error: {str(e)}"
-

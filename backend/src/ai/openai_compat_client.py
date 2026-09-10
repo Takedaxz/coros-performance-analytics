@@ -209,7 +209,6 @@ def generate_briefing(
 
 
 def generate_postmortem(
-    context: str,
     activity_context: str,
     model: str | None = None,
     provider: str = "openai_compat",
@@ -223,7 +222,7 @@ def generate_postmortem(
     target_model = model or config.model
     messages: list[dict[str, str]] = [
         {"role": "system", "content": POSTMORTEM_PROMPT},
-        {"role": "user", "content": f"{context}\n\nActivity Details:\n{activity_context}"},
+        {"role": "user", "content": f"Activity Details:\n{activity_context}"},
     ]
 
     try:
@@ -239,7 +238,6 @@ def generate_postmortem(
 
 
 def generate_postmortem_stream(
-    context: str,
     activity_context: str,
     model: str | None = None,
     provider: str = "openai_compat",
@@ -254,7 +252,7 @@ def generate_postmortem_stream(
     target_model = model or config.model
     messages: list[dict[str, str]] = [
         {"role": "system", "content": POSTMORTEM_PROMPT},
-        {"role": "user", "content": f"{context}\n\nActivity Details:\n{activity_context}"},
+        {"role": "user", "content": f"Activity Details:\n{activity_context}"},
     ]
 
     try:

@@ -156,12 +156,13 @@ def test_resolve_model_aliases() -> None:
 def test_generate_postmortem_passes_resolved_model(monkeypatch) -> None:
     passed_model: list[str] = []
 
-    def mock_gemini_postmortem(context: str, act_context: str, model: str | None = None) -> str:
+    def mock_gemini_postmortem(act_context: str, model: str | None = None) -> str:
+        assert act_context == "Activity"
         passed_model.append(model or "")
         return "Postmortem OK"
 
     monkeypatch.setattr(gemini_client, "generate_postmortem", mock_gemini_postmortem)
 
-    res = ai.generate_postmortem("Context", "Activity", model="3.5-flash0lite")
+    res = ai.generate_postmortem("Activity", model="3.5-flash0lite")
     assert res == "Postmortem OK"
     assert passed_model == ["gemini-3.5-flash-lite"]

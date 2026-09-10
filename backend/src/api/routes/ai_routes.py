@@ -600,13 +600,12 @@ async def activity_postmortem(
     )
     laps = laps_res.scalars().all()
 
-    # 2. Build context
-    context = await build_training_context(db, user_id=get_owner_id(), days=7)
+    # 2. Build activity context
     lap_lines = await _build_laps_with_km_breakdown(db, activity, laps)
     activity_str = _build_activity_summary_string(activity, lap_lines)
 
     # 3. Generate postmortem
-    analysis = generate_postmortem(context, activity_str, model=model)
+    analysis = generate_postmortem(activity_str, model=model)
 
     return {
         "activity_id": activity_id,
@@ -640,7 +639,6 @@ async def activity_postmortem_stream(
     )
     laps = laps_res.scalars().all()
 
-    context = await build_training_context(db, user_id=get_owner_id(), days=7)
     lap_lines = await _build_laps_with_km_breakdown(db, activity, laps)
     activity_str = _build_activity_summary_string(activity, lap_lines)
 
@@ -660,7 +658,7 @@ async def activity_postmortem_stream(
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 
-        sync_stream = generate_postmortem_stream(context, activity_str, model=model)
+        sync_stream = generate_postmortem_stream(activity_str, model=model)
         producer = asyncio.create_task(asyncio.to_thread(_produce, sync_stream))
 
         try:
