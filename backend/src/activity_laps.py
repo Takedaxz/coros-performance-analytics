@@ -148,6 +148,7 @@ def distance_splits(
                 "max_hr_bpm": max(heart_rates) if heart_rates else None,
                 "avg_speed_mps": distance_m / elapsed_s if elapsed_s > 0 else None,
                 "avg_power_w": round(sum(powers) / len(powers)) if powers else None,
+                "max_power_w": max(powers) if powers else None,
                 "avg_cadence": round(sum(cadences) / len(cadences)) if cadences else None,
             }
         )

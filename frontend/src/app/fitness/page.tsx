@@ -210,11 +210,20 @@ export default function FitnessPage() {
     { code: "@E", label: "Easy aerobic", pace: formatPace(1000 / (latestThreshold * 1.25)), color: "var(--color-accent-sleep)", glow: "rgba(141, 171, 194, 0.10)" },
   ];
   const frielZones = latestThreshold === null ? [] : [
-    { code: "Z5", label: "Anaerobic", pace: `< ${formatPace(1000 / (latestThreshold * 0.90))}`, color: "var(--color-status-critical)", glow: "rgba(255, 77, 98, 0.10)" },
+    { code: "Z5c", label: "Anaerobic", pace: `< ${formatPace(1000 / (latestThreshold * 0.90))}`, color: "var(--color-status-critical)", glow: "rgba(255, 77, 98, 0.10)" },
+    { code: "Z5a/b", label: "Super-threshold", pace: `${formatPace(1000 / (latestThreshold * 0.90))} – ${formatPace(1000 / latestThreshold)}`, color: "var(--color-status-moderate)", glow: "rgba(240, 211, 72, 0.10)" },
     { code: "Z4", label: "Threshold", pace: `${formatPace(1000 / (latestThreshold * 1.05))} – ${formatPace(1000 / latestThreshold)}`, color: "var(--color-accent-primary)", glow: "rgba(33, 230, 165, 0.10)" },
     { code: "Z3", label: "Tempo", pace: `${formatPace(1000 / (latestThreshold * 1.14))} – ${formatPace(1000 / (latestThreshold * 1.05))}`, color: "var(--color-status-moderate)", glow: "rgba(240, 211, 72, 0.10)" },
     { code: "Z2", label: "Endurance", pace: `${formatPace(1000 / (latestThreshold * 1.29))} – ${formatPace(1000 / (latestThreshold * 1.14))}`, color: "var(--color-accent-exertion)", glow: "rgba(45, 155, 240, 0.10)" },
     { code: "Z1", label: "Active recovery", pace: `> ${formatPace(1000 / (latestThreshold * 1.29))}`, color: "var(--color-accent-sleep)", glow: "rgba(141, 171, 194, 0.10)" },
+  ];
+  const corosZones = latestThreshold === null ? [] : [
+    { code: "Z6", label: "Anaerobic power", pace: `< ${formatPace(1000 / (latestThreshold / 1.06))}`, color: "var(--color-status-critical)", glow: "rgba(255, 77, 98, 0.10)" },
+    { code: "Z5", label: "Anaerobic endurance", pace: `${formatPace(1000 / (latestThreshold / 1.06))} – ${formatPace(1000 / (latestThreshold / 1.02))}`, color: "var(--color-status-moderate)", glow: "rgba(240, 211, 72, 0.10)" },
+    { code: "Z4", label: "Threshold", pace: `${formatPace(1000 / (latestThreshold / 1.02))} – ${formatPace(1000 / (latestThreshold / 0.95))}`, color: "var(--color-accent-primary)", glow: "rgba(33, 230, 165, 0.10)" },
+    { code: "Z3", label: "Aerobic power", pace: `${formatPace(1000 / (latestThreshold / 0.95))} – ${formatPace(1000 / (latestThreshold / 0.90))}`, color: "var(--color-accent-exertion)", glow: "rgba(45, 155, 240, 0.10)" },
+    { code: "Z2", label: "Aerobic endurance", pace: `${formatPace(1000 / (latestThreshold / 0.90))} – ${formatPace(1000 / (latestThreshold / 0.80))}`, color: "var(--color-accent-sleep)", glow: "rgba(141, 171, 194, 0.10)" },
+    { code: "Z1", label: "Recovery", pace: `> ${formatPace(1000 / (latestThreshold / 0.80))}`, color: "var(--color-text-muted)", glow: "rgba(141, 171, 194, 0.08)" },
   ];
 
   return (
@@ -446,6 +455,7 @@ export default function FitnessPage() {
                 {[
                   { title: "Daniels Formula", subtitle: "Training formula", zones: danielsZones },
                   { title: "Friel Zones", subtitle: "Threshold zones", zones: frielZones },
+                  { title: "COROS Threshold Pace", subtitle: "Official six-zone model", zones: corosZones },
                 ].map((guide) => (
                   <section className="card" key={guide.title}>
                     <div className="card-header">
@@ -454,7 +464,7 @@ export default function FitnessPage() {
                         <h3 style={{ color: "var(--color-text-primary)", fontSize: "15px", margin: "var(--space-1) 0 0" }}>{guide.subtitle}</h3>
                       </div>
                     </div>
-                      <div className="training-pace-zone-grid">
+                      <div className={`training-pace-zone-grid${guide.zones.length === 6 ? " training-pace-zone-grid-six" : ""}`}>
                         {guide.zones.map((zone) => (
                           <div className="training-pace-zone" key={zone.code} style={{ background: `radial-gradient(circle at 0 0, ${zone.glow}, transparent 68%), var(--color-surface-secondary)`, border: `1px solid ${zone.glow}`, borderRadius: "12px", padding: "12px" }}>
                             <span className="mono" style={{ color: zone.color, fontSize: "11px", fontWeight: 700 }}>{zone.code}</span>

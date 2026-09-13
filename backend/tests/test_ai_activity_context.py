@@ -146,6 +146,35 @@ def test_detailed_activity_context_keeps_segments_and_compresses_sensor_data() -
     assert "Detail budget omitted 2 telemetry/route line(s)" in constrained
 
 
+def test_ride_context_uses_speed_not_pace() -> None:
+    start = datetime(2026, 9, 11, 13, 7)
+    activity = Activity(
+        id="ride-id",
+        sport="ride",
+        title="Activity",
+        start_time=start,
+        elapsed_time_s=642,
+        distance_m=7_020,
+        avg_speed_mps=10.0,
+    )
+    laps = [
+        ActivityLap(
+            activity_id=activity.id,
+            lap_index=1,
+            start_time=start,
+            elapsed_s=60,
+            distance_m=600,
+            avg_speed_mps=10.0,
+        )
+    ]
+
+    context = _format_detailed_activity_context([activity], {activity.id: laps}, {activity.id: []})
+
+    assert "Activity/ride" in context
+    assert "speed=36.0km/h" in context
+    assert "pace=" not in context
+
+
 def test_run_splits_restart_inside_each_workout_phase() -> None:
     start = datetime(2026, 7, 23, 18, 34)
     activity = Activity(

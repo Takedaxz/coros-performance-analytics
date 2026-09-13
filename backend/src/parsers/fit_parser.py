@@ -345,6 +345,21 @@ def parse_fit_file(data: bytes) -> ParsedFitFile:
     except Exception as exc:
         errors.append(f"FIT parse error: {exc}")
 
+    if len(laps) == 1 and sessions:
+        session = sessions[0]
+        single_lap = laps[0]
+        laps = [
+            replace(
+                single_lap,
+                avg_hr_bpm=single_lap.avg_hr_bpm if single_lap.avg_hr_bpm is not None else session.avg_hr_bpm,
+                max_hr_bpm=single_lap.max_hr_bpm if single_lap.max_hr_bpm is not None else session.max_hr_bpm,
+                avg_speed_mps=single_lap.avg_speed_mps if single_lap.avg_speed_mps is not None else session.avg_speed_mps,
+                avg_power_w=single_lap.avg_power_w if single_lap.avg_power_w is not None else session.avg_power_w,
+                calories_kcal=single_lap.calories_kcal if single_lap.calories_kcal is not None else session.calories_kcal,
+                avg_cadence=single_lap.avg_cadence if single_lap.avg_cadence is not None else session.avg_cadence,
+            )
+        ]
+
     pool_length_m = next(
         (
             session.pool_length_m

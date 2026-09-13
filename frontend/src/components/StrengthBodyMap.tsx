@@ -139,7 +139,7 @@ export default function StrengthBodyMap({ exercises }: StrengthBodyMapProps) {
   };
 
   return (
-    <section className="strength-body-heatmap" tabIndex={0}>
+    <section className="card strength-body-heatmap" tabIndex={0}>
       <div className="strength-body-heatmap-title">Session focus</div>
       <div className="strength-body-figures">
         <BodyFigure parts={bodyFront} side="front" loads={loads} maximumLoad={maximumLoad} />

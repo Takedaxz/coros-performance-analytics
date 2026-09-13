@@ -7,7 +7,7 @@ import PageTitle from "@/components/PageTitle";
 import SingleSelect from "@/components/SingleSelect";
 import NumberStepper from "@/components/NumberStepper";
 import CustomDatePicker from "@/components/CustomDatePicker";
-import { getSportVisual, SportIcon } from "@/components/SportActivityIcon";
+import { getActivityDisplayTitle, getSportVisual, SportIcon } from "@/components/SportActivityIcon";
 import type { ActivitySummary } from "@/lib/types";
 
 type DatePeriod = "" | "day" | "week" | "month" | "year";
@@ -463,7 +463,7 @@ export default function ActivitiesPage() {
                         </div>
                         <div className="activity-card-content dashboard-activity-content" style={{ minWidth: 0 }}>
                           <div className="activity-card-title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "14px", fontWeight: 750 }}>
-                            {activity.title || sportVisual.label}
+                            {getActivityDisplayTitle(activity.sport, activity.title, activity.subsport)}
                           </div>
                           <div className="activity-card-metrics" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(64px, max-content))", gap: "4px 16px", marginTop: "5px", fontVariantNumeric: "tabular-nums" }}>
                             {metrics.map(([label, value]) => (

@@ -1200,7 +1200,7 @@ a:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .training-pace-zone:last-child {
+  .training-pace-zone:last-child:nth-child(odd) {
     grid-column: 1 / -1;
   }
 
@@ -2822,6 +2822,10 @@ a:hover {
   gap: 8px;
 }
 
+.training-pace-zone-grid-six {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
 .training-pace-zone {
   display: flex;
   flex-direction: column;
@@ -3106,6 +3110,14 @@ a:hover {
   gap: 9px;
   padding-top: var(--space-4);
   border-top: 1px solid var(--border-color);
+}
+
+.power-zone-unavailable {
+  border-top: 1px solid var(--border-color);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin: 0;
+  padding-top: var(--space-4);
 }
 
 .training-zone-row {
@@ -5685,13 +5697,10 @@ table.data-table .lap-split-table tr:hover td {
   padding: var(--space-4);
   position: relative;
   min-height: 275px;
-  transition:
-    background-color var(--transition-base),
-    border-color var(--transition-base);
+  transition: all var(--transition-base);
 }
 
 .strength-body-heatmap:hover {
-  background: var(--color-bg-card-hover);
   border-color: var(--border-color-hover);
 }
 

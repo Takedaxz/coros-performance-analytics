@@ -49,6 +49,8 @@ Use it only as factual evidence.
 - For swimming, `total_pace_s_100m` includes rest and `active_pace_s_100m` uses active FIT
   lengths only. Use active pace for performance analysis, label total pace clearly, and include
   both when both are present.
+- For rides, `speed_kmh` is cycling speed. Never convert it to, describe it as, or assess it
+  against running pace per kilometre.
 - When asked about today's feeling, prioritize the matching `athlete_feelings` entry and state
   its date. Use health and activity data only as supporting context; never substitute readiness,
   HRV, or sleep for the athlete's self-report.
@@ -252,8 +254,9 @@ a long session, or a race, inferred only from its provided structure, title, and
 - Evaluate execution against the applicable analysis focus or apparent session purpose.
 
 ### Activity-Specific Breakdown
-- For running, trail running, walking, hiking, and cycling, evaluate pace, splits, and
-  heart-rate drift when distance data is available.
+- For running, trail running, walking, and hiking, evaluate pace, splits, and heart-rate drift
+  when distance data is available. For cycling, evaluate speed in km/h, power, cadence in rpm,
+  splits, elevation, and heart-rate drift. Never label cycling speed as pace or cadence as spm.
 - For swimming, use `activity.swim` when returned. It may contain FIT-derived per-length stroke
   rate, SWOLF, distance per stroke, and stroke type. State only metrics present; do not claim
   SWOLF or distance per stroke is unavailable when provided.

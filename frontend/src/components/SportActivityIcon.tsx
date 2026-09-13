@@ -34,7 +34,7 @@ const SPORT_VISUALS: Record<string, SportVisual> = {
   run: { label: "Run", background: "rgba(33, 230, 165, 0.14)", color: "var(--color-accent-primary)" },
   treadmill: { label: "Treadmill", background: "rgba(33, 230, 165, 0.14)", color: "var(--color-accent-primary)" },
   trail_run: { label: "Trail Run", background: "rgba(120, 200, 80, 0.14)", color: "#6dbf43" },
-  ride: { label: "Ride", background: "rgba(240, 211, 72, 0.14)", color: "var(--color-status-moderate)" },
+  ride: { label: "Cycling", background: "rgba(240, 211, 72, 0.14)", color: "var(--color-status-moderate)" },
   swim: { label: "Swim", background: "rgba(45, 155, 240, 0.14)", color: "var(--color-accent-exertion)" },
   hike: { label: "Hike", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
   walk: { label: "Walk", background: "rgba(165, 175, 180, 0.14)", color: "var(--color-text-secondary)" },
@@ -105,6 +105,17 @@ export function getSportVisual(sport: string, title?: string, subsport?: string)
     background: "rgba(165, 175, 180, 0.14)",
     color: "var(--color-text-secondary)",
   };
+}
+
+export function getActivityDisplayTitle(
+  sport: string,
+  title?: string,
+  subsport?: string,
+): string {
+  const normalizedTitle = title?.trim();
+  return normalizedTitle && normalizedTitle.toLowerCase() !== "activity"
+    ? normalizedTitle
+    : getSportVisual(sport, undefined, subsport).label;
 }
 
 export function SportIcon({

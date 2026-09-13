@@ -16,6 +16,7 @@ interface RoutePoint {
 
 interface MapProps {
   points: RoutePoint[];
+  sport?: string;
   showTelemetryPopup?: boolean;
   terrain3D?: boolean;
   onTerrain3DChange?: (value: boolean) => void;
@@ -60,21 +61,24 @@ function formatReplayTime(seconds: number): string {
   return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
-function formatPacePopup(speedMps?: number): string {
-  if (!speedMps || speedMps <= 0) return "--";
+function telemetryMetric(speedMps?: number, sport?: string): { label: string; value: string } {
+  const isRide = sport === "ride";
+  const label = isRide ? "Speed" : "Pace";
+  if (!speedMps || speedMps <= 0) return { label, value: "--" };
+  if (isRide) return { label, value: `${(speedMps * 3.6).toFixed(1)} km/h` };
   const paceSecsPerKm = 1000 / speedMps;
   const min = Math.floor(paceSecsPerKm / 60);
   const sec = Math.round(paceSecsPerKm % 60);
-  return `${min}:${sec.toString().padStart(2, "0")} /km`;
+  return { label, value: `${min}:${sec.toString().padStart(2, "0")} /km` };
 }
 
-function telemetryPopupHtml(speedMps?: number, heartRateBpm?: number): string {
-  const pace = formatPacePopup(speedMps);
+function telemetryPopupHtml(speedMps?: number, heartRateBpm?: number, sport?: string): string {
+  const metric = telemetryMetric(speedMps, sport);
   const heartRate = heartRateBpm != null ? `${heartRateBpm} bpm` : "--";
-  return `<div class="runner-telemetry-content"><div class="runner-telemetry-item"><span class="runner-telemetry-label">Pace</span><strong class="runner-telemetry-value">${pace}</strong></div><div class="runner-telemetry-item"><span class="runner-telemetry-label">HR</span><strong class="runner-telemetry-value">${heartRate}</strong></div></div>`;
+  return `<div class="runner-telemetry-content"><div class="runner-telemetry-item"><span class="runner-telemetry-label">${metric.label}</span><strong class="runner-telemetry-value">${metric.value}</strong></div><div class="runner-telemetry-item"><span class="runner-telemetry-label">HR</span><strong class="runner-telemetry-value">${heartRate}</strong></div></div>`;
 }
 
-export default function Map({ points, showTelemetryPopup = true, terrain3D = false, onTerrain3DChange, onExpand }: MapProps) {
+export default function Map({ points, sport, showTelemetryPopup = true, terrain3D = false, onTerrain3DChange, onExpand }: MapProps) {
   const isTerrain3D = terrain3D;
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const elapsedLabelRef = useRef<HTMLSpanElement>(null);
@@ -152,7 +156,7 @@ export default function Map({ points, showTelemetryPopup = true, terrain3D = fal
       if (popup && showTelemetryPopupRef.current) {
         popup
           .setLngLat([currentPoint[1], currentPoint[0]])
-          .setHTML(telemetryPopupHtml(position.speed_mps, position.heart_rate_bpm));
+          .setHTML(telemetryPopupHtml(position.speed_mps, position.heart_rate_bpm, sport));
         if (!popup.isOpen()) popup.addTo(terrainMapRef.current!);
       } else {
         popup?.remove();
@@ -162,7 +166,7 @@ export default function Map({ points, showTelemetryPopup = true, terrain3D = fal
       runnerMarkerRef.current.setLatLng(currentPoint);
 
       if (showTelemetryPopupRef.current) {
-        const popupHtml = telemetryPopupHtml(position.speed_mps, position.heart_rate_bpm);
+        const popupHtml = telemetryPopupHtml(position.speed_mps, position.heart_rate_bpm, sport);
 
         if (!runnerMarkerRef.current.getPopup()) {
           runnerMarkerRef.current.bindPopup(popupHtml, {
@@ -328,6 +332,8 @@ export default function Map({ points, showTelemetryPopup = true, terrain3D = fal
 
     let isMounted = true;
     let themeObserver: MutationObserver | null = null;
+    let resizeFrame: number | null = null;
+    let leafletMap: LeafletMap | null = null;
     const preservePlayback = preservePlaybackOnMapChangeRef.current;
     preservePlaybackOnMapChangeRef.current = false;
     cancelAnimation();
@@ -497,7 +503,7 @@ export default function Map({ points, showTelemetryPopup = true, terrain3D = fal
               offset: 8,
             })
               .setLngLat(coordinates[0])
-              .setHTML(telemetryPopupHtml(normalizedTimedPoints[0].speed_mps, normalizedTimedPoints[0].heart_rate_bpm));
+              .setHTML(telemetryPopupHtml(normalizedTimedPoints[0].speed_mps, normalizedTimedPoints[0].heart_rate_bpm, sport));
             renderPlayback(playbackRef.current.elapsedSeconds);
             resumePlaybackAfterMapChange();
           }
@@ -561,6 +567,7 @@ export default function Map({ points, showTelemetryPopup = true, terrain3D = fal
         zoomControl: true,
         scrollWheelZoom: true,
       });
+      leafletMap = map;
       mapInstanceRef.current = map;
 
       const currentTheme = (): Theme =>
@@ -638,10 +645,10 @@ export default function Map({ points, showTelemetryPopup = true, terrain3D = fal
         resumePlaybackAfterMapChange();
       }
 
-      requestAnimationFrame(() => {
-        if (isMounted && mapInstanceRef.current) {
-          mapInstanceRef.current.invalidateSize();
-          mapInstanceRef.current.fitBounds(routeBoundsRef.current!, { padding: [20, 20] });
+      resizeFrame = requestAnimationFrame(() => {
+        if (isMounted && mapInstanceRef.current === map && routeBoundsRef.current) {
+          map.invalidateSize();
+          map.fitBounds(routeBoundsRef.current, { padding: [20, 20] });
           const zoomInBtn = container.querySelector(".leaflet-control-zoom-in");
           const zoomOutBtn = container.querySelector(".leaflet-control-zoom-out");
           if (zoomInBtn) {
@@ -657,14 +664,15 @@ export default function Map({ points, showTelemetryPopup = true, terrain3D = fal
     return () => {
       isMounted = false;
       themeObserver?.disconnect();
+      if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
       cancelAnimation();
-      progressLineRef.current = null;
-      runnerMarkerRef.current = null;
-      routeBoundsRef.current = null;
-      timedPointsRef.current = [];
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.off();
-        mapInstanceRef.current.remove();
+      if (leafletMap && mapInstanceRef.current === leafletMap) {
+        progressLineRef.current = null;
+        runnerMarkerRef.current = null;
+        routeBoundsRef.current = null;
+        timedPointsRef.current = [];
+        leafletMap.off();
+        leafletMap.remove();
         mapInstanceRef.current = null;
       }
     };

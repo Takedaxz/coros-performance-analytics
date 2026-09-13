@@ -236,13 +236,36 @@ def _pace_s_km(speed_mps: float | None) -> int | None:
     return round(1_000 / speed_mps) if speed_mps and speed_mps > 0 else None
 
 
+def _speed_kmh(speed_mps: float | None) -> float | None:
+    return round(speed_mps * 3.6, 1) if speed_mps and speed_mps > 0 else None
+
+
+def _lap_speed_mps(
+    speed_mps: float | None, distance_m: float | None, elapsed_s: float | None
+) -> float | None:
+    if speed_mps and speed_mps > 0:
+        return speed_mps
+    if distance_m and distance_m > 0 and elapsed_s and elapsed_s > 0:
+        return distance_m / elapsed_s
+    return None
+
+
+def _speed_or_pace_field(
+    sport: SportType, speed_mps: float | None
+) -> dict[str, int | float | None]:
+    if sport == SportType.RIDE:
+        return {"speed_kmh": _speed_kmh(speed_mps)}
+    return {"pace_s_km": _pace_s_km(speed_mps)}
+
+
 def _activity_pace_fields(
     activity: Any,
     swim_lengths: list[dict[str, float | int | str | None]] | None = None,
-) -> dict[str, int | None]:
-    """Return unambiguous pace fields for the activity's sport."""
+) -> dict[str, int | float | None]:
+    """Return the sport-appropriate pace or speed field for an activity."""
+    speed_mps = getattr(activity, "avg_speed_mps", None)
     if activity.sport != SportType.SWIM:
-        return {"pace_s_km": _pace_s_km(getattr(activity, "avg_speed_mps", None))}
+        return _speed_or_pace_field(activity.sport, speed_mps)
     distance_m = getattr(activity, "distance_m", None)
     elapsed_time_s = getattr(activity, "elapsed_time_s", None)
     total_pace_s_100m = (
@@ -263,14 +286,6 @@ def _activity_pace_fields(
         "total_pace_s_100m": total_pace_s_100m,
         "active_pace_s_100m": active_swim_pace_s_100m(lengths),
     }
-
-
-def _lap_pace_s_km(speed_mps: float | None, distance_m: float | None, elapsed_s: float | None) -> int | None:
-    return _pace_s_km(speed_mps) or (
-        round(elapsed_s * 1_000 / distance_m)
-        if distance_m and distance_m > 0 and elapsed_s and elapsed_s > 0
-        else None
-    )
 
 
 def _activity_uuid(value: object) -> str | None:
@@ -877,7 +892,7 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
                                 "km": km_counter,
                                 "sec": round(time_diff_s),
                                 "m": round(dist_covered),
-                                "pace_s_km": _pace_s_km(avg_speed),
+                                **_speed_or_pace_field(activity.sport, avg_speed),
                                 "hr": avg_hr,
                                 "cadence": avg_cad,
                                 "power": avg_pwr,
@@ -950,10 +965,13 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
                 "n": lap.lap_index,
                 "sec": round(lap.elapsed_s),
                 "m": round(lap.distance_m) if getattr(lap, "distance_m", None) else None,
-                "pace_s_km": _lap_pace_s_km(
-                    getattr(lap, "avg_speed_mps", None),
-                    getattr(lap, "distance_m", None),
-                    getattr(lap, "elapsed_s", None),
+                **_speed_or_pace_field(
+                    activity.sport,
+                    _lap_speed_mps(
+                        getattr(lap, "avg_speed_mps", None),
+                        getattr(lap, "distance_m", None),
+                        getattr(lap, "elapsed_s", None),
+                    ),
                 ),
                 "hr": getattr(lap, "avg_hr_bpm", None),
                 "max_hr": getattr(lap, "max_hr_bpm", None),

@@ -17,7 +17,7 @@ import {
 import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import StrengthBodyMap from "@/components/StrengthBodyMap";
-import { getSportVisual, SportIcon } from "@/components/SportActivityIcon";
+import { getActivityDisplayTitle, getSportVisual, SportIcon } from "@/components/SportActivityIcon";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -70,6 +70,7 @@ interface ActivityDetail {
   activity_note?: string;
   threshold_hr_bpm?: number;
   threshold_pace_s_per_km?: number;
+  threshold_power_w?: number;
   laps: ActivityLap[];
   swim_lengths?: SwimLength[];
   pauses?: ActivityPause[];
@@ -121,6 +122,7 @@ interface ActivityLap {
   max_hr_bpm?: number;
   avg_speed_mps?: number;
   avg_power_w?: number;
+  max_power_w?: number;
   avg_cadence?: number;
   lap_type?: "warmup" | "training" | "cooldown" | "rest" | "run" | "ride" | "swim" | "functional";
   hrr_bpm?: number;
@@ -217,6 +219,7 @@ function strengthExerciseName(nameKey: string, name: string | null | undefined):
 interface RecordPoint {
   timestamp: string;
   elapsed_s?: number;
+  distance_m?: number;
   heart_rate_bpm?: number;
   speed_mps?: number;
   effort_speed_mps?: number;
@@ -237,6 +240,7 @@ type RunningDynamicsKey =
   | "cadence"
   | "stride_length_cm"
   | "power_w"
+  | "altitude_m"
   | "ground_time_ms"
   | "stride_ratio_pct"
   | "stride_height_cm";
@@ -250,13 +254,30 @@ interface RunningDynamicsMetric {
   ignoreZero: boolean;
 }
 
+type BikeMetricKey = "cadence" | "speed" | "altitude";
+
+interface BikeMetric {
+  key: BikeMetricKey;
+  label: string;
+  unit: string;
+  decimals: number;
+  color: string;
+}
+
 const RUNNING_DYNAMICS_METRICS: RunningDynamicsMetric[] = [
   { key: "cadence", label: "Cadence", unit: "spm", decimals: 0, color: "#ff4f87", ignoreZero: false },
   { key: "stride_length_cm", label: "Stride length", unit: "cm", decimals: 0, color: "#9d7bff", ignoreZero: true },
   { key: "power_w", label: "Running power", unit: "W", decimals: 0, color: "#ff8a2a", ignoreZero: false },
+  { key: "altitude_m", label: "Elevation", unit: "m", decimals: 0, color: "#35d07f", ignoreZero: false },
   { key: "ground_time_ms", label: "Ground time", unit: "ms", decimals: 0, color: "#00cfe8", ignoreZero: true },
   { key: "stride_ratio_pct", label: "Stride ratio", unit: "%", decimals: 1, color: "#f6d43a", ignoreZero: true },
   { key: "stride_height_cm", label: "Stride height", unit: "cm", decimals: 1, color: "#35d07f", ignoreZero: true },
+];
+
+const BIKE_METRICS: BikeMetric[] = [
+  { key: "cadence", label: "Cadence", unit: "rpm", decimals: 0, color: "#ff4f87" },
+  { key: "speed", label: "Speed", unit: "km/h", decimals: 1, color: "#3488df" },
+  { key: "altitude", label: "Elevation", unit: "m", decimals: 0, color: "#35d07f" },
 ];
 
 interface TrainingZone {
@@ -356,9 +377,9 @@ function formatPace(speedMps: number): string {
 
 function formatSwimPace(speedMps: number): string {
   if (speedMps <= 0) return "--";
-  const paceSecondsPer100m = 100 / speedMps;
+  const paceSecondsPer100m = Math.round(100 / speedMps);
   const min = Math.floor(paceSecondsPer100m / 60);
-  const sec = Math.round(paceSecondsPer100m % 60);
+  const sec = paceSecondsPer100m % 60;
   return `${min}:${sec.toString().padStart(2, "0")}`;
 }
 
@@ -425,6 +446,26 @@ function buildPaceZones(thresholdPace: number): TrainingZone[] {
     { key: "threshold", label: "Threshold", range: `${formatPaceSeconds(anaerobicEndurance)}–${formatPaceSeconds(threshold - 1)}`, color: ZONE_COLORS[3], min: anaerobicEndurance, max: threshold },
     { key: "anaerobic-endurance", label: "Anaerobic Endurance", range: `${formatPaceSeconds(anaerobicPower)}–${formatPaceSeconds(anaerobicEndurance - 1)}`, color: ZONE_COLORS[4], min: anaerobicPower, max: anaerobicEndurance },
     { key: "anaerobic-power", label: "Anaerobic Power", range: `<${formatPaceSeconds(anaerobicPower)}`, color: ZONE_COLORS[5], min: 0, max: anaerobicPower },
+  ];
+}
+
+function buildPowerZones(ftp: number): TrainingZone[] {
+  const [recovery, aerobicEndurance, aerobicPower, threshold, anaerobicEndurance, anaerobicPower] = [
+    0.55,
+    0.75,
+    0.9,
+    1.05,
+    1.2,
+    1.5,
+  ].map((factor) => Math.round(ftp * factor));
+  return [
+    { key: "recovery", label: "Recovery", range: `<${recovery + 1}`, color: "#3488df", min: 0, max: recovery + 1 },
+    { key: "aerobic-endurance", label: "Aerobic Endurance", range: `${recovery + 1}–${aerobicEndurance}`, color: "#36bed2", min: recovery + 1, max: aerobicEndurance + 1 },
+    { key: "aerobic-power", label: "Aerobic Power", range: `${aerobicEndurance + 1}–${aerobicPower}`, color: "#3bc76b", min: aerobicEndurance + 1, max: aerobicPower + 1 },
+    { key: "threshold", label: "Threshold", range: `${aerobicPower + 1}–${threshold}`, color: "#f0ca3e", min: aerobicPower + 1, max: threshold + 1 },
+    { key: "anaerobic-endurance", label: "Anaerobic Endurance", range: `${threshold + 1}–${anaerobicEndurance}`, color: "#ff7548", min: threshold + 1, max: anaerobicEndurance + 1 },
+    { key: "anaerobic-power", label: "Anaerobic Power", range: `${anaerobicEndurance + 1}–${anaerobicPower}`, color: "#ef3944", min: anaerobicEndurance + 1, max: anaerobicPower + 1 },
+    { key: "sprint", label: "Sprint", range: `>${anaerobicPower}`, color: "#b91c1c", min: anaerobicPower + 1, max: Number.POSITIVE_INFINITY },
   ];
 }
 
@@ -503,7 +544,7 @@ function SegmentDetail({ lap, records, sport }: SegmentDetailProps) {
     : isSwim
       ? hasCadence ? "stroke" : hasSpeed ? "swim_pace" : null
       : isRide
-        ? hasPower ? "power" : hasCadence ? "cadence" : hasSpeed ? "speed" : null
+        ? hasSpeed ? "speed" : hasCadence ? "cadence" : null
         : hasCadence
           ? ["Ski Erg", "Indoor Rower"].includes(lap.lap_name ?? "") ? "stroke" : "cadence"
           : hasPower ? "power" : hasSpeed ? "speed" : null;
@@ -545,6 +586,7 @@ function SegmentDetail({ lap, records, sport }: SegmentDetailProps) {
       time: (record.elapsed_s ?? startElapsed) - startElapsed,
       heartRate: record.heart_rate_bpm,
       rate: signalValue(record),
+      power: record.power_w,
     }));
   const heartRates = segmentRecords.flatMap((record) =>
     record.heart_rate_bpm != null ? [record.heart_rate_bpm] : [],
@@ -554,13 +596,18 @@ function SegmentDetail({ lap, records, sport }: SegmentDetailProps) {
     return value != null && value > 0 ? [value] : [];
   });
   const averageSignal = signal === "pace" || signal === "swim_pace" || signal === "speed"
-    ? lap.avg_speed_mps
+    ? (lap.avg_speed_mps ?? (lap.distance_m && lap.elapsed_s > 0 ? lap.distance_m / lap.elapsed_s : (signalValues.length ? signalValues.reduce((sum, val) => sum + val, 0) / signalValues.length : undefined)))
     : signal === "power"
       ? lap.avg_power_w
       : lap.avg_cadence;
   const maxSignal = signalValues.length ? Math.max(...signalValues) : undefined;
   const maxHeartRate = lap.max_hr_bpm ?? (
     heartRates.length ? Math.max(...heartRates) : undefined
+  );
+  const averageHeartRate = lap.avg_hr_bpm ?? (
+    heartRates.length
+      ? Math.round(heartRates.reduce((sum, val) => sum + val, 0) / heartRates.length)
+      : undefined
   );
   const load = lap.distance_m
     ? lap.load_unit === "reps"
@@ -572,7 +619,7 @@ function SegmentDetail({ lap, records, sport }: SegmentDetailProps) {
   const metrics: ActivityMetric[] = [
     ["Event time", formatSplitDuration(lap.elapsed_s)],
     ["Max HR", maxHeartRate ?? "--", "bpm"],
-    ["Average HR", lap.avg_hr_bpm ?? "--", "bpm"],
+    ["Average HR", averageHeartRate ?? "--", "bpm"],
     [lap.lap_type === "functional" ? "Load" : "Distance", load],
     ...(signal
       ? [
@@ -595,10 +642,11 @@ function SegmentDetail({ lap, records, sport }: SegmentDetailProps) {
   ];
   const hasHeartRate = chartData.some((point) => point.heartRate != null);
   const hasRate = chartData.some((point) => point.rate != null);
+  const hasRidePower = isRide && hasPower;
 
   return (
     <div className="segment-detail">
-      {(hasHeartRate || hasRate) && (
+      {(hasHeartRate || hasRate || hasRidePower) && (
         <div className="segment-chart">
           <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 260 }}>
             <LineChart data={chartData} margin={{ top: 16, right: 12, bottom: 8, left: 4 }}>
@@ -632,13 +680,15 @@ function SegmentDetail({ lap, records, sport }: SegmentDetailProps) {
                   axisLine={false}
                 />
               )}
+              {hasRidePower && <YAxis yAxisId="power" hide domain={[0, "dataMax + 10"]} />}
               <Tooltip
                 labelFormatter={(value) => `${formatSplitDuration(Number(value))} elapsed`}
-                formatter={(value, name) =>
-                  name === "Heart Rate"
+                formatter={(value, name) => {
+                  if (name === "Power") return `${Math.round(Number(value))} W`;
+                  return name === "Heart Rate"
                     ? `${Math.round(Number(value))} bpm`
-                    : `${formatSignal(Number(value))} ${signalUnit}`
-                }
+                    : `${formatSignal(Number(value))} ${signalUnit}`;
+                }}
               />
               {hasHeartRate && (
                 <Line
@@ -662,6 +712,18 @@ function SegmentDetail({ lap, records, sport }: SegmentDetailProps) {
                   dot={false}
                   connectNulls
                   name={signalLabel}
+                />
+              )}
+              {hasRidePower && (
+                <Line
+                  yAxisId="power"
+                  type="monotone"
+                  dataKey="power"
+                  stroke="#3488df"
+                  strokeWidth={2.25}
+                  dot={false}
+                  connectNulls
+                  name="Power"
                 />
               )}
             </LineChart>
@@ -701,6 +763,8 @@ export default function ActivityDetailPage() {
   const [expandedTriathlonLeg, setExpandedTriathlonLeg] = useState<string | null>(null);
   const [selectedDynamicsMetrics, setSelectedDynamicsMetrics] =
     useState<RunningDynamicsKey[]>(["cadence"]);
+  const [selectedBikeMetrics, setSelectedBikeMetrics] =
+    useState<BikeMetricKey[]>(["cadence", "speed"]);
   const [paceMode, setPaceMode] = useState<PaceMode>("normal");
   const [selectedSwimMetrics, setSelectedSwimMetrics] =
     useState<SwimMetricKey[]>(["stroke_rate_spm"]);
@@ -1011,6 +1075,9 @@ export default function ActivityDetailPage() {
   const paceZones = isRun && activity.threshold_pace_s_per_km
     ? buildPaceZones(activity.threshold_pace_s_per_km)
     : [];
+  const powerZones = activity.sport === "ride" && activity.threshold_power_w
+    ? buildPowerZones(activity.threshold_power_w)
+    : [];
   const hasEffortPaceData = records.some((record) => (record.effort_speed_mps ?? 0) > 0);
   const selectedPaceLabel = paceMode === "effort" ? "Effort Pace" : "Pace";
   const selectedPaceSpeed = (record: RecordPoint): number | undefined =>
@@ -1036,6 +1103,8 @@ export default function ActivityDetailPage() {
     : [0, 720];
   const heartRateZoneSummary = summarizeTrainingZones(heartRateValues, heartRateZones);
   const paceZoneSummary = summarizeTrainingZones(paceValues, paceZones);
+  const powerValues = records.flatMap((record) => record.power_w != null ? [record.power_w] : []);
+  const powerZoneSummary = summarizeTrainingZones(powerValues, powerZones);
   const sampleRate = Math.max(1, Math.floor(records.length / 300));
   const chartData = records
     .filter((_, i) => i % sampleRate === 0 || i === records.length - 1)
@@ -1050,10 +1119,13 @@ export default function ActivityDetailPage() {
         time: record.elapsed_s ? record.elapsed_s / 60 : 0,
         hr: record.heart_rate_bpm,
         speed: record.speed_mps
-          ? Math.round(record.speed_mps * 3.6 * 10) / 10
+          ? activity.sport === "swim"
+            ? 100 / record.speed_mps
+            : Math.round(record.speed_mps * 3.6 * 10) / 10
           : undefined,
         pace,
         alt: record.altitude_m != null ? Math.round(record.altitude_m) : undefined,
+        altitude_m: record.altitude_m != null ? Math.round(record.altitude_m) : undefined,
         power: record.power_w,
         power_w: record.power_w,
         cadence: record.cadence,
@@ -1066,8 +1138,10 @@ export default function ActivityDetailPage() {
         ? findTrainingZone(heartRateZones, record.heart_rate_bpm)
         : undefined;
       const paceZone = pace != null ? findTrainingZone(paceZones, pace) : undefined;
+      const powerZone = record.power_w != null ? findTrainingZone(powerZones, record.power_w) : undefined;
       if (heartRateZone) point[`hr_${heartRateZone.key}`] = record.heart_rate_bpm;
       if (paceZone) point[`pace_${paceZone.key}`] = pace;
+      if (powerZone) point[`power_${powerZone.key}`] = record.power_w;
       return point;
     });
   const chartDurationMinutes = Math.max(
@@ -1089,6 +1163,50 @@ export default function ActivityDetailPage() {
   const hasSpeedData = chartData.some((point) => point.speed != null);
   const hasPaceData = chartData.some((point) => point.pace != null);
   const hasTelemetryData = hasHeartRateData || hasSpeedData;
+  const bikeChartData = chartData.map((point) => ({
+    ...point,
+    cadence: point.cadence && point.cadence > 0 ? point.cadence : undefined,
+    power_w: point.power_w && point.power_w > 0 ? point.power_w : undefined,
+    altitude: point.alt,
+  }));
+  const bikeMetricValue = (record: RecordPoint, key: BikeMetricKey): number | undefined => {
+    if (key === "speed") {
+      return record.speed_mps && record.speed_mps > 0 ? record.speed_mps * 3.6 : undefined;
+    }
+    if (key === "altitude") return record.altitude_m;
+    const value = record[key];
+    return value && value > 0 ? value : undefined;
+  };
+  const availableBikeMetrics = BIKE_METRICS.filter((metric) =>
+    records.some((record) => bikeMetricValue(record, metric.key) != null),
+  );
+  const activeBikeMetrics = availableBikeMetrics.filter((metric) =>
+    selectedBikeMetrics.includes(metric.key),
+  );
+  const visibleBikeMetrics = activeBikeMetrics.length
+    ? activeBikeMetrics
+    : availableBikeMetrics.slice(0, 1);
+  const bikeMetricAverages = visibleBikeMetrics.map((metric) => {
+    const values = records.flatMap((record) => {
+      const value = bikeMetricValue(record, metric.key);
+      return value != null ? [value] : [];
+    });
+    return {
+      metric,
+      average: values.length
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : null,
+    };
+  });
+  const toggleBikeMetric = (key: BikeMetricKey) => {
+    setSelectedBikeMetrics((selected) =>
+      selected.includes(key)
+        ? selected.length === 1
+          ? selected
+          : selected.filter((metric) => metric !== key)
+        : [...selected, key],
+    );
+  };
   const availableDynamicsMetrics = RUNNING_DYNAMICS_METRICS.filter((metric) =>
     records.some((record) => record[metric.key] != null),
   );
@@ -1125,6 +1243,7 @@ export default function ActivityDetailPage() {
   const isHyrox = !isStrength && (activity.subsport === "1200" || activityTitle.includes("hyrox"));
   const strength = isStrength ? activity.strength_detail : undefined;
   const isSwim = activity.sport === "swim";
+  const isRide = activity.sport === "ride";
   const swimLengths = activity.swim_lengths ?? [];
   const availableSwimMetrics = SWIM_METRICS.filter((metric) =>
     swimLengths.some((length) => length[metric.key] != null),
@@ -1262,9 +1381,12 @@ export default function ActivityDetailPage() {
   const trainingDuration = activity.timer_time_s != null
     ? Math.max(0, activity.timer_time_s - restDuration)
     : activeRunDuration;
-  const pausedDuration = activity.elapsed_time_s != null && activity.timer_time_s != null
-    ? Math.max(0, activity.elapsed_time_s - activity.timer_time_s)
-    : activity.pauses?.reduce((total, pause) => total + pause.elapsed_s, 0) ?? 0;
+  const fitPausedDuration = activity.pauses?.reduce((total, pause) => total + pause.elapsed_s, 0) ?? 0;
+  const pausedDuration = fitPausedDuration > 0
+    ? fitPausedDuration
+    : activity.elapsed_time_s != null && activity.timer_time_s != null
+      ? Math.max(0, activity.elapsed_time_s - activity.timer_time_s)
+      : 0;
   const activityMetrics: ActivityMetric[] = strength
     ? [
       ["Sets", strength.sets],
@@ -1330,15 +1452,15 @@ export default function ActivityDetailPage() {
     <div className={`card activity-zone-card${strength ? "" : " telemetry-card-standalone"}`} id="chart-hr-speed" style={{ marginBottom: strength ? 0 : "var(--space-6)" }}>
       <div className="activity-zone-header">
         <div>
-          <span className="card-title">Heart Rate & Speed Telemetry</span>
+          <span className="card-title">{isSwim ? "Heart Rate & Swim Pace Telemetry" : "Heart Rate & Speed Telemetry"}</span>
           {hasHeartRateData && <span className="activity-zone-unit" style={{ marginLeft: "8px" }}>bpm</span>}
-          {hasSpeedData && <span className="activity-zone-unit" style={{ marginLeft: "6px", color: "var(--color-text-primary)", fontWeight: 700 }}>• km/h</span>}
+          {hasSpeedData && <span className="activity-zone-unit" style={{ marginLeft: "6px", color: "var(--color-text-primary)", fontWeight: 700 }}>{isSwim ? "• /100m" : "• km/h"}</span>}
         </div>
         <div className="activity-zone-stats">
           {hasHeartRateData && maxHeartRate != null && <span>Max HR <strong className="mono">{maxHeartRate}</strong></span>}
           {hasHeartRateData && activity.avg_hr_bpm != null && <span>Avg HR <strong className="mono">{activity.avg_hr_bpm}</strong></span>}
           {hasSpeedData && activity.avg_speed_mps != null && activity.avg_speed_mps > 0 && (
-            <span>Avg Speed <strong className="mono" style={{ color: "var(--color-text-primary)" }}>{(activity.avg_speed_mps * 3.6).toFixed(1)} km/h</strong></span>
+            <span>{isSwim ? "Avg Pace" : "Avg Speed"} <strong className="mono" style={{ color: "var(--color-text-primary)" }}>{isSwim ? `${formatSwimPace(activity.avg_speed_mps)}/100m` : `${(activity.avg_speed_mps * 3.6).toFixed(1)} km/h`}</strong></span>
           )}
         </div>
       </div>
@@ -1348,8 +1470,19 @@ export default function ActivityDetailPage() {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
             <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
             {hasHeartRateData && <YAxis yAxisId="hr" width={44} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} bpm`} axisLine={false} domain={["dataMin - 10", "dataMax + 10"]} />}
-            {hasSpeedData && <YAxis yAxisId="speed" orientation="right" width={68} padding={{ top: 8, bottom: 8 }} tick={{ fill: "var(--color-text-primary)", fontSize: 11, fontWeight: 700 }} tickFormatter={(value: number) => `${Math.round(value)} km/h`} axisLine={false} />}
-            <Tooltip labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`} />
+            {hasSpeedData && <YAxis yAxisId="speed" orientation="right" width={68} padding={{ top: 8, bottom: 8 }} domain={isSwim ? ["dataMin - 5", "dataMax + 5"] : undefined} reversed={isSwim} tick={{ fill: "var(--color-text-primary)", fontSize: 11, fontWeight: 700 }} tickFormatter={(value: number) => isSwim ? `${formatPaceSeconds(value)}/100m` : `${Math.round(value)} km/h`} axisLine={false} />}
+            <Tooltip
+              labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`}
+              formatter={(value, name) => {
+                const isHeartRate = name === "Heart Rate"
+                  || heartRateZones.some((zone) => zone.label === name);
+                return isHeartRate
+                  ? [`${Math.round(Number(value))} bpm`, "Heart Rate"]
+                  : isSwim
+                    ? [`${formatPaceSeconds(Number(value))}/100m`, "Swim pace"]
+                    : [`${Number(value).toFixed(1)} km/h`, "Speed (km/h)"];
+              }}
+            />
             {hasHeartRateData && activity.avg_hr_bpm != null && (
               <ReferenceLine yAxisId="hr" y={activity.avg_hr_bpm} stroke="var(--color-status-critical)" strokeDasharray="4 4" />
             )}
@@ -1365,7 +1498,7 @@ export default function ActivityDetailPage() {
                 <Line yAxisId="hr" type="monotone" dataKey="hr" stroke="var(--color-status-critical)" strokeWidth={2.5} dot={false} name="Heart Rate (bpm)" />
               )
             )}
-            {hasSpeedData && <Line yAxisId="speed" type="monotone" dataKey="speed" stroke="var(--color-text-primary)" strokeWidth={2.5} dot={false} name="Speed (km/h)" />}
+            {hasSpeedData && <Line yAxisId="speed" type="monotone" dataKey="speed" stroke="var(--color-text-primary)" strokeWidth={2.5} dot={false} name={isSwim ? "Swim pace (/100m)" : "Speed (km/h)"} />}
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -1409,9 +1542,6 @@ export default function ActivityDetailPage() {
                   </div>
                 )}
                 <div className="activity-zone-stats">
-                  {activity.threshold_pace_s_per_km != null && (
-                    <span>Threshold <strong className="mono">{formatPaceSeconds(activity.threshold_pace_s_per_km)}</strong></span>
-                  )}
                   {selectedAverageSpeed != null && selectedAverageSpeed > 0 && (
                     <span>Average <strong className="mono">{formatPace(selectedAverageSpeed)}</strong></span>
                   )}
@@ -1520,7 +1650,12 @@ export default function ActivityDetailPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                   <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
                   {visibleDynamicsMetrics.map((metric) => (
-                    <YAxis key={metric.key} yAxisId={metric.key} hide domain={[0, "dataMax + 10"]} />
+                    <YAxis
+                      key={metric.key}
+                      yAxisId={metric.key}
+                      hide
+                      domain={metric.key === "altitude_m" ? ["dataMin - 5", "dataMax + 5"] : [0, "dataMax + 10"]}
+                    />
                   ))}
                   <Tooltip
                     formatter={(value, name) => {
@@ -1553,7 +1688,135 @@ export default function ActivityDetailPage() {
         )}
       </div>
     );
-  const telemetryCard = isRun ? runTelemetryCards : combinedTelemetryCard;
+  const rideTelemetryCards = isRide
+    && (hasSpeedData || hasHeartRateData)
+    && (
+      <div className="activity-zone-charts" id="chart-speed-hr">
+        <div className="activity-zone-overview-grid">
+          {powerValues.length > 0 && (
+            <section className="card activity-zone-card">
+              <div className="activity-zone-header">
+                <div>
+                  <span className="card-title">Power</span>
+                  <span className="activity-zone-unit">W</span>
+                </div>
+                <div className="activity-zone-stats">
+                  {activity.max_power_w != null && <span>Max <strong className="mono">{activity.max_power_w}</strong></span>}
+                  {activity.avg_power_w != null && <span>Average <strong className="mono">{activity.avg_power_w}</strong></span>}
+                </div>
+              </div>
+              <div className="activity-zone-chart">
+                <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 220 }}>
+                  <LineChart data={chartData} margin={{ top: 16, right: 12, bottom: 8, left: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
+                    <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
+                    <YAxis width={56} domain={[0, "dataMax + 10"]} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} W`} axisLine={false} />
+                    <Tooltip formatter={(value) => [`${Math.round(Number(value))} W`, "Power"]} labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`} />
+                    {activity.avg_power_w != null && <ReferenceLine y={activity.avg_power_w} stroke="var(--color-status-critical)" strokeDasharray="4 4" />}
+                    {powerZones.length > 0 && <Line type="linear" dataKey="power_w" stroke="var(--color-text-muted)" strokeWidth={2} dot={false} name="Power" tooltipType="none" />}
+                    {powerZones.length ? powerZones.map((zone) => (
+                      <Line key={zone.key} type="linear" dataKey={`power_${zone.key}`} stroke={zone.color} strokeWidth={2.5} dot={false} connectNulls={false} name={zone.label} />
+                    )) : (
+                      <Line type="linear" dataKey="power_w" stroke="var(--color-accent-primary)" strokeWidth={2.5} dot={false} name="Power" />
+                    )}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              {powerZoneSummary.length > 0 ? (
+                <ZoneDistribution zones={powerZoneSummary} />
+              ) : (
+                <p className="power-zone-unavailable">Power zone breakdown unavailable — FTP is not synced from COROS.</p>
+              )}
+            </section>
+          )}
+
+          {hasHeartRateData && (
+            <section className="card activity-zone-card">
+              <div className="activity-zone-header">
+                <div>
+                  <span className="card-title">Heart Rate</span>
+                  <span className="activity-zone-unit">bpm</span>
+                </div>
+                <div className="activity-zone-stats">
+                  {maxHeartRate != null && <span>Max <strong className="mono">{maxHeartRate}</strong></span>}
+                  {activity.avg_hr_bpm != null && <span>Average <strong className="mono">{activity.avg_hr_bpm}</strong></span>}
+                </div>
+              </div>
+              <div className="activity-zone-chart">
+                <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 220 }}>
+                  <LineChart data={chartData} margin={{ top: 16, right: 12, bottom: 8, left: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
+                    <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
+                    <YAxis width={56} domain={["dataMin - 10", "dataMax + 10"]} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)}`} axisLine={false} />
+                    <Tooltip formatter={(value) => [`${Math.round(Number(value))} bpm`, "Heart Rate"]} labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`} />
+                    {activity.avg_hr_bpm != null && <ReferenceLine y={activity.avg_hr_bpm} stroke="var(--color-status-critical)" strokeDasharray="4 4" />}
+                    {heartRateZones.length > 0 && <Line type="linear" dataKey="hr" stroke="var(--color-text-muted)" strokeWidth={2} dot={false} name="Heart Rate" tooltipType="none" />}
+                    {heartRateZones.length ? heartRateZones.map((zone) => (
+                      <Line key={zone.key} type="linear" dataKey={`hr_${zone.key}`} stroke={zone.color} strokeWidth={2.5} dot={false} connectNulls={false} name={zone.label} />
+                    )) : (
+                      <Line type="linear" dataKey="hr" stroke="var(--color-status-critical)" strokeWidth={2.5} dot={false} name="Heart Rate" />
+                    )}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              {heartRateZoneSummary.length > 0 && <ZoneDistribution zones={heartRateZoneSummary} />}
+            </section>
+          )}
+        </div>
+      </div>
+    );
+  const telemetryCard = isRun ? runTelemetryCards : isRide ? rideTelemetryCards : combinedTelemetryCard;
+  const bikeMetricsCard = activity.sport === "ride" && visibleBikeMetrics.length > 0 && (
+    <section className="card activity-zone-card running-dynamics-card" id="chart-bike-metrics" style={{ marginBottom: "var(--space-6)" }}>
+      <div className="activity-zone-header">
+        <div>
+          <span className="card-title">Bike Metrics</span>
+        </div>
+      </div>
+      <div className="running-dynamics-tabs" role="group" aria-label="Bike metrics">
+        {availableBikeMetrics.map((metric) => (
+          <button
+            type="button"
+            aria-pressed={visibleBikeMetrics.some(({ key }) => key === metric.key)}
+            className={visibleBikeMetrics.some(({ key }) => key === metric.key) ? "active" : ""}
+            style={visibleBikeMetrics.some(({ key }) => key === metric.key) ? { backgroundColor: `${metric.color}18`, borderColor: metric.color, color: metric.color } : undefined}
+            key={metric.key}
+            onClick={() => toggleBikeMetric(metric.key)}
+          >
+            {metric.label}
+          </button>
+        ))}
+      </div>
+      <div className="running-dynamics-legend" aria-label="Selected bike metric averages">
+        {bikeMetricAverages.map(({ metric, average }) => (
+          <span key={metric.key}>
+            <i style={{ background: metric.color }} />
+            {metric.label}
+            {average != null && <strong className="mono">{average.toFixed(metric.decimals)} {metric.unit}</strong>}
+          </span>
+        ))}
+      </div>
+      <div className="activity-zone-chart running-dynamics-chart">
+        <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 0, height: 260 }}>
+          <LineChart data={bikeChartData} margin={{ top: 16, right: 12, bottom: 8, left: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
+            <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
+            {visibleBikeMetrics.map((metric) => <YAxis key={metric.key} yAxisId={metric.key} hide domain={[0, "dataMax + 10"]} />)}
+            <Tooltip
+              formatter={(value, name) => {
+                const metric = BIKE_METRICS.find(({ label }) => label === name);
+                return metric ? [`${Number(value).toFixed(metric.decimals)} ${metric.unit}`, metric.label] : [value, name];
+              }}
+              labelFormatter={(value) => `${formatSplitDuration(Number(value) * 60)} elapsed`}
+            />
+            {visibleBikeMetrics.map((metric) => (
+              <Line key={metric.key} yAxisId={metric.key} type="linear" dataKey={metric.key} stroke={metric.color} strokeWidth={2.25} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={false} name={metric.label} />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </section>
+  );
   const swimMetricsCard = isSwim && visibleSwimMetrics.length > 0 && (
     <section className="card activity-zone-card running-dynamics-card" id="chart-swim-metrics" style={{ marginBottom: "var(--space-6)" }}>
       <div className="activity-zone-header">
@@ -1640,7 +1903,7 @@ export default function ActivityDetailPage() {
               <SportIcon sport={activity.sport} title={activity.title} subsport={activity.subsport} />
             </span>
             <div>
-              <h1>{activity.title || sportVisual.label}</h1>
+              <h1>{getActivityDisplayTitle(activity.sport, activity.title, activity.subsport)}</h1>
               <span>{activityTime}</span>
             </div>
           </div>
@@ -1664,6 +1927,7 @@ export default function ActivityDetailPage() {
             telemetryCard
           )}
           {swimMetricsCard}
+          {bikeMetricsCard}
 
           {strength && (
             <div className="card breakdown-card" style={{ marginTop: "var(--space-6)", marginBottom: "var(--space-6)" }}>
@@ -1736,17 +2000,19 @@ export default function ActivityDetailPage() {
                       type="button"
                       className={`route-replay-button route-replay-toggle-popup${showTelemetryPopup ? " is-active" : ""}`}
                       aria-pressed={showTelemetryPopup}
-                      title={showTelemetryPopup ? "Hide Pace & HR popup on green marker" : "Show Pace & HR popup on green marker"}
+                      title={showTelemetryPopup
+                        ? `Hide ${activity.sport === "ride" ? "Speed" : "Pace"} & HR popup on green marker`
+                        : `Show ${activity.sport === "ride" ? "Speed" : "Pace"} & HR popup on green marker`}
                       onClick={() => setShowTelemetryPopup((prev) => !prev)}
                     >
                       <svg viewBox="0 0 512 512" aria-hidden="true" style={{ width: 13, height: 13, marginRight: 4 }}>
                         <path d="M464 256H368l-56 160L200 96l-56 160H48" stroke="currentColor" strokeWidth="36" strokeLinecap="round" strokeLinejoin="round" fill="none" />
                       </svg>
-                      Pace &amp; HR
+                      {activity.sport === "ride" ? "Speed" : "Pace"} &amp; HR
                     </button>
                   </div>
                   <div style={{ flex: 1, position: "relative", minHeight: "260px", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-                    <Map key={activityId} points={sampledRoutePoints} showTelemetryPopup={showTelemetryPopup} terrain3D={isTerrain3D} onTerrain3DChange={setIsTerrain3D} onExpand={() => setIsMapExpanded(true)} />
+                    <Map key={activityId} points={sampledRoutePoints} sport={activity.sport} showTelemetryPopup={showTelemetryPopup} terrain3D={isTerrain3D} onTerrain3DChange={setIsTerrain3D} onExpand={() => setIsMapExpanded(true)} />
                   </div>
                 </div>
               )}
@@ -1772,12 +2038,15 @@ export default function ActivityDetailPage() {
                           type="button"
                           className={`route-replay-button route-replay-toggle-popup${showTelemetryPopup ? " is-active" : ""}`}
                           aria-pressed={showTelemetryPopup}
+                          title={showTelemetryPopup
+                            ? `Hide ${activity.sport === "ride" ? "Speed" : "Pace"} & HR popup on green marker`
+                            : `Show ${activity.sport === "ride" ? "Speed" : "Pace"} & HR popup on green marker`}
                           onClick={() => setShowTelemetryPopup((prev) => !prev)}
                         >
                           <svg viewBox="0 0 512 512" aria-hidden="true" style={{ width: 13, height: 13, marginRight: 4 }}>
                             <path d="M464 256H368l-56 160L200 96l-56 160H48" stroke="currentColor" strokeWidth="36" strokeLinecap="round" strokeLinejoin="round" fill="none" />
                           </svg>
-                          Pace &amp; HR
+                          {activity.sport === "ride" ? "Speed" : "Pace"} &amp; HR
                         </button>
                         <button
                           type="button"
@@ -1793,7 +2062,7 @@ export default function ActivityDetailPage() {
                       </div>
                     </div>
                     <div className="map-expanded-modal-body">
-                      <Map key={`${activityId}-expanded`} points={sampledRoutePoints} showTelemetryPopup={showTelemetryPopup} terrain3D={isTerrain3D} onTerrain3DChange={setIsTerrain3D} />
+                      <Map key={`${activityId}-expanded`} points={sampledRoutePoints} sport={activity.sport} showTelemetryPopup={showTelemetryPopup} terrain3D={isTerrain3D} onTerrain3DChange={setIsTerrain3D} />
                     </div>
                   </div>
                 </div>
@@ -1826,7 +2095,7 @@ export default function ActivityDetailPage() {
             <div className="card breakdown-card" style={{ marginBottom: "var(--space-6)" }} id="laps-table">
               <BreakdownHeader
                 title="Triathlon Breakdown"
-                description="Leg performance with transition timing"
+                description="Leg performance with transition and manual-pause timing"
                 count={triathlonLegDetails.length}
                 itemLabel="leg"
               />
@@ -1851,6 +2120,21 @@ export default function ActivityDetailPage() {
                           ? "Bike"
                           : nextLeg.sport[0].toUpperCase() + nextLeg.sport.slice(1)
                         : "";
+                      const recordOriginMs = records[0]
+                        ? new Date(records[0].timestamp).getTime()
+                        : null;
+                      const legStartMs = leg.laps[0]?.start_time
+                        ? new Date(leg.laps[0].start_time).getTime()
+                        : 0;
+                      const nextLegStartMs = nextLeg?.laps[0]?.start_time
+                        ? new Date(nextLeg.laps[0].start_time).getTime()
+                        : Number.POSITIVE_INFINITY;
+                      const manualPauses = recordOriginMs === null
+                        ? []
+                        : (activity.pauses ?? []).filter((pause) => {
+                          const pauseStartMs = recordOriginMs + pause.start_elapsed_s * 1_000;
+                          return pauseStartMs >= legStartMs && pauseStartMs < nextLegStartMs;
+                        });
                       const toggleLeg = (): void =>
                         setExpandedTriathlonLeg(isExpanded ? null : leg.sport);
                       const legHeartRates = leg.laps.flatMap((lap) =>
@@ -1935,6 +2219,15 @@ export default function ActivityDetailPage() {
                               </td>
                             </tr>
                           )}
+                          {manualPauses.map((pause) => (
+                            <PhaseRow
+                              key={`${leg.sport}-pause-${pause.start_elapsed_s}`}
+                              badge={`P${(activity.pauses ?? []).indexOf(pause) + 1}`}
+                              title="Manual pause"
+                              description={`Timer stopped at ${formatSplitDuration(pause.start_elapsed_s)} elapsed`}
+                              duration={formatSplitDuration(pause.elapsed_s)}
+                            />
+                          ))}
                           {leg.transition > 0 && (
                             <PhaseRow
                               badge={`T${index + 1}`}
@@ -1976,8 +2269,8 @@ export default function ActivityDetailPage() {
                       <th>{isHyrox ? "Load" : "Distance"}</th>
                       <th>Duration</th>
                       <th>Avg HR</th>
-                      <th>{isTriathlon ? "Pace / Speed" : isSwim ? "Pace /100m" : "Pace"}</th>
-                      <th>{isHyrox ? "Cadence" : isTriathlon ? "Power / Cadence" : isSwim ? "Stroke rate" : hasStructuredLapPhases ? "Power / HRR" : "Power"}</th>
+                      <th>{isTriathlon ? "Pace / Speed" : isSwim ? "Pace /100m" : isRide ? "Speed" : "Pace"}</th>
+                      <th>{isHyrox ? "Cadence" : isTriathlon ? "Power / Cadence" : isSwim ? "Stroke rate" : isRide ? "Cadence" : hasStructuredLapPhases ? "Power / HRR" : "Power"}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1987,16 +2280,23 @@ export default function ActivityDetailPage() {
                       const kilometerSplits = sourceLaps.length === 1
                         ? activity.lap_splits?.[String(lap.lap_index)] ?? []
                         : [];
-                      const pausesInLap = (activity.pauses ?? []).filter((pause) =>
-                        kilometerSplits.some((split) =>
-                          pause.start_elapsed_s >= (split.start_elapsed_s ?? 0)
-                          && pause.start_elapsed_s < (split.end_elapsed_s ?? 0),
-                        ),
+                      const lapStart = lap.start_elapsed_s ?? 0;
+                      const nextLapStart = activity.laps[groupIndex + 1]?.start_elapsed_s
+                        ?? Number.POSITIVE_INFINITY;
+                      const pausesAfterLap = (activity.pauses ?? []).filter((pause) =>
+                        pause.start_elapsed_s >= lapStart && pause.start_elapsed_s < nextLapStart,
                       );
+                      const pauseDistanceM = (pause: ActivityPause): number | undefined => records.find((record) =>
+                        record.elapsed_s != null
+                        && record.elapsed_s >= pause.start_elapsed_s
+                        && record.distance_m != null,
+                      )?.distance_m;
                       const isExpanded = expandedLapIndex === lap.lap_index;
                       const lapSport = lap.leg ?? activity.sport;
                       const isLapSwim = lapSport === "swim";
+                      const isLapRide = lapSport === "ride";
                       const isLapPaceSport = lap.lap_type === "run" || ["run", "trail_run", "walk", "hike"].includes(lapSport);
+                      const nestsPausesInKilometerBreakdown = isLapPaceSport && kilometerSplits.length > 1;
                       const lapNumber = isSwim
                         ? swimLapNumbers[lap.lap_index] ?? groupIndex + 1
                         : hasStructuredLapPhases
@@ -2013,15 +2313,25 @@ export default function ActivityDetailPage() {
 
                       if (isRestPhase) {
                         return (
-                          <PhaseRow
-                            key={`${lap.lap_index}-${groupIndex}`}
-                            badge={isSwim ? undefined : `R${lapNumber}`}
-                            title="Rest"
-                            description="Recovery between intervals"
-                            duration={formatSplitDuration(lap.elapsed_s)}
-                            avgHr={lap.avg_hr_bpm}
-                            heartRateRecovery={heartRateRecovery}
-                          />
+                          <Fragment key={`${lap.lap_index}-${groupIndex}`}>
+                            <PhaseRow
+                              badge={isSwim ? undefined : `R${lapNumber}`}
+                              title="Rest"
+                              description="Recovery between intervals"
+                              duration={formatSplitDuration(lap.elapsed_s)}
+                              avgHr={lap.avg_hr_bpm}
+                              heartRateRecovery={heartRateRecovery}
+                            />
+                            {pausesAfterLap.map((pause) => (
+                              <PhaseRow
+                                key={`${lap.lap_index}-pause-${pause.start_elapsed_s}`}
+                                badge={`P${(activity.pauses ?? []).indexOf(pause) + 1}`}
+                                title="Manual pause"
+                                description={`Timer stopped at ${formatSplitDuration(pause.start_elapsed_s)} elapsed`}
+                                duration={formatSplitDuration(pause.elapsed_s)}
+                              />
+                            ))}
+                          </Fragment>
                         );
                       }
 
@@ -2078,9 +2388,9 @@ export default function ActivityDetailPage() {
                             </td>
                             <td data-label={isHyrox ? "Load" : "Distance"} className="mono">{lap.distance_m ? lap.load_unit === "reps" ? `${Math.round(lap.distance_m)} reps` : lap.lap_type === "functional" || isLapSwim ? `${Math.round(lap.distance_m)} m` : `${(lap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
                             <td data-label="Duration" className="mono">{isLapSwim ? formatSwimLapDuration(lap.elapsed_s) : `${Math.floor(lap.elapsed_s / 60)}:${String(Math.round(lap.elapsed_s % 60)).padStart(2, "0")}`}</td>
-                            <td data-label="Avg HR" className="mono">{lap.avg_hr_bpm ? `${lap.avg_hr_bpm} bpm` : "--"}</td>
-                            <td data-label={isSwim ? "Pace /100m" : "Pace"} className="mono breakdown-primary-metric">{lap.avg_speed_mps ? isLapSwim ? formatSwimPace(lap.avg_speed_mps) : isLapPaceSport ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : isLapPaceSport && lap.distance_m && lap.elapsed_s > 0 ? formatPace(lap.distance_m / lap.elapsed_s) : "--"}</td>
-                            <td data-label={isRest && heartRateRecovery ? "HRR" : isHyrox ? "Cadence" : isSwim ? "Stroke rate" : "Power"} className="mono">{isRest && heartRateRecovery ? heartRateRecovery : isHyrox || isLapSwim ? lap.avg_cadence ? `${lap.avg_cadence} spm` : "--" : lap.avg_power_w ? `${lap.avg_power_w} W` : "--"}</td>
+                            <td data-label="Avg HR" className="mono">{lap.avg_hr_bpm ? `${lap.avg_hr_bpm} bpm` : (activity.avg_hr_bpm && lapGroups.length === 1) ? `${activity.avg_hr_bpm} bpm` : "--"}</td>
+                            <td data-label={isSwim ? "Pace /100m" : isRide ? "Speed" : "Pace"} className="mono breakdown-primary-metric">{lap.avg_speed_mps ? isLapSwim ? formatSwimPace(lap.avg_speed_mps) : isLapPaceSport ? formatPace(lap.avg_speed_mps) : `${(lap.avg_speed_mps * 3.6).toFixed(1)} km/h` : isLapPaceSport && lap.distance_m && lap.elapsed_s > 0 ? formatPace(lap.distance_m / lap.elapsed_s) : lap.distance_m && lap.elapsed_s > 0 && isRide ? `${((lap.distance_m / lap.elapsed_s) * 3.6).toFixed(1)} km/h` : "--"}</td>
+                            <td data-label={isRest && heartRateRecovery ? "HRR" : isHyrox || isRide ? "Cadence" : isSwim ? "Stroke rate" : "Power"} className="mono">{isRest && heartRateRecovery ? heartRateRecovery : isHyrox || isLapSwim ? lap.avg_cadence ? `${lap.avg_cadence} spm` : "--" : isRide ? lap.avg_cadence ? `${lap.avg_cadence} rpm` : "--" : lap.avg_power_w ? `${lap.avg_power_w} W` : "--"}</td>
                           </tr>
                           {isExpanded && (
                             <tr className="lap-split-row">
@@ -2100,15 +2410,15 @@ export default function ActivityDetailPage() {
                                       <span className="lap-split-count">{sourceLaps.length} laps</span>
                                     </div>
                                     <table className="lap-split-table breakdown-nested-table mono">
-                                      <thead><tr><th>Lap</th><th>Distance</th><th>Duration</th><th>Pace</th><th>Avg HR</th><th>Power</th></tr></thead>
+                                      <thead><tr><th>Lap</th><th>Distance</th><th>Duration</th><th>{isRide ? "Speed" : "Pace"}</th><th>Avg HR</th><th>{isRide ? "Cadence" : "Power"}</th></tr></thead>
                                       <tbody>{sourceLaps.map((sourceLap, sourceLapIndex) => (
                                         <tr key={`${sourceLap.lap_index}-${sourceLapIndex}`}>
                                           <td data-label="Lap"><span className="lap-split-index">{sourceLap.lap_index}</span></td>
                                           <td data-label="Distance">{sourceLap.distance_m ? `${(sourceLap.distance_m / 1000).toFixed(2)} km` : "--"}</td>
                                           <td data-label="Duration">{formatSplitDuration(sourceLap.elapsed_s)}</td>
-                                          <td data-label="Pace" className="lap-split-pace">{sourceLap.avg_speed_mps ? `${formatPace(sourceLap.avg_speed_mps)}/km` : sourceLap.distance_m && sourceLap.elapsed_s > 0 ? `${formatPace(sourceLap.distance_m / sourceLap.elapsed_s)}/km` : "--"}</td>
+                                          <td data-label={isRide ? "Speed" : "Pace"} className="lap-split-pace">{sourceLap.avg_speed_mps ? isRide ? `${(sourceLap.avg_speed_mps * 3.6).toFixed(1)} km/h` : `${formatPace(sourceLap.avg_speed_mps)}/km` : sourceLap.distance_m && sourceLap.elapsed_s > 0 ? isRide ? `${((sourceLap.distance_m / sourceLap.elapsed_s) * 3.6).toFixed(1)} km/h` : `${formatPace(sourceLap.distance_m / sourceLap.elapsed_s)}/km` : "--"}</td>
                                           <td data-label="Avg HR">{sourceLap.avg_hr_bpm ? `${sourceLap.avg_hr_bpm} bpm` : "--"}</td>
-                                          <td data-label="Power">{sourceLap.avg_power_w ? `${sourceLap.avg_power_w} W` : "--"}</td>
+                                          <td data-label={isRide ? "Cadence" : "Power"}>{isRide ? sourceLap.avg_cadence ? `${sourceLap.avg_cadence} rpm` : "--" : sourceLap.avg_power_w ? `${sourceLap.avg_power_w} W` : "--"}</td>
                                         </tr>
                                       ))}</tbody>
                                     </table>
@@ -2117,46 +2427,81 @@ export default function ActivityDetailPage() {
                                   <div className="segment-splits">
                                     <div className="lap-split-header">
                                       <div>
-                                        <div className="lap-split-label">{isSwim ? "Length breakdown" : "Kilometre breakdown"}</div>
-                                        <div className="lap-split-description">{isSwim ? "Pace and heart rate by pool length" : "Pace and heart rate by kilometre"}</div>
+                                        <div className="lap-split-label">{isLapSwim ? "Length breakdown" : isLapRide ? "5 km breakdown" : "Kilometre breakdown"}</div>
+                                        <div className="lap-split-description">{isLapSwim ? "Pace and heart rate by pool length" : isLapRide ? "Speed, power and heart rate by 5 kilometres" : "Pace and heart rate by kilometre"}</div>
                                       </div>
                                       <span className="lap-split-count">{kilometerSplits.length} splits</span>
                                     </div>
                                     <table className="lap-split-table breakdown-nested-table mono">
-                                      <thead><tr><th>{isSwim ? "Length" : "Km"}</th><th>Distance</th><th>Duration</th><th>{isSwim ? "Pace /100m" : "Pace"}</th><th>Avg HR</th><th>Max HR</th></tr></thead>
-                                      <tbody>{kilometerSplits.map((split, index) => (
-                                        <Fragment key={`${lap.lap_index}-${index}`}>
-                                          {pausesInLap
-                                            .filter((pause) =>
-                                              pause.start_elapsed_s >= (split.start_elapsed_s ?? 0)
-                                              && pause.start_elapsed_s < (split.end_elapsed_s ?? 0),
-                                            )
-                                            .map((pause, pauseIndex) => (
-                                              <tr className="lap-summary-row is-rest" key={`${lap.lap_index}-pause-${pauseIndex}`}>
-                                                <td data-label="Pause"><span className="breakdown-row-label">Pause</span></td>
-                                                <td data-label="Distance">--</td>
-                                                <td data-label="Duration">{formatSplitDuration(pause.elapsed_s)}</td>
-                                                <td data-label="Pace">--</td>
-                                                <td data-label="Avg HR">--</td>
-                                                <td data-label="Max HR">--</td>
-                                              </tr>
-                                            ))}
-                                          <tr>
-                                            <td data-label={isSwim ? "Length" : "Km"}><span className="lap-split-index">{index + 1}</span></td>
-                                            <td data-label="Distance">{split.distance_m ? isSwim ? `${Math.round(split.distance_m)} m` : `${(split.distance_m / 1000).toFixed(2)} km` : "--"}</td>
-                                            <td data-label="Duration">{formatSplitDuration(split.elapsed_s)}</td>
-                                            <td data-label={isSwim ? "Pace /100m" : "Pace"} className="lap-split-pace">{split.avg_speed_mps ? isSwim ? formatSwimPace(split.avg_speed_mps) : `${formatPace(split.avg_speed_mps)}/km` : split.distance_m && split.elapsed_s > 0 && !isSwim ? `${formatPace(split.distance_m / split.elapsed_s)}/km` : "--"}</td>
-                                            <td data-label="Avg HR">{split.avg_hr_bpm ? `${split.avg_hr_bpm} bpm` : "--"}</td>
-                                            <td data-label="Max HR">{split.max_hr_bpm ? `${split.max_hr_bpm} bpm` : "--"}</td>
-                                          </tr>
-                                        </Fragment>
-                                      ))}</tbody>
+                                      <thead><tr><th>{isLapSwim ? "Length" : isLapRide ? "5 km" : "Km"}</th><th>Distance</th><th>Duration</th><th>{isLapSwim ? "Pace /100m" : isLapRide ? "Speed" : "Pace"}</th>{isLapRide && <><th>Avg Power</th><th>Max Power</th></>}<th>Avg HR</th><th>Max HR</th></tr></thead>
+                                      <tbody>{kilometerSplits.map((split, index) => {
+                                        const pausesInSplit = nestsPausesInKilometerBreakdown
+                                          ? pausesAfterLap.filter((pause) =>
+                                            pause.start_elapsed_s >= (split.start_elapsed_s ?? 0)
+                                            && pause.start_elapsed_s < (split.end_elapsed_s ?? 0),
+                                          )
+                                          : [];
+                                        return (
+                                          <Fragment key={`${lap.lap_index}-${index}`}>
+                                            {pausesInSplit.flatMap((pause, pauseIndex) => {
+                                              const pauseDistance = pauseDistanceM(pause);
+                                              const nextPause = pausesInSplit[pauseIndex + 1];
+                                              const nextPauseDistance = nextPause ? pauseDistanceM(nextPause) : undefined;
+                                              const resumedDurationS = nextPause
+                                                ? Math.max(0, nextPause.start_elapsed_s - (pause.start_elapsed_s + pause.elapsed_s))
+                                                : 0;
+                                              const resumedDistanceM = pauseDistance != null && nextPauseDistance != null
+                                                ? Math.max(0, nextPauseDistance - pauseDistance)
+                                                : undefined;
+
+                                              return [
+                                                <tr className="is-rest" key={`pause-${pause.start_elapsed_s}`}>
+                                                  <td data-label="Pause"><span className="lap-split-index">P{(activity.pauses ?? []).indexOf(pause) + 1}</span> <span className="breakdown-row-label">Manual pause</span></td>
+                                                  <td data-label="Distance">{pauseDistance != null ? `${(pauseDistance / 1000).toFixed(2)} km` : "--"}</td>
+                                                  <td data-label="Duration">{formatSplitDuration(pause.elapsed_s)}</td>
+                                                  <td data-label="Pace">--</td>
+                                                  <td data-label="Avg HR">--</td>
+                                                  <td data-label="Max HR">--</td>
+                                                </tr>,
+                                                ...(nextPause && resumedDistanceM != null && resumedDurationS > 0 ? [
+                                                  <tr key={`resumed-${pause.start_elapsed_s}`}>
+                                                    <td data-label="Segment"><span className="breakdown-row-label">Resumed</span></td>
+                                                    <td data-label="Distance">{(resumedDistanceM / 1000).toFixed(2)} km</td>
+                                                    <td data-label="Duration">{formatSplitDuration(resumedDurationS)}</td>
+                                                    <td data-label="Pace" className="lap-split-pace">{resumedDistanceM > 0 ? `${formatPace(resumedDistanceM / resumedDurationS)}/km` : "--"}</td>
+                                                    <td data-label="Avg HR">--</td>
+                                                    <td data-label="Max HR">--</td>
+                                                  </tr>,
+                                                ] : []),
+                                              ];
+                                            })}
+                                            <tr>
+                                              <td data-label={isLapSwim ? "Length" : isLapRide ? "5 km" : "Km"}><span className="lap-split-index">{index + 1}</span></td>
+                                              <td data-label="Distance">{split.distance_m ? isLapSwim ? `${Math.round(split.distance_m)} m` : `${(split.distance_m / 1000).toFixed(2)} km` : "--"}</td>
+                                              <td data-label="Duration">{formatSplitDuration(split.elapsed_s)}</td>
+                                              <td data-label={isLapSwim ? "Pace /100m" : isLapRide ? "Speed" : "Pace"} className="lap-split-pace">{split.avg_speed_mps ? isLapSwim ? formatSwimPace(split.avg_speed_mps) : isLapRide ? `${(split.avg_speed_mps * 3.6).toFixed(1)} km/h` : `${formatPace(split.avg_speed_mps)}/km` : split.distance_m && split.elapsed_s > 0 ? isLapRide ? `${((split.distance_m / split.elapsed_s) * 3.6).toFixed(1)} km/h` : !isLapSwim ? `${formatPace(split.distance_m / split.elapsed_s)}/km` : "--" : "--"}</td>
+                                              {isLapRide && <><td data-label="Avg Power">{split.avg_power_w != null ? `${split.avg_power_w} W` : "--"}</td><td data-label="Max Power">{split.max_power_w != null ? `${split.max_power_w} W` : "--"}</td></>}
+                                              <td data-label="Avg HR">{split.avg_hr_bpm ? `${split.avg_hr_bpm} bpm` : "--"}</td>
+                                              <td data-label="Max HR">{split.max_hr_bpm ? `${split.max_hr_bpm} bpm` : "--"}</td>
+                                            </tr>
+                                          </Fragment>
+                                        );
+                                      })}</tbody>
                                     </table>
                                   </div>
                                 ) : null}
                               </td>
                             </tr>
                           )}
+                          {!nestsPausesInKilometerBreakdown && pausesAfterLap.map((pause) => (
+                            <PhaseRow
+                              key={`${lap.lap_index}-pause-${pause.start_elapsed_s}`}
+                              badge={`P${(activity.pauses ?? []).indexOf(pause) + 1}`}
+                              title="Manual pause"
+                              description={`Timer stopped at ${formatSplitDuration(pause.start_elapsed_s)} elapsed`}
+                              duration={formatSplitDuration(pause.elapsed_s)}
+                            />
+                          ))}
                         </Fragment>
                       );
                     })}
@@ -2173,7 +2518,7 @@ export default function ActivityDetailPage() {
                       </td>
                       <td data-label="Duration" className="mono">{formatSplitDuration(totalDuration)}</td>
                       <td data-label="Avg HR" className="mono">{totalAvgHr ? `${totalAvgHr} bpm` : "—"}</td>
-                      <td data-label={isSwim ? "Pace /100m" : "Pace"} className="mono">
+                      <td data-label={isSwim ? "Pace /100m" : isRide ? "Speed" : "Pace"} className="mono">
                         {totalAvgSpeed
                           ? isSwim
                             ? formatSwimPace(totalAvgSpeed)
@@ -2182,9 +2527,9 @@ export default function ActivityDetailPage() {
                               : `${(totalAvgSpeed * 3.6).toFixed(1)} km/h`
                           : "—"}
                       </td>
-                      <td data-label={isHyrox ? "Cadence" : isSwim ? "Stroke rate" : "Power"} className="mono">
-                        {isHyrox || isSwim
-                          ? totalAvgCadence ? `${totalAvgCadence} spm` : "—"
+                      <td data-label={isHyrox || isRide ? "Cadence" : isSwim ? "Stroke rate" : "Power"} className="mono">
+                        {isHyrox || isSwim || isRide
+                          ? totalAvgCadence ? `${totalAvgCadence} ${isRide ? "rpm" : "spm"}` : "—"
                           : totalAvgPower ? `${totalAvgPower} W` : "—"}
                       </td>
                     </tr>

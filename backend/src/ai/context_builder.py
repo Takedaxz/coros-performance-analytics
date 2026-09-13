@@ -135,7 +135,16 @@ def _activity_sport(activity: Activity) -> str:
 
 def _activity_header(index: int, activity: Activity) -> str:
     sport = _activity_sport(activity)
+    is_ride = sport == "ride"
     pace = _format_pace(activity.avg_speed_mps, 100 if sport == "swim" else 1_000)
+    speed = (
+        f"{activity.avg_speed_mps * 3.6:.1f}km/h"
+        if is_ride and activity.avg_speed_mps
+        else None
+    )
+    speed_or_pace_label = (
+        "speed" if is_ride else "total_pace" if sport == "swim" else "pace"
+    )
     metrics = [
         _metric("dur", _format_duration(activity.elapsed_time_s)),
         _metric("dist", f"{activity.distance_m / 1_000:.2f}km" if activity.distance_m else None),
@@ -146,7 +155,7 @@ def _activity_header(index: int, activity: Activity) -> str:
             if activity.avg_hr_bpm and activity.max_hr_bpm
             else activity.avg_hr_bpm,
         ),
-        _metric("total_pace" if sport == "swim" else "pace", pace),
+        _metric(speed_or_pace_label, speed or pace),
         _metric(
             "power",
             f"{activity.avg_power_w}/{activity.max_power_w}W"
@@ -189,9 +198,15 @@ def _lap_label(lap: ActivityLap) -> tuple[str, str | None]:
 def _lap_line(lap: ActivityLap, sport: str) -> str:
     label, load_unit = _lap_label(lap)
     is_functional = load_unit is not None
+    is_ride = sport == "ride"
     pace = None if is_functional else _format_pace(
         lap.avg_speed_mps,
         100 if sport == "swim" else 1_000,
+    )
+    speed = (
+        f"{lap.avg_speed_mps * 3.6:.1f}km/h"
+        if is_ride and lap.avg_speed_mps
+        else None
     )
     load = None
     distance = None
@@ -210,7 +225,7 @@ def _lap_line(lap: ActivityLap, sport: str) -> str:
         _metric("dur", _format_duration(lap.elapsed_s)),
         _metric("load", load),
         _metric("dist", distance),
-        _metric("pace", pace),
+        _metric("speed" if is_ride else "pace", speed or pace),
         _metric(
             "hr",
             f"{lap.avg_hr_bpm}/{lap.max_hr_bpm}"

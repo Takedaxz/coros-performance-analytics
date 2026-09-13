@@ -398,11 +398,27 @@ def _format_pace(speed_mps: float) -> str:
     return f"{m}:{s:02d}/km"
 
 
+def _format_speed(speed_mps: float) -> str:
+    if not speed_mps or speed_mps <= 0:
+        return "--"
+    return f"{speed_mps * 3.6:.1f} km/h"
+
+
+def _format_postmortem_motion(speed_mps: float, is_ride: bool) -> str:
+    return _format_speed(speed_mps) if is_ride else _format_pace(speed_mps)
+
+
+def _format_postmortem_cadence(cadence: int | None, is_ride: bool) -> str:
+    if not cadence:
+        return ""
+    return f"{cadence} {'rpm' if is_ride else 'spm'}"
+
+
 def _postmortem_focus(sport: str) -> str:
     focuses = {
         "run": "Pacing, split consistency, and heart-rate response.",
         "trail_run": "Effort, pacing, elevation, and heart-rate response.",
-        "ride": "Power, pacing, elevation, and heart-rate response.",
+        "ride": "Power, speed, elevation, and heart-rate response.",
         "swim": "Intervals, pace, stroke/cadence, and heart-rate response when available.",
         "walk": "Pacing, duration, and heart-rate response.",
         "hike": "Duration, elevation, effort, and heart-rate response.",
@@ -438,6 +454,8 @@ async def _build_laps_with_km_breakdown(
     )
     records = records_res.scalars().all()
 
+    is_ride = _postmortem_sport(activity) == "ride"
+    motion_label = "Speed" if is_ride else "Pace"
     lines = []
     if laps:
         lines.append("Splits & Per-Kilometer Breakdown:")
@@ -449,15 +467,16 @@ async def _build_laps_with_km_breakdown(
 
             dist_km = (lap.distance_m / 1000) if lap.distance_m else 0
             dur_min = (lap.elapsed_s / 60) if lap.elapsed_s else 0
-            pace_str = _format_pace(lap.avg_speed_mps or 0)
+            motion_str = _format_postmortem_motion(lap.avg_speed_mps or 0, is_ride)
             hr_str = f"{lap.avg_hr_bpm} bpm" if lap.avg_hr_bpm else "--"
             power_str = f"{lap.avg_power_w} W" if lap.avg_power_w else ""
-            cadence_str = f"{lap.avg_cadence} spm" if lap.avg_cadence else ""
+            cadence_str = _format_postmortem_cadence(lap.avg_cadence, is_ride)
             extra = ", ".join(filter(None, [power_str, cadence_str]))
             extra_str = f" ({extra})" if extra else ""
 
             lines.append(
-                f"- Lap {lap.lap_index + 1}: {dist_km:.2f} km in {dur_min:.2f} min | Pace: {pace_str} | Avg HR: {hr_str}{extra_str}"
+                f"- Lap {lap.lap_index + 1}: {dist_km:.2f} km in {dur_min:.2f} min"
+                f" | {motion_label}: {motion_str} | Avg HR: {hr_str}{extra_str}"
             )
 
             # Filter time-series records for this lap to compute per-km splits inside the lap
@@ -508,9 +527,10 @@ async def _build_laps_with_km_breakdown(
                         if r.altitude_m is not None and start_rec.altitude_m is not None:
                             elev_delta = round(r.altitude_m - start_rec.altitude_m)
 
-                        sub_pace = _format_pace(avg_speed)
+                        sub_motion = _format_postmortem_motion(avg_speed, is_ride)
                         sub_hr = f"Avg HR: {avg_hr} bpm" if avg_hr else ""
-                        sub_cad = f"Cadence: {avg_cad} spm" if avg_cad else ""
+                        sub_cad_value = _format_postmortem_cadence(avg_cad, is_ride)
+                        sub_cad = f"Cadence: {sub_cad_value}" if sub_cad_value else ""
                         sub_elev = (
                             f"Elev: {'+' if elev_delta > 0 else ''}{elev_delta}m"
                             if elev_delta is not None and elev_delta != 0
@@ -524,7 +544,10 @@ async def _build_laps_with_km_breakdown(
                             else "1.00 km"
                         )
                         metrics_str = " | ".join(
-                            filter(None, [f"Pace {sub_pace}", sub_hr, sub_cad, sub_elev])
+                            filter(
+                                None,
+                                [f"{motion_label} {sub_motion}", sub_hr, sub_cad, sub_elev],
+                            )
                         )
                         lines.append(
                             f"    • Km {overall_km_counter} ({dist_desc}): {metrics_str}{sub_pwr}"

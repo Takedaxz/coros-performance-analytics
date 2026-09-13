@@ -20,7 +20,7 @@ import ScoreRing from "@/components/ScoreRing";
 import SleepCard from "@/components/SleepCard";
 import Vo2Gauge from "@/components/Vo2Gauge";
 import TrainingHeatmapPanel from "@/components/TrainingHeatmapPanel";
-import { getSportVisual, SportIcon } from "@/components/SportActivityIcon";
+import { getActivityDisplayTitle, getSportVisual, SportIcon } from "@/components/SportActivityIcon";
 import type { DashboardData } from "@/lib/types";
 
 type WeeklyActivityMetric = "distance" | "duration" | "load";
@@ -704,7 +704,7 @@ export default function DashboardPage() {
                       <div className="dashboard-activity-content" style={{ minWidth: 0 }}>
                         <div style={{ minWidth: 0 }}>
                           <span style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "14px", fontWeight: 750 }}>
-                            {activity.title || activity.sport}
+                            {getActivityDisplayTitle(activity.sport, activity.title, activity.subsport)}
                           </span>
                         </div>
                         <span style={{ display: "block", marginTop: "5px", color: "var(--color-text-muted)", fontSize: "11px" }}>

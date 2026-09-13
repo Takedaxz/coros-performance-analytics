@@ -590,7 +590,7 @@ async def get_activity(
             .order_by(FitnessEstimate.date.desc())
             .limit(1)
         )
-        if activity.sport in {"run", "trail_run"}
+        if activity.sport in {"run", "trail_run", "ride"}
         else None
     )
 
@@ -612,6 +612,8 @@ async def get_activity(
     split_distance_m = (
         1_000
         if activity.sport in {"run", "trail_run"}
+        else 5_000
+        if activity.sport == "ride"
         else 20
         if activity.sport == "swim"
         else None
@@ -639,17 +641,51 @@ async def get_activity(
     ]
 
     lap_payload = []
+    single_lap = len(laps) == 1
     for lap in laps:
         lap_name, load_unit = _hyrox_lap_detail(lap.lap_trigger)
         lap_name = lap_name or _swim_lap_name(lap.lap_trigger)
         avg_speed_mps = lap.avg_speed_mps
         if avg_speed_mps is None and lap.distance_m and lap.distance_m > 0 and lap.elapsed_s > 0:
             avg_speed_mps = lap.distance_m / lap.elapsed_s
+        if avg_speed_mps is None and single_lap:
+            avg_speed_mps = activity.avg_speed_mps
+
+        avg_hr_bpm = lap.avg_hr_bpm
+        if avg_hr_bpm is None and single_lap:
+            avg_hr_bpm = activity.avg_hr_bpm
+
+        max_hr_bpm = lap.max_hr_bpm
+        if max_hr_bpm is None and single_lap:
+            max_hr_bpm = activity.max_hr_bpm
+
+        avg_power_w = lap.avg_power_w
+        if avg_power_w is None and single_lap:
+            avg_power_w = activity.avg_power_w
+
+        avg_cadence = lap.avg_cadence
+        if avg_cadence is None and single_lap:
+            avg_cadence = activity.avg_cadence
+
+        lap_start_s = _lap_start_elapsed(lap.start_time, lap_origin)
+        if records and (avg_hr_bpm is None or max_hr_bpm is None):
+            lap_end_s = lap_start_s + lap.elapsed_s
+            lap_hrs = [
+                r.heart_rate_bpm
+                for r in records
+                if r.heart_rate_bpm is not None and r.elapsed_s is not None and lap_start_s <= r.elapsed_s <= lap_end_s
+            ]
+            if lap_hrs:
+                if avg_hr_bpm is None:
+                    avg_hr_bpm = round(sum(lap_hrs) / len(lap_hrs))
+                if max_hr_bpm is None:
+                    max_hr_bpm = max(lap_hrs)
+
         lap_payload.append(
             {
                 "lap_index": lap.lap_index,
                 "start_time": lap.start_time.isoformat(),
-                "start_elapsed_s": _lap_start_elapsed(lap.start_time, lap_origin),
+                "start_elapsed_s": lap_start_s,
                 "leg": lap.lap_trigger.removeprefix("triathlon_")
                 if lap.lap_trigger and lap.lap_trigger.startswith("triathlon_")
                 else None,
@@ -657,11 +693,11 @@ async def get_activity(
                 "load_unit": load_unit,
                 "elapsed_s": lap.elapsed_s,
                 "distance_m": lap.distance_m,
-                "avg_hr_bpm": lap.avg_hr_bpm,
-                "max_hr_bpm": lap.max_hr_bpm,
+                "avg_hr_bpm": avg_hr_bpm,
+                "max_hr_bpm": max_hr_bpm,
                 "avg_speed_mps": avg_speed_mps,
-                "avg_power_w": lap.avg_power_w,
-                "avg_cadence": lap.avg_cadence,
+                "avg_power_w": avg_power_w,
+                "avg_cadence": avg_cadence,
                 "lap_type": _lap_type(lap.lap_trigger),
                 "hrr_bpm": recovery_by_lap.get(lap.lap_index),
             }
@@ -773,6 +809,9 @@ async def get_activity(
         ),
         "threshold_pace_s_per_km": (
             fitness.lactate_threshold_pace_s_per_km if fitness else None
+        ),
+        "threshold_power_w": (
+            fitness.ftp_vendor if fitness and fitness.ftp_vendor is not None else activity.ftp_vendor
         ),
         "laps": lap_payload,
         "lap_splits": lap_splits,

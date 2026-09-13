@@ -12,7 +12,6 @@ from src.ai.coach_tools import (
     _calendar_change_proposal,
     _execute_tool,
     _health_trend,
-    _lap_pace_s_km,
     _pace_s_km,
     _past_race_goals,
     _rank_strength_exercises,
@@ -40,7 +39,14 @@ def test_activity_tool_rejects_unknown_sport() -> None:
 def test_activity_tool_computes_compact_pace() -> None:
     assert _pace_s_km(3.0) == 333
     assert _pace_s_km(None) is None
-    assert _lap_pace_s_km(None, 500.0, 150.0) == 300
+
+
+def test_activity_tool_uses_speed_for_rides() -> None:
+    result = _activity_pace_fields(
+        SimpleNamespace(sport=SportType.RIDE, avg_speed_mps=10.0)
+    )
+
+    assert result == {"speed_kmh": 36.0}
 
 
 def test_activity_tool_separates_total_and_active_swim_pace() -> None:

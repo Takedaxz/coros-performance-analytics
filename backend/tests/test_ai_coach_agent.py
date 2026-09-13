@@ -99,6 +99,7 @@ def test_coach_treats_personal_records_as_supporting_evidence() -> None:
     assert "12-week records are stronger performance evidence" in COACH_SYSTEM_PROMPT
     assert "recovery, rest," in COACH_SYSTEM_PROMPT
     assert "or normal jogging" in COACH_SYSTEM_PROMPT
+    assert "`speed_kmh` is cycling speed" in COACH_SYSTEM_PROMPT
 
 
 def test_untrusted_athlete_data_cannot_override_coach_instructions() -> None:

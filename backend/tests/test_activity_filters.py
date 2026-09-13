@@ -124,12 +124,14 @@ def test_swim_lap_mapping_uses_fit_sport_and_stroke() -> None:
 
 def test_distance_splits_exclude_timer_pauses() -> None:
     records = [
-        ActivityRecord(timestamp=datetime(2026, 8, 29, 6, 0), elapsed_s=0, distance_m=0),
-        ActivityRecord(timestamp=datetime(2026, 8, 29, 6, 1), elapsed_s=60, distance_m=500),
-        ActivityRecord(timestamp=datetime(2026, 8, 29, 6, 3), elapsed_s=180, distance_m=1000),
+        ActivityRecord(timestamp=datetime(2026, 8, 29, 6, 0), elapsed_s=0, distance_m=0, power_w=100),
+        ActivityRecord(timestamp=datetime(2026, 8, 29, 6, 1), elapsed_s=60, distance_m=500, power_w=200),
+        ActivityRecord(timestamp=datetime(2026, 8, 29, 6, 3), elapsed_s=180, distance_m=1000, power_w=300),
     ]
 
     splits = distance_splits(records, 1000, pause_intervals=[(60, 120)])
 
     assert splits[0]["elapsed_s"] == 120
     assert splits[0]["avg_speed_mps"] == pytest.approx(1000 / 120)
+    assert splits[0]["avg_power_w"] == 200
+    assert splits[0]["max_power_w"] == 300

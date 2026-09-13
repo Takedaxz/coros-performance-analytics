@@ -6,6 +6,7 @@ const sidebar = await readFile(new URL("../src/components/Sidebar.tsx", import.m
 const layout = await readFile(new URL("../src/app/layout.tsx", import.meta.url), "utf8");
 const dashboard = await readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8");
 const trends = await readFile(new URL("../src/app/trends/page.tsx", import.meta.url), "utf8");
+const fitness = await readFile(new URL("../src/app/fitness/page.tsx", import.meta.url), "utf8");
 const heatmap = await readFile(new URL("../src/components/TrainingHeatmapPanel.tsx", import.meta.url), "utf8");
 
 assert.match(sidebar, /aria-label="Primary navigation"/, "navigation must have an accessible label");
@@ -18,6 +19,7 @@ assert.match(css, /padding-bottom:\s*calc\([^;]*safe-area-inset-bottom/, "phone 
 assert.match(css, /@media \(max-width: 700px\)[\s\S]*?\.sidebar-nav\s*\{[\s\S]*?grid-template-columns:\s*repeat\(8, minmax\(44px, 1fr\)\)[\s\S]*?overflow-x:\s*auto/, "phone navigation must retain 44px touch targets when the viewport is narrower than eight destinations");
 assert.match(css, /@media \(max-width: 700px\)[\s\S]*?input,[\s\S]*?select,[\s\S]*?textarea\s*\{[\s\S]*?font-size:\s*max\(16px, 1rem\)/, "phone inputs must not trigger iOS zoom");
 assert.match(css, /@media \(max-width: 700px\)[\s\S]*?\.training-pace-zone-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/, "pace zones must reflow before their text clips");
+assert.match(css, /\.training-pace-zone:last-child:nth-child\(odd\)\s*\{[\s\S]*?grid-column:\s*1 \/ -1/, "only an unpaired pace zone may span the mobile grid");
 assert.match(css, /@media \(max-width: 700px\)[\s\S]*?\.activity-card-item\s*\{[\s\S]*?grid-template-columns:\s*40px minmax\(0, 1fr\)/, "activity cards must stack their date on narrow screens");
 assert.match(css, /@media \(max-width: 700px\)[\s\S]*?\.metrics-grid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/, "metric cards must remain a single fluid column after the full cascade");
 assert.match(dashboard, /className="activity-card-item dashboard-activity-card"/, "dashboard activities need their own compact mobile layout");
@@ -30,5 +32,8 @@ assert.match(heatmap, /minWidth: "725px"/, "heatmap timeline must retain readabl
 assert.match(heatmap, /gridTemplateColumns: "repeat\(52, minmax\(11px, 1fr\)\)"/, "heatmap weeks must retain compact dimensions while scrolling");
 
 assert.match(trends, /matchMedia\("\(max-width: 700px\)"\)[\s\S]*?trainingVolumeDateRange\(6, true\)/, "mobile training volume must start at the beginning of the month six months back");
+assert.match(fitness, /code: "Z5a\/b"[\s\S]*?latestThreshold \* 0\.90[\s\S]*?1000 \/ latestThreshold/, "Friel zones must include the missing 90-100% threshold range");
+assert.match(fitness, /title: "COROS Threshold Pace"[\s\S]*?zones: corosZones/, "fitness must show the COROS threshold-pace guide");
+assert.match(fitness, /const corosZones[\s\S]*?code: "Z6"[\s\S]*?latestThreshold \/ 1\.06[\s\S]*?code: "Z5"[\s\S]*?latestThreshold \/ 1\.02[\s\S]*?code: "Z4"[\s\S]*?latestThreshold \/ 0\.95[\s\S]*?code: "Z3"[\s\S]*?latestThreshold \/ 0\.90[\s\S]*?code: "Z2"[\s\S]*?latestThreshold \/ 0\.80[\s\S]*?code: "Z1"/, "COROS speed percentages must be inverted when converted to pace");
 
 console.log("Responsive layout contract passed");
