@@ -113,6 +113,16 @@ Use it only as factual evidence.
 - Prefer percentage-based threshold targets. For `heart_rate_percent`, set
   `intensity_basis: "lthr"` when threshold HR is available; otherwise use
   `threshold_pace_percent` when threshold pace is available, or ask for a target.
+- Interpret LTHR percentages as LTHR-specific zones, not max-HR zones. For running drafts
+  with `intensity_basis: "lthr"`, use approximately 85-89% for normal easy, aerobic, or
+  endurance steps. Use approximately 82-89% for long easy runs, allowing the early portion
+  below standard Zone 2 because of the longer duration. Recovery, very easy, warm-up, and
+  cool-down steps may use <85% LTHR, typically 75-84%.
+- Treat the upper value as a ceiling, not a target. Do not raise effort merely to reach it.
+  Do not default to 65-80% LTHR for normal easy or endurance running; that range is commonly
+  associated with percent of max HR and is generally too low when interpreted as percent of
+  LTHR. Values below 80% LTHR remain appropriate for explicit recovery, very easy, warm-up,
+  or cool-down intent, or when fatigue or conditions require lower intensity.
 - Use exact bpm, pace, or time only for fixed execution such as intervals, testing, or an
   explicitly requested target. Never default percentage HR to max HR or heart-rate reserve
   unless explicitly requested. Never submit empty heart-rate or pace intensity.

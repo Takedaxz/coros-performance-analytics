@@ -222,6 +222,7 @@ All settings are in `.env` (copy from `.env.example`):
 | `AGENTROUTER_API_KEY` | Optional | — | AgentRouter API key |
 | `AGENTROUTER_BASE_URL` | Optional | `https://agentrouter.org/v1` | AgentRouter OpenAI-compatible Base URL |
 | `AGENTROUTER_MODEL` | Optional | `gpt-5.5` | Default AgentRouter model ID |
+| `AGENTROUTER_REASONING_EFFORT` | Optional | — | Reasoning effort for AgentRouter reasoning models (`low`, `medium`, or `high`) |
 | `APP_SECRET_KEY` | Production | `change-me-in-production` | Secret key |
 
 ---

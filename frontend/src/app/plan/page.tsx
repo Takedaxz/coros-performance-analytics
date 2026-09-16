@@ -247,6 +247,7 @@ interface HeartRateProfile {
   resting_hr: number | null;
   hrr: number | null;
   threshold_hr: number | null;
+  threshold_pace_s_per_km: number | null;
 }
 
 function calculateStepHeartRate(
@@ -302,6 +303,25 @@ function hrBasisAbbreviation(basis: WorkoutIntensityBasis): string {
   }
 }
 
+function calculateStepThresholdPace(
+  step: WorkoutStepForm,
+  profile?: HeartRateProfile | null,
+): { low: number; high: number } | number | null {
+  if (step.intensity !== "threshold_pace_percent" || !profile?.threshold_pace_s_per_km) return null;
+  const lowPct = step.intensity_low;
+  const highPct = step.intensity_high;
+  if (lowPct === null && highPct === null) return null;
+
+  const paceAt = (pct: number) => pct > 0 ? Math.round(profile.threshold_pace_s_per_km! * 100 / pct) : null;
+  const lowPace = lowPct !== null ? paceAt(lowPct) : null;
+  const highPace = highPct !== null ? paceAt(highPct) : null;
+
+  if (lowPace !== null && highPace !== null) {
+    return lowPace === highPace ? lowPace : { low: lowPace, high: highPace };
+  }
+  return lowPace ?? highPace ?? null;
+}
+
 function intensityValue(step: WorkoutStepForm, profile?: HeartRateProfile | null): string {
   const label = INTENSITY_OPTIONS.find((item) => item.value === step.intensity)?.label ?? "Open intensity";
   if (step.intensity === "none" || step.intensity_low === null || step.intensity_low === undefined) return label;
@@ -321,6 +341,17 @@ function intensityValue(step: WorkoutStepForm, profile?: HeartRateProfile | null
       }
     }
     return `${label} ${value}${unit} (${basisAbbr})`;
+  }
+
+  if (step.intensity === "threshold_pace_percent") {
+    const pace = calculateStepThresholdPace(step, profile);
+    if (pace !== null) {
+      const paceText = typeof pace === "number"
+        ? `${formatDuration(pace)}/km`
+        : `${formatDuration(pace.low)}–${formatDuration(pace.high)}/km`;
+      return `${label} ${value}${unit} (${paceText} · LT PACE)`;
+    }
+    return `${label} ${value}${unit} (LT PACE)`;
   }
 
   return `${label} ${value}${unit}`;
@@ -611,14 +642,16 @@ export default function TrainingPlanPage() {
         const fitnessData = fitnessRes?.ok ? await fitnessRes.json() : null;
 
         let thresholdHr: number | null = (fitnessData?.lthr ? Math.round(fitnessData.lthr) : null) ?? profileData?.threshold_hr_bpm ?? null;
-        if (!thresholdHr) {
+        let thresholdPace: number | null = typeof fitnessData?.ltsp === "number" && fitnessData.ltsp > 0 ? fitnessData.ltsp : null;
+        if (!thresholdHr || !thresholdPace) {
           const trendRes = await fetch(`${apiBase}/api/dashboard/fitness-trend?days=180`).catch(() => null);
           if (trendRes?.ok) {
             const trendData = await trendRes.json();
             const latestTrend = Array.isArray(trendData)
-              ? [...trendData].reverse().find((d: { lthr?: number | null }) => d.lthr != null)
+              ? [...trendData].reverse().find((d: { lthr?: number | null; threshold_pace?: number | null }) => d.lthr != null || d.threshold_pace != null)
               : null;
             if (latestTrend?.lthr) thresholdHr = Math.round(latestTrend.lthr);
+            if (!thresholdPace && latestTrend?.threshold_pace) thresholdPace = latestTrend.threshold_pace;
           }
         }
 
@@ -633,6 +666,7 @@ export default function TrainingPlanPage() {
           resting_hr: restingHr,
           hrr,
           threshold_hr: thresholdHr,
+          threshold_pace_s_per_km: thresholdPace,
         });
       } catch {
         // Fallback gracefully

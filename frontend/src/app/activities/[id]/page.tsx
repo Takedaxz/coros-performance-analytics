@@ -238,6 +238,9 @@ type PaceMode = "normal" | "effort";
 
 type RunningDynamicsKey =
   | "cadence"
+  | "pace"
+  | "effort_pace"
+  | "hr"
   | "stride_length_cm"
   | "power_w"
   | "altitude_m"
@@ -254,7 +257,7 @@ interface RunningDynamicsMetric {
   ignoreZero: boolean;
 }
 
-type BikeMetricKey = "cadence" | "speed" | "altitude";
+type BikeMetricKey = "cadence" | "speed" | "hr" | "power" | "altitude";
 
 interface BikeMetric {
   key: BikeMetricKey;
@@ -266,6 +269,9 @@ interface BikeMetric {
 
 const RUNNING_DYNAMICS_METRICS: RunningDynamicsMetric[] = [
   { key: "cadence", label: "Cadence", unit: "spm", decimals: 0, color: "#ff4f87", ignoreZero: false },
+  { key: "pace", label: "Pace", unit: "/km", decimals: 0, color: "#3488df", ignoreZero: true },
+  { key: "effort_pace", label: "Effort pace", unit: "/km", decimals: 0, color: "#0ea5e9", ignoreZero: true },
+  { key: "hr", label: "Heart Rate", unit: "bpm", decimals: 0, color: "#e5484d", ignoreZero: false },
   { key: "stride_length_cm", label: "Stride length", unit: "cm", decimals: 0, color: "#9d7bff", ignoreZero: true },
   { key: "power_w", label: "Running power", unit: "W", decimals: 0, color: "#ff8a2a", ignoreZero: false },
   { key: "altitude_m", label: "Elevation", unit: "m", decimals: 0, color: "#35d07f", ignoreZero: false },
@@ -277,6 +283,8 @@ const RUNNING_DYNAMICS_METRICS: RunningDynamicsMetric[] = [
 const BIKE_METRICS: BikeMetric[] = [
   { key: "cadence", label: "Cadence", unit: "rpm", decimals: 0, color: "#ff4f87" },
   { key: "speed", label: "Speed", unit: "km/h", decimals: 1, color: "#3488df" },
+  { key: "hr", label: "Heart Rate", unit: "bpm", decimals: 0, color: "#e5484d" },
+  { key: "power", label: "Power", unit: "W", decimals: 0, color: "#ff8a2a" },
   { key: "altitude", label: "Elevation", unit: "m", decimals: 0, color: "#35d07f" },
 ];
 
@@ -410,6 +418,9 @@ function formatPaceSeconds(seconds: number): string {
 }
 
 function formatDynamicsValue(value: number, metric: RunningDynamicsMetric): string {
+  if (metric.key === "pace" || metric.key === "effort_pace") {
+    return formatPaceSeconds(value);
+  }
   return value.toFixed(metric.decimals);
 }
 
@@ -771,6 +782,7 @@ export default function ActivityDetailPage() {
   const [showTelemetryPopup, setShowTelemetryPopup] = useState(true);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [isTerrain3D, setIsTerrain3D] = useState(false);
+  const [mapBasemap, setMapBasemap] = useState<"map" | "satellite">("map");
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -796,6 +808,7 @@ export default function ActivityDetailPage() {
         elapsed_s: record.elapsed_s,
         heart_rate_bpm: record.heart_rate_bpm,
         speed_mps: record.speed_mps,
+        power_w: record.power_w,
       }));
     const routeSampleRate = Math.max(1, Math.floor(routePoints.length / 600));
     return routePoints.filter(
@@ -1115,15 +1128,27 @@ export default function ActivityDetailPage() {
         && 1000 / paceSpeed <= paceChartDomain[1]
         ? 1000 / paceSpeed
         : undefined;
+      const normalPace = record.speed_mps && record.speed_mps > 0
+        && 1000 / record.speed_mps >= paceChartDomain[0]
+        && 1000 / record.speed_mps <= paceChartDomain[1]
+        ? 1000 / record.speed_mps
+        : undefined;
+      const effortPace = record.effort_speed_mps && record.effort_speed_mps > 0
+        && 1000 / record.effort_speed_mps >= paceChartDomain[0]
+        && 1000 / record.effort_speed_mps <= paceChartDomain[1]
+        ? 1000 / record.effort_speed_mps
+        : undefined;
       const point: Record<string, number | undefined> = {
         time: record.elapsed_s ? record.elapsed_s / 60 : 0,
-        hr: record.heart_rate_bpm,
+        hr: record.heart_rate_bpm && record.heart_rate_bpm > 0 ? record.heart_rate_bpm : undefined,
         speed: record.speed_mps
           ? activity.sport === "swim"
             ? 100 / record.speed_mps
             : Math.round(record.speed_mps * 3.6 * 10) / 10
           : undefined,
         pace,
+        normal_pace: normalPace,
+        effort_pace: effortPace,
         alt: record.altitude_m != null ? Math.round(record.altitude_m) : undefined,
         altitude_m: record.altitude_m != null ? Math.round(record.altitude_m) : undefined,
         power: record.power_w,
@@ -1166,6 +1191,8 @@ export default function ActivityDetailPage() {
   const bikeChartData = chartData.map((point) => ({
     ...point,
     cadence: point.cadence && point.cadence > 0 ? point.cadence : undefined,
+    hr: point.hr && point.hr > 0 ? point.hr : undefined,
+    power: point.power != null && point.power >= 0 ? point.power : (point.power_w != null && point.power_w >= 0 ? point.power_w : undefined),
     power_w: point.power_w && point.power_w > 0 ? point.power_w : undefined,
     altitude: point.alt,
   }));
@@ -1174,8 +1201,16 @@ export default function ActivityDetailPage() {
       return record.speed_mps && record.speed_mps > 0 ? record.speed_mps * 3.6 : undefined;
     }
     if (key === "altitude") return record.altitude_m;
-    const value = record[key];
-    return value && value > 0 ? value : undefined;
+    if (key === "hr") {
+      return record.heart_rate_bpm && record.heart_rate_bpm > 0 ? record.heart_rate_bpm : undefined;
+    }
+    if (key === "power") {
+      return record.power_w != null && record.power_w >= 0 ? record.power_w : undefined;
+    }
+    if (key === "cadence") {
+      return record.cadence && record.cadence > 0 ? record.cadence : undefined;
+    }
+    return undefined;
   };
   const availableBikeMetrics = BIKE_METRICS.filter((metric) =>
     records.some((record) => bikeMetricValue(record, metric.key) != null),
@@ -1207,8 +1242,21 @@ export default function ActivityDetailPage() {
         : [...selected, key],
     );
   };
+  const dynamicsMetricValue = (record: RecordPoint, key: RunningDynamicsKey): number | undefined => {
+    if (key === "hr") {
+      return record.heart_rate_bpm && record.heart_rate_bpm > 0 ? record.heart_rate_bpm : undefined;
+    }
+    if (key === "pace") {
+      return record.speed_mps && record.speed_mps > 0 ? 1000 / record.speed_mps : undefined;
+    }
+    if (key === "effort_pace") {
+      return record.effort_speed_mps && record.effort_speed_mps > 0 ? 1000 / record.effort_speed_mps : undefined;
+    }
+    const value = record[key];
+    return value != null ? value : undefined;
+  };
   const availableDynamicsMetrics = RUNNING_DYNAMICS_METRICS.filter((metric) =>
-    records.some((record) => record[metric.key] != null),
+    records.some((record) => dynamicsMetricValue(record, metric.key) != null),
   );
   const activeDynamicsMetrics = availableDynamicsMetrics.filter((metric) =>
     selectedDynamicsMetrics.includes(metric.key),
@@ -1217,8 +1265,23 @@ export default function ActivityDetailPage() {
     ? activeDynamicsMetrics
     : availableDynamicsMetrics.slice(0, 1);
   const dynamicsAverages = visibleDynamicsMetrics.map((metric) => {
+    if (metric.key === "pace" && activity.avg_speed_mps && activity.avg_speed_mps > 0) {
+      return { metric, average: 1000 / activity.avg_speed_mps };
+    }
+    if (metric.key === "effort_pace") {
+      const validEffortSpeeds = records.flatMap((r) =>
+        r.effort_speed_mps && r.effort_speed_mps > 0 ? [r.effort_speed_mps] : [],
+      );
+      const avgEffortSpeed = validEffortSpeeds.length
+        ? validEffortSpeeds.reduce((a, b) => a + b, 0) / validEffortSpeeds.length
+        : null;
+      return { metric, average: avgEffortSpeed ? 1000 / avgEffortSpeed : null };
+    }
+    if (metric.key === "hr" && activity.avg_hr_bpm != null) {
+      return { metric, average: activity.avg_hr_bpm };
+    }
     const values = records.flatMap((record) => {
-      const value = record[metric.key];
+      const value = dynamicsMetricValue(record, metric.key);
       return value != null && (!metric.ignoreZero || value > 0) ? [value] : [];
     });
     return {
@@ -1654,7 +1717,16 @@ export default function ActivityDetailPage() {
                       key={metric.key}
                       yAxisId={metric.key}
                       hide
-                      domain={metric.key === "altitude_m" ? ["dataMin - 5", "dataMax + 5"] : [0, "dataMax + 10"]}
+                      reversed={metric.key === "pace" || metric.key === "effort_pace"}
+                      domain={
+                        metric.key === "pace" || metric.key === "effort_pace"
+                          ? paceChartDomain
+                          : metric.key === "altitude_m"
+                            ? ["dataMin - 5", "dataMax + 5"]
+                            : metric.key === "hr"
+                              ? ["dataMin - 10", "dataMax + 10"]
+                              : [0, "dataMax + 10"]
+                      }
                     />
                   ))}
                   <Tooltip
@@ -1671,7 +1743,7 @@ export default function ActivityDetailPage() {
                       key={metric.key}
                       yAxisId={metric.key}
                       type="linear"
-                      dataKey={metric.key}
+                      dataKey={metric.key === "pace" ? "normal_pace" : metric.key}
                       stroke={metric.color}
                       strokeWidth={2.25}
                       dot={false}
@@ -1801,7 +1873,20 @@ export default function ActivityDetailPage() {
           <LineChart data={bikeChartData} margin={{ top: 16, right: 12, bottom: 8, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
             <XAxis dataKey="time" type="number" domain={[0, chartDurationMinutes]} tickCount={6} tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value: number) => `${Math.round(value)} min`} axisLine={false} />
-            {visibleBikeMetrics.map((metric) => <YAxis key={metric.key} yAxisId={metric.key} hide domain={[0, "dataMax + 10"]} />)}
+            {visibleBikeMetrics.map((metric) => (
+              <YAxis
+                key={metric.key}
+                yAxisId={metric.key}
+                hide
+                domain={
+                  metric.key === "altitude"
+                    ? ["dataMin - 5", "dataMax + 5"]
+                    : metric.key === "hr"
+                      ? ["dataMin - 10", "dataMax + 10"]
+                      : [0, "dataMax + 10"]
+                }
+              />
+            ))}
             <Tooltip
               formatter={(value, name) => {
                 const metric = BIKE_METRICS.find(({ label }) => label === name);
@@ -2012,7 +2097,7 @@ export default function ActivityDetailPage() {
                     </button>
                   </div>
                   <div style={{ flex: 1, position: "relative", minHeight: "260px", borderRadius: "var(--radius-md)", overflow: "hidden" }}>
-                    <Map key={activityId} points={sampledRoutePoints} sport={activity.sport} showTelemetryPopup={showTelemetryPopup} terrain3D={isTerrain3D} onTerrain3DChange={setIsTerrain3D} onExpand={() => setIsMapExpanded(true)} />
+                    <Map key={activityId} points={sampledRoutePoints} sport={activity.sport} showTelemetryPopup={showTelemetryPopup} basemap={mapBasemap} onBasemapChange={setMapBasemap} terrain3D={isTerrain3D} onTerrain3DChange={setIsTerrain3D} onExpand={() => setIsMapExpanded(true)} />
                   </div>
                 </div>
               )}
@@ -2062,7 +2147,7 @@ export default function ActivityDetailPage() {
                       </div>
                     </div>
                     <div className="map-expanded-modal-body">
-                      <Map key={`${activityId}-expanded`} points={sampledRoutePoints} sport={activity.sport} showTelemetryPopup={showTelemetryPopup} terrain3D={isTerrain3D} onTerrain3DChange={setIsTerrain3D} />
+                      <Map key={`${activityId}-expanded`} points={sampledRoutePoints} sport={activity.sport} showTelemetryPopup={showTelemetryPopup} basemap={mapBasemap} onBasemapChange={setMapBasemap} terrain3D={isTerrain3D} onTerrain3DChange={setIsTerrain3D} />
                     </div>
                   </div>
                 </div>

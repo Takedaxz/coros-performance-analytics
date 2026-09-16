@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { CircleMarker, LatLngBounds, Map as LeafletMap, Polyline } from "leaflet";
-import type { GeoJSONSource, Map as MapLibreMap, Marker, Popup } from "maplibre-gl";
+import type { GeoJSONSource, Map as MapLibreMap, Marker, Popup, StyleSpecification } from "maplibre-gl";
 import { routePositionAt, type TimedRoutePoint } from "./routeReplay";
 import { openFreeMapStyleUrl, type Theme } from "@/lib/theme";
 
@@ -12,18 +12,34 @@ interface RoutePoint {
   elapsed_s?: number;
   heart_rate_bpm?: number;
   speed_mps?: number;
+  power_w?: number;
 }
 
 interface MapProps {
   points: RoutePoint[];
   sport?: string;
   showTelemetryPopup?: boolean;
+  basemap: "map" | "satellite";
+  onBasemapChange: (value: "map" | "satellite") => void;
   terrain3D?: boolean;
   onTerrain3DChange?: (value: boolean) => void;
   onExpand?: () => void;
 }
 
 type PlaybackSpeed = 25 | 50 | 100;
+
+const SATELLITE_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {
+    satellite: {
+      type: "raster",
+      tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+      tileSize: 256,
+      attribution: 'Source: <a href="https://www.esri.com">Esri</a>, Vantor, Earthstar Geographics, and the GIS User Community',
+    },
+  },
+  layers: [{ id: "satellite", type: "raster", source: "satellite" }],
+};
 
 interface PlaybackState {
   elapsedSeconds: number;
@@ -41,6 +57,10 @@ function normalizedTimedRoutePoints(points: RoutePoint[]): TimedRoutePoint[] {
   const timedPoints = points.filter(isTimedPoint);
   const firstElapsed = timedPoints[0]?.elapsed_s ?? 0;
   return timedPoints.map((point) => ({ ...point, elapsed_s: point.elapsed_s - firstElapsed }));
+}
+
+function basemapStyle(theme: Theme, basemap: "map" | "satellite"): string | StyleSpecification {
+  return basemap === "satellite" ? SATELLITE_STYLE : openFreeMapStyleUrl(theme);
 }
 
 function terrainMarkerElement(kind: "start" | "finish" | "runner"): HTMLDivElement {
@@ -72,13 +92,17 @@ function telemetryMetric(speedMps?: number, sport?: string): { label: string; va
   return { label, value: `${min}:${sec.toString().padStart(2, "0")} /km` };
 }
 
-function telemetryPopupHtml(speedMps?: number, heartRateBpm?: number, sport?: string): string {
+function telemetryPopupHtml(speedMps?: number, heartRateBpm?: number, sport?: string, powerW?: number): string {
   const metric = telemetryMetric(speedMps, sport);
   const heartRate = heartRateBpm != null ? `${heartRateBpm} bpm` : "--";
-  return `<div class="runner-telemetry-content"><div class="runner-telemetry-item"><span class="runner-telemetry-label">${metric.label}</span><strong class="runner-telemetry-value">${metric.value}</strong></div><div class="runner-telemetry-item"><span class="runner-telemetry-label">HR</span><strong class="runner-telemetry-value">${heartRate}</strong></div></div>`;
+  const isRide = sport === "ride";
+  const powerHtml = isRide
+    ? `<div class="runner-telemetry-item"><span class="runner-telemetry-label">Power</span><strong class="runner-telemetry-value">${powerW != null ? `${Math.round(powerW)} W` : "--"}</strong></div>`
+    : "";
+  return `<div class="runner-telemetry-content"><div class="runner-telemetry-item"><span class="runner-telemetry-label">${metric.label}</span><strong class="runner-telemetry-value">${metric.value}</strong></div><div class="runner-telemetry-item"><span class="runner-telemetry-label">HR</span><strong class="runner-telemetry-value">${heartRate}</strong></div>${powerHtml}</div>`;
 }
 
-export default function Map({ points, sport, showTelemetryPopup = true, terrain3D = false, onTerrain3DChange, onExpand }: MapProps) {
+export default function Map({ points, sport, showTelemetryPopup = true, basemap, onBasemapChange, terrain3D = false, onTerrain3DChange, onExpand }: MapProps) {
   const isTerrain3D = terrain3D;
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const elapsedLabelRef = useRef<HTMLSpanElement>(null);
@@ -156,7 +180,7 @@ export default function Map({ points, sport, showTelemetryPopup = true, terrain3
       if (popup && showTelemetryPopupRef.current) {
         popup
           .setLngLat([currentPoint[1], currentPoint[0]])
-          .setHTML(telemetryPopupHtml(position.speed_mps, position.heart_rate_bpm, sport));
+          .setHTML(telemetryPopupHtml(position.speed_mps, position.heart_rate_bpm, sport, position.power_w));
         if (!popup.isOpen()) popup.addTo(terrainMapRef.current!);
       } else {
         popup?.remove();
@@ -166,7 +190,7 @@ export default function Map({ points, sport, showTelemetryPopup = true, terrain3
       runnerMarkerRef.current.setLatLng(currentPoint);
 
       if (showTelemetryPopupRef.current) {
-        const popupHtml = telemetryPopupHtml(position.speed_mps, position.heart_rate_bpm, sport);
+        const popupHtml = telemetryPopupHtml(position.speed_mps, position.heart_rate_bpm, sport, position.power_w);
 
         if (!runnerMarkerRef.current.getPopup()) {
           runnerMarkerRef.current.bindPopup(popupHtml, {
@@ -253,12 +277,21 @@ export default function Map({ points, sport, showTelemetryPopup = true, terrain3
     animationFrameRef.current = requestAnimationFrame(animate);
   };
 
-  const toggleTerrain = (): void => {
+  const preservePlaybackForMapChange = (): void => {
     preservePlaybackOnMapChangeRef.current = true;
     resumePlaybackOnMapChangeRef.current = playbackRef.current.playing;
     cancelAnimation();
     setIsPlaying(false);
+  };
+
+  const toggleTerrain = (): void => {
+    preservePlaybackForMapChange();
     onTerrain3DChange?.(!isTerrain3D);
+  };
+
+  const toggleBasemap = (): void => {
+    preservePlaybackForMapChange();
+    onBasemapChange(basemap === "map" ? "satellite" : "map");
   };
 
   const pause = (): void => {
@@ -371,7 +404,8 @@ export default function Map({ points, sport, showTelemetryPopup = true, terrain3
           document.documentElement.dataset.theme === "light" ? "light" : "dark";
         const map = new maplibregl.Map({
           container,
-          style: openFreeMapStyleUrl(currentTheme()),
+          style: basemapStyle(currentTheme(), basemap),
+          attributionControl: { compact: true },
           center: coordinates[0],
           zoom: 12,
           pitch: 65,
@@ -382,7 +416,7 @@ export default function Map({ points, sport, showTelemetryPopup = true, terrain3
 
         // Mirror the 2D map's theme observer so style updates without a remount
         themeObserver = new MutationObserver(() => {
-          map.setStyle(openFreeMapStyleUrl(currentTheme()));
+          map.setStyle(basemapStyle(currentTheme(), basemap));
           // Re-add route sources/layers after style reload
           map.once("style.load", () => {
             if (!isMounted) return;
@@ -503,13 +537,14 @@ export default function Map({ points, sport, showTelemetryPopup = true, terrain3
               offset: 8,
             })
               .setLngLat(coordinates[0])
-              .setHTML(telemetryPopupHtml(normalizedTimedPoints[0].speed_mps, normalizedTimedPoints[0].heart_rate_bpm, sport));
+              .setHTML(telemetryPopupHtml(normalizedTimedPoints[0].speed_mps, normalizedTimedPoints[0].heart_rate_bpm, sport, normalizedTimedPoints[0].power_w));
             renderPlayback(playbackRef.current.elapsedSeconds);
             resumePlaybackAfterMapChange();
           }
           map.fitBounds(bounds, { padding: 40, pitch: 65, duration: 0 });
           map.once("idle", () => {
             if (!isMounted) return;
+            map.getContainer().querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");
             terrainStartMarkerRef.current?.setLngLat(coordinates[0]);
             terrainFinishMarkerRef.current?.setLngLat(coordinates[coordinates.length - 1]);
             renderPlayback(playbackRef.current.elapsedSeconds);
@@ -573,11 +608,11 @@ export default function Map({ points, sport, showTelemetryPopup = true, terrain3
       const currentTheme = (): Theme =>
         document.documentElement.dataset.theme === "light" ? "light" : "dark";
       const basemapLayer = maplibreGL({
-        style: openFreeMapStyleUrl(currentTheme()),
+        style: basemapStyle(currentTheme(), basemap),
         interactive: false,
       }).addTo(map);
       themeObserver = new MutationObserver(() => {
-        basemapLayer.getMaplibreMap().setStyle(openFreeMapStyleUrl(currentTheme()));
+        basemapLayer.getMaplibreMap().setStyle(basemapStyle(currentTheme(), basemap));
       });
       themeObserver.observe(document.documentElement, {
         attributeFilter: ["data-theme"],
@@ -676,7 +711,7 @@ export default function Map({ points, sport, showTelemetryPopup = true, terrain3
         mapInstanceRef.current = null;
       }
     };
-  }, [points, isTerrain3D]);
+  }, [points, isTerrain3D, basemap]);
 
   return (
     <div className={canReplay ? "activity-route-shell has-replay" : "activity-route-shell"}>
@@ -685,6 +720,19 @@ export default function Map({ points, sport, showTelemetryPopup = true, terrain3
         className="activity-route-map"
       />
       <div className="activity-route-map-actions">
+        <button
+          aria-label={basemap === "satellite" ? "Show street map" : "Show satellite map"}
+          aria-pressed={basemap === "satellite"}
+          className={`activity-route-terrain-toggle${basemap === "satellite" ? " is-active" : ""}`}
+          onClick={toggleBasemap}
+          title={basemap === "satellite" ? "Street map" : "Satellite map"}
+          type="button"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m12.83 2.18 8.58 3.9a1 1 0 0 1 0 1.83l-8.58 3.91a2 2 0 0 1-1.66 0L2.59 7.91a1 1 0 0 1 0-1.83l8.58-3.9a2 2 0 0 1 1.66 0Z" />
+            <path d="m22 12.5-9.17 4.17a2 2 0 0 1-1.66 0L2 12.5M22 17.5l-9.17 4.17a2 2 0 0 1-1.66 0L2 17.5" />
+          </svg>
+        </button>
         <button
           aria-label={isTerrain3D ? "Switch to flat map" : "Show 3D terrain map"}
           aria-pressed={isTerrain3D}

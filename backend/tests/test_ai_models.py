@@ -166,3 +166,37 @@ def test_generate_postmortem_passes_resolved_model(monkeypatch) -> None:
     res = ai.generate_postmortem("Activity", model="3.5-flash0lite")
     assert res == "Postmortem OK"
     assert passed_model == ["gemini-3.5-flash-lite"]
+
+
+def test_postmortem_stream_falls_back_when_primary_is_empty(monkeypatch) -> None:
+    monkeypatch.setattr(ai, "resolve_model", lambda _model: ("openai_compat", "gateway-model"))
+    monkeypatch.setattr(ai, "_gemini_ready", lambda: True)
+    monkeypatch.setattr(
+        openai_compat_client,
+        "generate_postmortem_stream",
+        lambda *_args, **_kwargs: iter(()),
+    )
+    monkeypatch.setattr(
+        gemini_client,
+        "generate_postmortem_stream",
+        lambda *_args, **_kwargs: iter(("Gemini fallback",)),
+    )
+
+    assert "".join(ai.generate_postmortem_stream("Activity")) == "Gemini fallback"
+
+
+def test_postmortem_stream_falls_back_when_primary_reports_error(monkeypatch) -> None:
+    monkeypatch.setattr(ai, "resolve_model", lambda _model: ("agentrouter", "gpt-5.5"))
+    monkeypatch.setattr(ai, "_gemini_ready", lambda: True)
+    monkeypatch.setattr(
+        openai_compat_client,
+        "generate_postmortem_stream",
+        lambda *_args, **_kwargs: iter(("Error generating postmortem.",)),
+    )
+    monkeypatch.setattr(
+        gemini_client,
+        "generate_postmortem_stream",
+        lambda *_args, **_kwargs: iter(("Gemini fallback",)),
+    )
+
+    assert "".join(ai.generate_postmortem_stream("Activity")) == "Gemini fallback"

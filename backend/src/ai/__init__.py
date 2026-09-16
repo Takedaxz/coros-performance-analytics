@@ -281,10 +281,33 @@ def generate_postmortem_stream(
     provider, clean_model = resolve_model(model)
     if provider == "gemini":
         yield from gemini_client.generate_postmortem_stream(activity_context, model=clean_model)
-    else:
-        yield from openai_compat_client.generate_postmortem_stream(
-            activity_context, model=clean_model, provider=provider
+        return
+
+    emitted = False
+    provider_errors = {
+        "Error generating postmortem.",
+        "OpenAI-compatible AI is not configured.",
+    }
+    for chunk in openai_compat_client.generate_postmortem_stream(
+        activity_context, model=clean_model, provider=provider
+    ):
+        if chunk and chunk not in provider_errors:
+            emitted = True
+            yield chunk
+
+    # Some OpenAI-compatible gateways return provider errors as HTTP 200 JSON,
+    # which the SDK exposes as an empty stream. Use the configured Gemini backend
+    # so a temporary gateway limit does not leave the workout analysis blank.
+    if not emitted and _gemini_ready():
+        logger.warning(
+            "Postmortem provider returned no content; retrying with Gemini",
+            extra={"provider": provider, "model": clean_model},
         )
+        yield from gemini_client.generate_postmortem_stream(
+            activity_context, model=get_settings().gemini_model
+        )
+    elif not emitted:
+        yield "Unable to generate postmortem analysis."
 
 
 __all__ = [

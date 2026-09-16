@@ -4,6 +4,7 @@ export interface TimedRoutePoint {
   elapsed_s: number;
   heart_rate_bpm?: number;
   speed_mps?: number;
+  power_w?: number;
 }
 
 export interface RoutePosition {
@@ -12,6 +13,7 @@ export interface RoutePosition {
   segmentIndex: number;
   heart_rate_bpm?: number;
   speed_mps?: number;
+  power_w?: number;
 }
 
 export function routePositionAt(
@@ -43,12 +45,17 @@ export function routePositionAt(
     ? start.speed_mps + (end.speed_mps - start.speed_mps) * progress
     : start.speed_mps ?? end.speed_mps;
 
+  const power = start.power_w != null && end.power_w != null
+    ? Math.round(start.power_w + (end.power_w - start.power_w) * progress)
+    : start.power_w ?? end.power_w;
+
   return {
     lat: start.lat + (end.lat - start.lat) * progress,
     lng: start.lng + (end.lng - start.lng) * progress,
     segmentIndex,
-    heart_rate_bpm: hr,
-    speed_mps: speed,
+    ...(hr != null ? { heart_rate_bpm: hr } : {}),
+    ...(speed != null ? { speed_mps: speed } : {}),
+    ...(power != null ? { power_w: power } : {}),
   };
 }
 

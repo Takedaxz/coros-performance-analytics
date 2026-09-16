@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
@@ -87,6 +88,17 @@ def test_coach_prefers_time_based_targets_for_easy_sessions() -> None:
     assert 'prefer time-based duration\n  (`target: "time"`)' in COACH_SYSTEM_PROMPT
     assert "Distance remains acceptable" in COACH_SYSTEM_PROMPT
     assert COACH_SYSTEM_PROMPT.count("For easy sessions") == 1
+
+
+def test_coach_uses_lthr_specific_ranges_for_easy_running_workouts() -> None:
+    assert "approximately 85-89% for normal easy, aerobic, or" in COACH_SYSTEM_PROMPT
+    assert "approximately 82-89% for long easy runs" in COACH_SYSTEM_PROMPT
+    assert "may use <85% LTHR, typically 75-84%" in COACH_SYSTEM_PROMPT
+    assert "Treat the upper value as a ceiling, not a target" in COACH_SYSTEM_PROMPT
+    assert "Do not default to 65-80% LTHR" in COACH_SYSTEM_PROMPT
+    assert "Values below 80% LTHR remain appropriate" in COACH_SYSTEM_PROMPT
+    assert "75-84% only" not in COACH_SYSTEM_PROMPT
+    assert "Never use 65-80% LTHR" not in COACH_SYSTEM_PROMPT
 
 
 def test_past_race_questions_require_the_past_race_goals_tool() -> None:
@@ -517,3 +529,29 @@ def test_openai_compat_streams_reasoning_before_its_answer(monkeypatch) -> None:
     )
 
     assert chunks == ["<think>Checking recovery data.", "</think>\nTake an easy day."]
+
+
+def test_agentrouter_model_passes_reasoning_effort(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Model:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(coach_agent, "ChatOpenAI", Model)
+    monkeypatch.setattr(
+        coach_agent,
+        "get_settings",
+        lambda: SimpleNamespace(agentrouter_reasoning_effort="low"),
+    )
+    monkeypatch.setattr(
+        coach_agent,
+        "provider_config",
+        lambda _provider: SimpleNamespace(
+            api_key="key", base_url="https://agentrouter.org/v1", headers={}
+        ),
+    )
+
+    coach_agent._model("agentrouter", "deepseek-v4-flash")
+
+    assert captured["reasoning_effort"] == "low"

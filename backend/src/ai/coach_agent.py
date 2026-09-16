@@ -61,14 +61,22 @@ def _model(provider: str, model_name: str) -> ChatGoogleGenerativeAI | ChatOpenA
             request_timeout=60,
         )
     config = provider_config(provider)
-    return ChatOpenAI(
-        model=model_name,
-        api_key=SecretStr(config.api_key),
-        base_url=config.base_url,
-        default_headers=config.headers,
-        temperature=0.7,
-        timeout=60,
-        max_retries=0,
+    reasoning_effort = (
+        get_settings().agentrouter_reasoning_effort if provider == "agentrouter" else None
+    )
+    chat_openai = cast("Any", ChatOpenAI)
+    return cast(
+        "ChatGoogleGenerativeAI | ChatOpenAI",
+        chat_openai(
+            model=model_name,
+            api_key=SecretStr(config.api_key),
+            base_url=config.base_url,
+            default_headers=config.headers,
+            temperature=0.7,
+            timeout=60,
+            max_retries=0,
+            **({"reasoning_effort": reasoning_effort} if reasoning_effort else {}),
+        ),
     )
 
 
