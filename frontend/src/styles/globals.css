@@ -6368,6 +6368,38 @@ table.data-table .lap-split-table tr:hover td {
   gap: 12px;
 }
 
+.training-volume-sports {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.training-volume-sports button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 11px;
+  gap: 6px;
+  padding: 0;
+}
+
+.training-volume-sports button[aria-pressed="false"] {
+  color: var(--color-text-muted);
+  opacity: 0.55;
+}
+
+.training-volume-sports i {
+  border-radius: 50%;
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+}
+
 .training-volume-metrics button {
   align-items: center;
   background: var(--color-bg-card);
@@ -6453,6 +6485,24 @@ table.data-table .lap-split-table tr:hover td {
 .training-volume-tooltip b {
   color: var(--color-text-primary);
   font-family: var(--font-mono);
+}
+
+.training-volume-tooltip em {
+  color: var(--color-text-secondary);
+  font-style: normal;
+}
+
+.training-volume-tooltip small {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.training-volume-tooltip span.training-volume-tooltip-total {
+  border-top: 1px solid var(--border-color);
+  grid-column: 1 / -1;
+  grid-template-columns: 1fr auto;
+  margin-top: 2px;
+  padding-top: 7px;
 }
 
 .activity-filter {

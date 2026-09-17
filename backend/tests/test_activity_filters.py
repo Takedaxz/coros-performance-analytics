@@ -13,8 +13,8 @@ from src.api.routes.activity_routes import (
     _validate_range,
 )
 from src.api.routes.dashboard_routes import _training_volume_bounds, training_volume_trend
-from src.parsers.fit_parser import _fit_lap_trigger
 from src.db.models import ActivityRecord
+from src.parsers.fit_parser import _fit_lap_trigger
 
 
 @pytest.mark.parametrize(
@@ -53,10 +53,12 @@ async def test_training_volume_serializes_aggregate_rows() -> None:
             return [
                 SimpleNamespace(
                     period_start=datetime(2026, 8, 3),
+                    sport_category="run",
                     distance_m=12500,
                     duration_s=4200,
                     training_load=82,
                     activity_count=2,
+                    load_activity_count=2,
                 )
             ]
 
@@ -64,20 +66,20 @@ async def test_training_volume_serializes_aggregate_rows() -> None:
         async def execute(self, _query: object) -> Result:
             return Result()
 
-    assert await training_volume_trend(
+    result = await training_volume_trend(
         group_by="week",
         start_date=date(2026, 8, 1),
         end_date=date(2026, 8, 9),
         db=Session(),  # type: ignore[arg-type]
-    ) == [
-        {
-            "period_start": "2026-08-03",
-            "distance_m": 12500,
-            "duration_s": 4200,
-            "training_load": 82,
-            "activity_count": 2,
-        }
-    ]
+    )
+    assert result[0]["period_start"] == "2026-08-03"
+    assert result[0]["distance_m"] == 12500
+    assert result[0]["duration_s"] == 4200
+    assert result[0]["training_load"] == 82
+    assert result[0]["activity_count"] == 2
+    assert result[0]["load_activity_count"] == 2
+    assert result[0]["sports"]["run"]["training_load"] == 82
+    assert result[0]["sports"]["ride"]["training_load"] == 0
 
 
 def test_lap_elapsed_uses_first_lap_as_origin() -> None:

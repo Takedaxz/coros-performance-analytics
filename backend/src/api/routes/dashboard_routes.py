@@ -5,17 +5,26 @@ from statistics import fmean, median
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, case, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.engine import get_db_session
 from src.activity_laps import training_time_s
-from src.db.models import Activity, ActivityLap, DailyHealth, FitnessEstimate, SleepSession, SportType, User
+from src.db.engine import get_db_session
+from src.db.models import (
+    Activity,
+    ActivityLap,
+    DailyHealth,
+    FitnessEstimate,
+    SleepSession,
+    SportType,
+    User,
+)
 from src.metrics.derived import compute_cardio_fitness_age
 
 router = APIRouter()
 
 TrainingVolumeGroup = Literal["week", "month", "year"]
+TRAINING_VOLUME_SPORTS = ("ride", "run", "swim", "strength", "other")
 
 
 def _training_volume_bounds(start_date: date, end_date: date) -> tuple[datetime, datetime]:
@@ -243,28 +252,65 @@ async def training_volume_trend(
         conditions.append(Activity.sport == sport)
 
     period_start = func.date_trunc(group_by, Activity.start_time).label("period_start")
+    sport_category = case(
+        (Activity.sport == SportType.RIDE, "ride"),
+        (Activity.sport.in_((SportType.RUN, SportType.TRAIL_RUN)), "run"),
+        (Activity.sport == SportType.SWIM, "swim"),
+        (Activity.sport == SportType.STRENGTH, "strength"),
+        else_="other",
+    ).label("sport_category")
     result = await db.execute(
         select(
             period_start,
+            sport_category,
             func.sum(Activity.distance_m).label("distance_m"),
             func.sum(Activity.elapsed_time_s).label("duration_s"),
             func.sum(Activity.training_load_vendor).label("training_load"),
             func.count(Activity.id).label("activity_count"),
+            func.count(Activity.training_load_vendor).label("load_activity_count"),
         )
         .where(*conditions)
-        .group_by(period_start)
-        .order_by(period_start)
+        .group_by(period_start, sport_category)
+        .order_by(period_start, sport_category)
     )
-    return [
-        {
-            "period_start": row.period_start.date().isoformat(),
+    buckets: dict[str, dict] = {}
+    for row in result.all():
+        period = row.period_start.date().isoformat()
+        bucket = buckets.setdefault(
+            period,
+            {
+                "period_start": period,
+                "distance_m": 0,
+                "duration_s": 0,
+                "training_load": 0,
+                "activity_count": 0,
+                "load_activity_count": 0,
+                "sports": {
+                    sport_name: {
+                        "distance_m": 0,
+                        "duration_s": 0,
+                        "training_load": 0,
+                        "activity_count": 0,
+                        "load_activity_count": 0,
+                    }
+                    for sport_name in TRAINING_VOLUME_SPORTS
+                },
+            },
+        )
+        values = {
             "distance_m": row.distance_m or 0,
             "duration_s": row.duration_s or 0,
             "training_load": row.training_load or 0,
-            "activity_count": row.activity_count,
+            "activity_count": row.activity_count or 0,
+            "load_activity_count": row.load_activity_count or 0,
         }
-        for row in result.all()
-    ]
+        bucket["distance_m"] += values["distance_m"]
+        bucket["duration_s"] += values["duration_s"]
+        bucket["training_load"] += values["training_load"]
+        bucket["activity_count"] += values["activity_count"]
+        bucket["load_activity_count"] += values["load_activity_count"]
+        bucket["sports"][row.sport_category] = values
+    return list(buckets.values())
 
 
 @router.get("/fitness-trend")

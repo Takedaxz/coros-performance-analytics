@@ -15,6 +15,7 @@ import {
   Cell,
   Pie,
   PieChart,
+  Rectangle,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -28,6 +29,7 @@ interface TrainingLoadDay {
 
 type TrainingVolumeGroup = "week" | "month" | "year";
 type TrainingVolumeMetric = "distance" | "duration" | "load";
+type TrainingVolumeSport = "ride" | "run" | "swim" | "strength" | "other";
 
 interface TrainingVolumeBucket {
   period_start: string;
@@ -35,6 +37,14 @@ interface TrainingVolumeBucket {
   duration_s: number;
   training_load: number;
   activity_count: number;
+  load_activity_count: number;
+  sports: Record<TrainingVolumeSport, {
+    distance_m: number;
+    duration_s: number;
+    training_load: number;
+    activity_count: number;
+    load_activity_count: number;
+  }>;
 }
 
 const TRAINING_VOLUME_METRICS: TrainingVolumeMetric[] = ["distance", "duration", "load"];
@@ -43,6 +53,15 @@ const TRAINING_VOLUME_CONFIG: Record<TrainingVolumeMetric, { label: string; colo
   distance: { label: "Distance", color: "var(--color-accent-primary)" },
   duration: { label: "Duration", color: "var(--color-accent-exertion)" },
   load: { label: "Training Load", color: "var(--color-status-moderate)" },
+};
+
+const TRAINING_VOLUME_SPORTS: TrainingVolumeSport[] = ["ride", "run", "swim", "strength", "other"];
+const TRAINING_VOLUME_SPORT_CONFIG: Record<TrainingVolumeSport, { label: string; color: string }> = {
+  ride: { label: "Ride", color: "#F3D33C" },
+  run: { label: "Run", color: "#19D89B" },
+  swim: { label: "Swim", color: "#11B8F2" },
+  strength: { label: "Strength", color: "#FF4D62" },
+  other: { label: "Others", color: "#A6B4C5" },
 };
 
 interface GenericTooltipEntry {
@@ -139,19 +158,6 @@ function ChartLegendTooltip({
   );
 }
 
-const SPORT_OPTIONS = [
-  { value: "", label: "All Sports" },
-  { value: "run", label: "Run" },
-  { value: "trail_run", label: "Trail Run" },
-  { value: "ride", label: "Ride" },
-  { value: "swim", label: "Swim" },
-  { value: "hike", label: "Hike" },
-  { value: "walk", label: "Walk" },
-  { value: "strength", label: "Strength" },
-  { value: "multisport", label: "Multisport" },
-  { value: "other", label: "Other" },
-];
-
 interface DistributionEntry {
   index: number;
   ratio?: number;
@@ -198,11 +204,12 @@ function dateInputValue(value: Date): string {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
-function trainingVolumeDateRange(months = 12, alignStartToMonth = false): { start: string; end: string } {
+function trainingVolumeDefaultRange(months = 12): { start: string; end: string } {
   const end = new Date();
   const start = new Date(end);
   start.setMonth(start.getMonth() - months);
-  if (alignStartToMonth) start.setDate(1);
+  const daysSinceMonday = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - daysSinceMonday);
   return { start: dateInputValue(start), end: dateInputValue(end) };
 }
 
@@ -420,10 +427,10 @@ export default function TrendsPage() {
   const [trainingVolume, setTrainingVolume] = useState<TrainingVolumeBucket[]>([]);
   const [trainingVolumeLoading, setTrainingVolumeLoading] = useState(true);
   const [trainingVolumeError, setTrainingVolumeError] = useState<string | null>(null);
-  const [trainingVolumeGroupBy, setTrainingVolumeGroupBy] = useState<TrainingVolumeGroup>("month");
-  const [trainingVolumeSport, setTrainingVolumeSport] = useState("");
-  const [trainingVolumeMetrics, setTrainingVolumeMetrics] = useState<TrainingVolumeMetric[]>(TRAINING_VOLUME_METRICS);
-  const [trainingVolumeRange, setTrainingVolumeRange] = useState(trainingVolumeDateRange);
+  const [trainingVolumeGroupBy, setTrainingVolumeGroupBy] = useState<TrainingVolumeGroup>("week");
+  const [trainingVolumeMetric, setTrainingVolumeMetric] = useState<TrainingVolumeMetric>("duration");
+  const [visibleTrainingVolumeSports, setVisibleTrainingVolumeSports] = useState<TrainingVolumeSport[]>(TRAINING_VOLUME_SPORTS);
+  const [trainingVolumeRange, setTrainingVolumeRange] = useState(trainingVolumeDefaultRange);
   const invalidTrainingVolumeRange = trainingVolumeRange.start > trainingVolumeRange.end;
   const trendHistoryDays = visibleTrendDays + 6;
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -439,7 +446,7 @@ export default function TrendsPage() {
 
   useEffect(() => {
     if (window.matchMedia("(max-width: 700px)").matches) {
-      const mobileRangeTimer = window.setTimeout(() => setTrainingVolumeRange(trainingVolumeDateRange(6, true)), 0);
+      const mobileRangeTimer = window.setTimeout(() => setTrainingVolumeRange(trainingVolumeDefaultRange()), 0);
       return () => window.clearTimeout(mobileRangeTimer);
     }
   }, []);
@@ -484,7 +491,6 @@ export default function TrendsPage() {
           start_date: trainingVolumeRange.start,
           end_date: trainingVolumeRange.end,
         });
-        if (trainingVolumeSport) params.set("sport", trainingVolumeSport);
         const response = await fetch(`${apiBase}/api/dashboard/training-volume?${params}`);
         if (!response.ok) throw new Error("Unable to load training volume.");
         if (!cancelled) setTrainingVolume(await response.json());
@@ -501,7 +507,7 @@ export default function TrendsPage() {
     return () => {
       cancelled = true;
     };
-  }, [apiBase, invalidTrainingVolumeRange, trainingVolumeGroupBy, trainingVolumeRange, trainingVolumeSport]);
+  }, [apiBase, invalidTrainingVolumeRange, trainingVolumeGroupBy, trainingVolumeRange]);
 
   useEffect(() => {
     async function fetchDailyHealthTrends() {
@@ -551,70 +557,43 @@ export default function TrendsPage() {
   const caloriesStats = useMemo(() => {
     return computeSeriesStats(caloriesChartData.map((d) => d.active_calories_kcal));
   }, [caloriesChartData]);
-  const trainingVolumeMaxima = TRAINING_VOLUME_METRICS.reduce(
-    (maxima, metric) => ({
-      ...maxima,
-      [metric]: Math.max(
-        ...trainingVolume.map((bucket) => (
-          metric === "distance"
-            ? bucket.distance_m / 1000
-            : metric === "duration"
-              ? bucket.duration_s / 3600
-              : bucket.training_load
-        )),
-        1,
-      ),
-    }),
-    { distance: 1, duration: 1, load: 1 },
-  );
   const trainingVolumeChartData = trainingVolume.map((bucket) => {
-    const distance = bucket.distance_m / 1000;
-    const duration = bucket.duration_s / 3600;
-    const load = bucket.training_load;
+    const sportValues = TRAINING_VOLUME_SPORTS.reduce((values, sport) => {
+      const activity = bucket.sports?.[sport];
+      values[sport] = {
+        distance: (activity?.distance_m ?? 0) / 1000,
+        duration: (activity?.duration_s ?? 0) / 3600,
+        load: activity?.training_load ?? 0,
+      };
+      return values;
+    }, {} as Record<TrainingVolumeSport, Record<TrainingVolumeMetric, number>>);
     return {
       ...bucket,
       label: formatTrainingVolumePeriod(bucket.period_start, trainingVolumeGroupBy),
       tooltipLabel: formatTrainingVolumeTooltipLabel(bucket.period_start, trainingVolumeGroupBy),
       toDate: isCurrentTrainingVolumePeriod(bucket.period_start, trainingVolumeGroupBy),
-      distance,
-      duration,
-      load,
-      distanceRelative: (distance / trainingVolumeMaxima.distance) * 100,
-      durationRelative: (duration / trainingVolumeMaxima.duration) * 100,
-      loadRelative: (load / trainingVolumeMaxima.load) * 100,
+      sportValues,
     };
   });
-  const trainingVolumeIsRelative = trainingVolumeMetrics.length > 1;
   const trainingVolumeBarSize = useMemo(() => {
-    const metricCount = trainingVolumeMetrics.length;
     const dataPoints = Math.max(1, trainingVolumeChartData.length);
 
     if (isMobile) {
-      if (metricCount === 1) return dataPoints > 20 ? 8 : 16;
-      if (metricCount === 2) return dataPoints > 20 ? 5 : 9;
-      return dataPoints > 20 ? 4 : 7;
+      return dataPoints > 20 ? 10 : 18;
     }
 
-    // Non-mobile (desktop / tablet): significantly wider bars for clear visual weight
     if (dataPoints > 30) {
-      if (metricCount === 1) return 16;
-      if (metricCount === 2) return 9;
-      return 6;
+      return 18;
     }
     if (dataPoints > 15) {
-      if (metricCount === 1) return 28;
-      if (metricCount === 2) return 16;
-      return 12;
+      return 30;
     }
-    // <= 15 data points (e.g. 12 months in annual view)
-    if (metricCount === 1) return 46;
-    if (metricCount === 2) return 28;
-    return 20;
-  }, [isMobile, trainingVolumeMetrics.length, trainingVolumeChartData.length]);
-  const toggleTrainingVolumeMetric = (metric: TrainingVolumeMetric) => {
-    setTrainingVolumeMetrics((current) => {
-      if (current.includes(metric)) return current.length === 1 ? current : current.filter((item) => item !== metric);
-      return [...current, metric];
+    return 46;
+  }, [isMobile, trainingVolumeChartData.length]);
+  const toggleTrainingVolumeSport = (sport: TrainingVolumeSport) => {
+    setVisibleTrainingVolumeSports((current) => {
+      if (current.includes(sport)) return current.length === 1 ? current : current.filter((item) => item !== sport);
+      return [...current, sport];
     });
   };
 
@@ -641,16 +620,18 @@ export default function TrendsPage() {
                 <span id="training-volume-title" className="card-title">Training Volume</span>
                 <div className="training-volume-metrics" role="group" aria-label="Training volume metrics">
                   {TRAINING_VOLUME_METRICS.map((metric) => {
-                    const selected = trainingVolumeMetrics.includes(metric);
-                    return <button key={metric} type="button" aria-pressed={selected} onClick={() => toggleTrainingVolumeMetric(metric)}><i style={{ background: selected ? TRAINING_VOLUME_CONFIG[metric].color : "var(--color-overlay-medium)" }} />{TRAINING_VOLUME_CONFIG[metric].label}</button>;
+                    const selected = trainingVolumeMetric === metric;
+                    return <button key={metric} type="button" aria-pressed={selected} onClick={() => setTrainingVolumeMetric(metric)}><i style={{ background: selected ? TRAINING_VOLUME_CONFIG[metric].color : "var(--color-overlay-medium)" }} />{TRAINING_VOLUME_CONFIG[metric].label}</button>;
+                  })}
+                </div>
+                <div className="training-volume-sports" role="group" aria-label="Training volume sports">
+                  {TRAINING_VOLUME_SPORTS.map((sport) => {
+                    const selected = visibleTrainingVolumeSports.includes(sport);
+                    return <button key={sport} type="button" aria-pressed={selected} onClick={() => toggleTrainingVolumeSport(sport)}><i style={{ background: selected ? TRAINING_VOLUME_SPORT_CONFIG[sport].color : "var(--color-overlay-medium)" }} />{TRAINING_VOLUME_SPORT_CONFIG[sport].label}</button>;
                   })}
                 </div>
               </div>
               <div className="training-volume-controls">
-                <label>
-                  Sport
-                  <SingleSelect ariaLabel="Training volume sport filter" value={trainingVolumeSport} onChange={setTrainingVolumeSport} options={SPORT_OPTIONS} />
-                </label>
                 <label>
                   Group by
                   <SingleSelect ariaLabel="Training volume grouping" value={trainingVolumeGroupBy} onChange={(value) => setTrainingVolumeGroupBy(value as TrainingVolumeGroup)} options={[{ value: "week", label: "Week" }, { value: "month", label: "Month" }, { value: "year", label: "Year" }]} />
@@ -689,31 +670,39 @@ export default function TrendsPage() {
                   <BarChart data={trainingVolumeChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={isMobile ? 1 : 2}>
                     <CartesianGrid strokeDasharray="2 6" stroke="var(--color-chart-grid)" />
                     <XAxis dataKey="label" tick={{ fill: "var(--color-text-muted)", fontSize: 11, fontWeight: 600 }} axisLine={false} tickLine={false} dy={4} interval="equidistantPreserveStart" />
-                    <YAxis domain={trainingVolumeIsRelative ? [0, 100] : [0, "auto"]} tick={trainingVolumeIsRelative ? false : { fill: "var(--color-text-muted)", fontSize: 10 }} tickFormatter={(value: number) => trainingVolumeMetrics[0] === "distance" ? value.toFixed(value >= 10 ? 0 : 1) : trainingVolumeMetrics[0] === "duration" ? `${value.toFixed(1)}h` : `${Math.round(value)}`} axisLine={false} tickLine={false} width={trainingVolumeIsRelative ? 8 : 40} />
+                    <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 10 }} tickFormatter={(value: number) => trainingVolumeMetric === "distance" ? value.toFixed(value >= 10 ? 0 : 1) : trainingVolumeMetric === "duration" ? `${value.toFixed(1)}h` : `${Math.round(value)}`} axisLine={false} tickLine={false} width={44} />
                     <Tooltip cursor={false} content={({ active, payload }) => {
                       const bucket = payload?.[0]?.payload as (typeof trainingVolumeChartData)[number] | undefined;
                       if (!active || !bucket) return null;
-                      return <div className="training-volume-tooltip"><strong>{bucket.tooltipLabel}{bucket.toDate ? " · To date" : ""}</strong>{trainingVolumeMetrics.map((metric) => <span key={metric}><i style={{ background: TRAINING_VOLUME_CONFIG[metric].color }} />{TRAINING_VOLUME_CONFIG[metric].label}<b>{formatTrainingVolumeMetric(metric, bucket[metric])}</b></span>)}</div>;
+                      return <div className="training-volume-tooltip">
+                        <strong>{bucket.tooltipLabel}{bucket.toDate ? " · To date" : ""}</strong>
+                        {visibleTrainingVolumeSports.map((sport) => {
+                          const values = bucket.sports?.[sport];
+                          if (!values?.activity_count) return null;
+                          const metricValue = bucket.sportValues[sport][trainingVolumeMetric];
+                          const loadRate = values.duration_s > 0 && values.training_load > 0 ? values.training_load / (values.duration_s / 3600) : null;
+                          return <span key={sport}><i style={{ background: TRAINING_VOLUME_SPORT_CONFIG[sport].color }} /><em>{TRAINING_VOLUME_SPORT_CONFIG[sport].label}</em><b>{formatTrainingVolumeMetric(trainingVolumeMetric, metricValue)}{loadRate ? ` · ${Math.round(loadRate)} TL/h` : ""}</b></span>;
+                        })}
+                        <span className="training-volume-tooltip-total"><em>Total</em><b>{formatTrainingVolumeMetric(trainingVolumeMetric, trainingVolumeMetric === "distance" ? bucket.distance_m / 1000 : trainingVolumeMetric === "duration" ? bucket.duration_s / 3600 : bucket.training_load)}</b></span>
+                      </div>;
                     }} />
-                    {trainingVolumeMetrics.map((metric) => (
+                    {visibleTrainingVolumeSports.map((sport) => (
                       <Bar
-                        key={metric}
-                        dataKey={trainingVolumeIsRelative ? `${metric}Relative` : metric}
-                        name={TRAINING_VOLUME_CONFIG[metric].label}
-                        radius={[4, 4, 0, 0]}
+                        key={sport}
+                        dataKey={(bucket) => bucket.sportValues[sport][trainingVolumeMetric]}
+                        name={TRAINING_VOLUME_SPORT_CONFIG[sport].label}
+                        stackId="training-volume"
+                        fill={TRAINING_VOLUME_SPORT_CONFIG[sport].color}
+                        shape={(props) => {
+                          const bucket = props.payload as (typeof trainingVolumeChartData)[number] | undefined;
+                          const topSport = bucket
+                            ? [...visibleTrainingVolumeSports].reverse().find((candidate) => bucket.sportValues[candidate][trainingVolumeMetric] > 0)
+                            : undefined;
+                          return <Rectangle {...props} radius={topSport === sport ? [4, 4, 0, 0] : [0, 0, 0, 0]} />;
+                        }}
                         barSize={trainingVolumeBarSize}
                         isAnimationActive={false}
-                      >
-                        {trainingVolumeChartData.map((bucket) => (
-                          <Cell
-                            key={`${metric}-${bucket.period_start}`}
-                            fill={TRAINING_VOLUME_CONFIG[metric].color}
-                            fillOpacity={0.4}
-                            stroke={TRAINING_VOLUME_CONFIG[metric].color}
-                            strokeWidth={1.5}
-                          />
-                        ))}
-                      </Bar>
+                      />
                     ))}
                   </BarChart>
                 </ResponsiveContainer>
