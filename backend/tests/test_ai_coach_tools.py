@@ -303,6 +303,7 @@ async def test_activity_detail_tool_includes_a_saved_note() -> None:
         elevation_loss_m=50.0,
         strength_detail=strength_detail,
         activity_note="Legs felt heavy after the sled push.",
+        weather={"condition": "Rain", "temperature_c": 30.0},
     )
 
     class Result:
@@ -316,11 +317,26 @@ async def test_activity_detail_tool_includes_a_saved_note() -> None:
             return self
 
         def all(self) -> list[object]:
-            return []
+            return self.value if isinstance(self.value, list) else []
 
     class Db:
         def __init__(self) -> None:
-            self.results = iter([Result(activity), Result([]), Result([])])
+            self.results = iter(
+                [
+                    Result(activity),
+                    Result([]),
+                    Result(
+                        [
+                            SimpleNamespace(
+                                timestamp=activity.start_time,
+                                position_lat=13.75,
+                                position_long=100.5,
+                                distance_m=None,
+                            )
+                        ]
+                    ),
+                ]
+            )
 
         async def execute(self, _statement: object) -> Result:
             return next(self.results)
@@ -328,6 +344,10 @@ async def test_activity_detail_tool_includes_a_saved_note() -> None:
     result = await _activity_detail(Db(), "owner", "activity-1")
 
     assert result["activity"]["note"] == "Legs felt heavy after the sled push."
+    assert result["activity"]["weather"] == {
+        "condition": "Rain",
+        "temperature_c": 30.0,
+    }
     assert result["activity"]["strength_detail"] == {
         "exercises_detail": [
             {

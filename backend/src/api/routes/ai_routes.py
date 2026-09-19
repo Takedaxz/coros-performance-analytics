@@ -34,6 +34,7 @@ from src.db.models import ChatMessage as DBChatMessage
 from src.db.models import ChatProject as DBChatProject
 from src.db.models import ChatSession as DBChatSession
 from src.db.owner import get_owner_id
+from src.weather import load_activity_weather
 
 logger = logging.getLogger(__name__)
 
@@ -590,6 +591,16 @@ def _build_activity_summary_string(activity: Activity, lap_lines: list[str]) -> 
         )
     if activity.activity_note:
         summary_parts.append(f"Athlete Note: {activity.activity_note}")
+    weather = getattr(activity, "weather", None)
+    if isinstance(weather, dict):
+        summary_parts.append(
+            "Weather at start: "
+            f"{weather.get('condition', '--')}, {weather.get('temperature_c', '--')} C "
+            f"(feels like {weather.get('apparent_temperature_c', '--')} C), "
+            f"humidity {weather.get('humidity_pct', '--')}%, "
+            f"precipitation {weather.get('precipitation_mm', '--')} mm, "
+            f"wind {weather.get('wind_speed_kph', '--')} km/h"
+        )
 
     res = "\n".join(summary_parts)
     if lap_lines:
@@ -615,6 +626,7 @@ async def activity_postmortem(
     activity = act_res.scalar_one_or_none()
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found.")
+    await load_activity_weather(db, activity)
 
     laps_res = await db.execute(
         select(ActivityLap)
@@ -654,6 +666,7 @@ async def activity_postmortem_stream(
     activity = act_res.scalar_one_or_none()
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found.")
+    await load_activity_weather(db, activity)
 
     laps_res = await db.execute(
         select(ActivityLap)

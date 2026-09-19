@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 from src.ai.prompts import POSTMORTEM_PROMPT
 from src.api.routes.ai_routes import (
+    _build_activity_summary_string,
     _build_laps_with_km_breakdown,
     _postmortem_focus,
     _postmortem_sport,
@@ -114,3 +115,28 @@ def test_postmortem_prompt_is_activity_aware() -> None:
     assert "look-back analysis only" in POSTMORTEM_PROMPT
     assert "Do not recommend changes to future scheduled training" in POSTMORTEM_PROMPT
     assert "Never label cycling speed as pace or cadence as spm" in POSTMORTEM_PROMPT
+
+
+def test_postmortem_summary_includes_persisted_weather() -> None:
+    activity = Activity(
+        id="activity-id",
+        user_id="user-id",
+        sport=SportType.RUN,
+        title="Morning Run",
+        start_time=datetime(2026, 9, 19, 6),
+        weather={
+            "condition": "Rain",
+            "temperature_c": 30.0,
+            "apparent_temperature_c": 34.0,
+            "humidity_pct": 70,
+            "precipitation_mm": 0.2,
+            "wind_speed_kph": 8.0,
+        },
+    )
+
+    summary = _build_activity_summary_string(activity, [])
+
+    assert (
+        "Weather at start: Rain, 30.0 C (feels like 34.0 C), humidity 70%, "
+        "precipitation 0.2 mm, wind 8.0 km/h"
+    ) in summary

@@ -2951,6 +2951,10 @@ a:hover {
   text-transform: none;
 }
 
+.activity-weather-inline {
+  color: var(--color-text-secondary);
+}
+
 
 .strength-overview {
   display: grid;

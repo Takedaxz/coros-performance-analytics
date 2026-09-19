@@ -21,6 +21,7 @@ from src.activity_laps import (
 from src.db.engine import get_db_session
 from src.db.models import Activity, ActivityLap, ActivityPause, ActivityRecord, FitnessEstimate, SportType
 from src.db.owner import get_owner_id
+from src.weather import load_activity_weather
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -582,6 +583,7 @@ async def get_activity(
         raise HTTPException(status_code=404, detail="Activity not found")
 
     await ensure_activity_fit_downloaded(db, activity)
+    weather = await load_activity_weather(db, activity)
 
     fitness = (
         await db.scalar(
@@ -803,6 +805,7 @@ async def get_activity(
         "strength_detail": activity.strength_detail,
         "postmortem": activity.postmortem,
         "activity_note": activity.activity_note,
+        "weather": weather,
         "source_type": activity.source_type,
         "threshold_hr_bpm": (
             fitness.lactate_threshold_hr if (fitness and fitness.lactate_threshold_hr) else 173

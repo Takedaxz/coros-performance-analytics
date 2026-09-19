@@ -244,6 +244,7 @@ class Activity(Base):
     hr_quality_flag: Mapped[str | None] = mapped_column(String(50), nullable=True)
     postmortem: Mapped[str | None] = mapped_column(Text, nullable=True)
     activity_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    weather: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Provenance
     source_type: Mapped[str] = mapped_column(Enum(SourceType, name="source_type"), nullable=False)

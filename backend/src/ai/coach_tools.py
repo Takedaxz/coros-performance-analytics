@@ -40,6 +40,7 @@ from src.db.models import (
 from src.strength_exercises import resolve_exercise_name
 from src.swim_metrics import active_swim_pace_s_100m, swim_length_metrics
 from src.sync.api_client import CorosApiClientError
+from src.weather import load_activity_weather
 
 _TREND_DAYS = frozenset({7, 14, 28, 56})
 _FITNESS_DAYS = frozenset({28, 56, 90, 180})
@@ -846,6 +847,7 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
         .scalars()
         .all()
     )
+    weather = await load_activity_weather(db, activity, records)
 
     km_splits: list[dict[str, Any]] = []
     if records:
@@ -954,6 +956,7 @@ async def _activity_detail(db: Any, user_id: str, activity_id: str) -> dict[str,
             "elev_loss_m": getattr(activity, "elevation_loss_m", None),
             "strength_detail": strength_detail,
             "swim": swim,
+            "weather": weather,
             **(
                 {"note": activity.activity_note}
                 if getattr(activity, "activity_note", None)

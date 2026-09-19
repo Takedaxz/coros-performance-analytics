@@ -75,6 +75,18 @@ interface ActivityDetail {
   swim_lengths?: SwimLength[];
   pauses?: ActivityPause[];
   lap_splits?: Record<string, ActivitySplit[]>;
+  weather?: ActivityWeather | null;
+}
+
+interface ActivityWeather {
+  source: "Open-Meteo";
+  observed_at: string;
+  temperature_c: number;
+  apparent_temperature_c: number;
+  humidity_pct: number;
+  precipitation_mm: number;
+  condition: string;
+  wind_speed_kph: number;
 }
 
 interface SwimLength {
@@ -1989,7 +2001,14 @@ export default function ActivityDetailPage() {
             </span>
             <div>
               <h1>{getActivityDisplayTitle(activity.sport, activity.title, activity.subsport)}</h1>
-              <span>{activityTime}</span>
+              <span className="activity-detail-meta">
+                {activityTime}
+                {activity.weather && (
+                  <span className="activity-weather-inline">
+                    {` · ${activity.weather.condition} · ${activity.weather.temperature_c.toFixed(1)} °C · Feels ${activity.weather.apparent_temperature_c.toFixed(1)} °C · ${activity.weather.humidity_pct}% humidity · ${activity.weather.precipitation_mm.toFixed(1)} mm rain · ${activity.weather.wind_speed_kph.toFixed(1)} km/h wind`}
+                  </span>
+                )}
+              </span>
             </div>
           </div>
           <div className="activity-metric-strip">
