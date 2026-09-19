@@ -2539,11 +2539,33 @@ export default function AiPage() {
     const userMessage = messages[messageIndex - 1];
     if (userMessage?.role !== "user") return;
     const cleanHistory = messages.slice(0, messageIndex - 1);
+    const currentSession = sessions.find((session) => session.id === routeSessionId);
     const response = await fetch(
       `${API_BASE}/api/ai/sessions/${routeSessionId}/exchanges/${userMessage.id}`,
       { method: "DELETE" },
     );
     if (!response.ok) return;
+    const result: DeleteExchangeResponse = await response.json();
+    let retrySessionId = routeSessionId;
+    if (result.session_deleted) {
+      setSessions((current) => current.filter((session) => session.id !== routeSessionId));
+      const replacement = await createRealSession(currentSession?.project_id ?? null);
+      if (!replacement) {
+        setMessages([]);
+        try {
+          localStorage.setItem("coros_latest_ai_path", "/ai");
+        } catch {}
+        router.replace("/ai");
+        return;
+      }
+      retrySessionId = replacement.id;
+      const replacementPath = `/ai/${encodeURIComponent(replacement.id)}`;
+      routeSessionIdRef.current = replacement.id;
+      try {
+        localStorage.setItem("coros_latest_ai_path", replacementPath);
+      } catch {}
+      router.replace(replacementPath);
+    }
     setMessages(cleanHistory);
     const retryImages = userMessage.images ?? [];
     setPendingImages(retryImages);
@@ -2552,7 +2574,7 @@ export default function AiPage() {
         ? { name: userMessage.csvName, content: userMessage.csvContent }
         : null,
     );
-    await handleSend(userMessage.content, routeSessionId, cleanHistory);
+    await handleSend(userMessage.content, retrySessionId, cleanHistory);
   }
 
   async function generateBriefing(sid: string) {
