@@ -106,6 +106,21 @@ def test_past_race_questions_require_the_past_race_goals_tool() -> None:
     assert "more than 30 days ago" in COACH_SYSTEM_PROMPT
 
 
+def test_empty_tool_schema_has_an_empty_required_list() -> None:
+    loop = asyncio.new_event_loop()
+    try:
+        schemas = coach_agent._provider_tools(coach_agent._tools("owner", loop))
+    finally:
+        loop.close()
+
+    past_race_tool = next(
+        schema["function"]
+        for schema in schemas
+        if schema["function"]["name"] == "get_past_race_goals"
+    )
+    assert past_race_tool["parameters"]["required"] == []
+
+
 def test_coach_treats_personal_records_as_supporting_evidence() -> None:
     assert "race-feasibility, and pace questions" in COACH_SYSTEM_PROMPT
     assert "12-week records are stronger performance evidence" in COACH_SYSTEM_PROMPT

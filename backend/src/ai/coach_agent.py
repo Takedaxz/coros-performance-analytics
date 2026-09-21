@@ -15,6 +15,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
@@ -120,6 +121,25 @@ def _tools(user_id: str, event_loop: asyncio.AbstractEventLoop) -> list[BaseTool
     return [StructuredTool.from_function(function) for function in functions]
 
 
+def _provider_tools(tools: list[BaseTool]) -> list[dict[str, Any]]:
+    """Return gateway-safe OpenAI tool schemas."""
+    schemas = [convert_to_openai_tool(tool) for tool in tools]
+    for schema in schemas:
+        parameters = schema["function"]["parameters"]
+        if parameters.get("type") == "object":
+            parameters.setdefault("required", [])
+    return schemas
+
+
+def _message_chunk(message: AIMessage) -> AIMessageChunk:
+    return AIMessageChunk(
+        content=message.content,
+        additional_kwargs=message.additional_kwargs,
+        id=message.id,
+        tool_calls=message.tool_calls,
+    )
+
+
 def _append_tool_results(
     response: AIMessage,
     tools_by_name: dict[str, BaseTool],
@@ -204,7 +224,8 @@ def _prepare_tool_messages(
     model = _model(provider, model_name)
 
     try:
-        model_with_tools = model.bind_tools(tools)
+        provider_tools = _provider_tools(tools) if isinstance(model, ChatOpenAI) else tools
+        model_with_tools = model.bind_tools(provider_tools)
         for _ in range(MAX_TOOL_CALLS):
             response = model_with_tools.invoke(messages)
             if not isinstance(response, AIMessage) or not response.tool_calls:
@@ -261,24 +282,31 @@ def ask_coach_with_tools_stream(
     tool_calls: list[ToolCallRecord],
     images: list[str] | None = None,
 ) -> Iterator[str]:
-    """Run read-only tools and stream every model response without duplicate calls."""
+    """Run read-only tools and stream compatible provider responses."""
     tools = _tools(user_id, event_loop)
     tools_by_name = {tool.name: tool for tool in tools}
     messages = _messages(question, context, history, images=images)
     model = _model(provider, model_name)
-    model_with_tools = model.bind_tools(tools)
+    provider_tools = _provider_tools(tools) if isinstance(model, ChatOpenAI) else tools
+    model_with_tools = model.bind_tools(provider_tools)
     thinking_open = False
 
     for _ in range(MAX_TOOL_CALLS):
         response: AIMessageChunk | None = None
-        for chunk in model_with_tools.stream(messages):
-            if response is None:
-                response = cast("AIMessageChunk", chunk)
-            else:
-                response = cast("AIMessageChunk", response + chunk)
-            text, thinking_open = _stream_text(chunk, thinking_open)
+        if provider == "agentrouter":
+            response = _message_chunk(cast("AIMessage", model_with_tools.invoke(messages)))
+            text, thinking_open = _stream_text(response, thinking_open)
             if text:
                 yield text
+        else:
+            for chunk in model_with_tools.stream(messages):
+                if response is None:
+                    response = cast("AIMessageChunk", chunk)
+                else:
+                    response = cast("AIMessageChunk", response + chunk)
+                text, thinking_open = _stream_text(chunk, thinking_open)
+                if text:
+                    yield text
 
         if response is None or not response.tool_calls:
             if thinking_open:
@@ -306,9 +334,16 @@ def ask_coach_with_tools_stream(
             content="Use the tool results above to answer the athlete. Do not call more tools."
         )
     )
-    for chunk in model.stream(messages):
-        text, thinking_open = _stream_text(cast("AIMessageChunk", chunk), thinking_open)
+    if provider == "agentrouter":
+        text, thinking_open = _stream_text(
+            _message_chunk(cast("AIMessage", model.invoke(messages))), thinking_open
+        )
         if text:
             yield text
+    else:
+        for chunk in model.stream(messages):
+            text, thinking_open = _stream_text(cast("AIMessageChunk", chunk), thinking_open)
+            if text:
+                yield text
     if thinking_open:
         yield "</think>\n"
