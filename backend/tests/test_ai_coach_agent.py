@@ -546,14 +546,86 @@ def test_openai_compat_streams_reasoning_before_its_answer(monkeypatch) -> None:
     assert chunks == ["<think>Checking recovery data.", "</think>\nTake an easy day."]
 
 
-def test_agentrouter_model_passes_reasoning_effort(monkeypatch) -> None:
+def test_agentrouter_streams_reasoning_before_its_answer(monkeypatch) -> None:
+    class Model:
+        def bind_tools(self, _tools: list[object]) -> "Model":
+            return self
+
+        def invoke(self, _messages: list[object]) -> AIMessage:
+            raise AssertionError("AgentRouter streaming must not call invoke")
+
+        def stream(self, _messages: list[object]):
+            return iter(
+                [
+                    AIMessageChunk(
+                        content="",
+                        additional_kwargs={"reasoning_content": "Checking recovery data."},
+                    ),
+                    AIMessageChunk(content="Take an easy day."),
+                ]
+            )
+
+    monkeypatch.setattr(coach_agent, "_model", lambda _provider, _model: Model())
+    monkeypatch.setattr(coach_agent, "_tools", lambda _user_id, _loop: [])
+
+    chunks = list(
+        coach_agent.ask_coach_with_tools_stream(
+            "agentrouter",
+            "deepseek-v4-flash",
+            "Question",
+            "Snapshot",
+            None,
+            "user-id",
+            asyncio.new_event_loop(),
+            [],
+        )
+    )
+
+    assert chunks == ["<think>Checking recovery data.", "</think>\nTake an easy day."]
+
+
+def test_streamed_tool_response_preserves_reasoning_content() -> None:
+    response = coach_agent._streamed_tool_response(
+        AIMessageChunk(
+            content="",
+            additional_kwargs={"reasoning_content": "Need a tool."},
+            tool_calls=[{"name": "get_activities", "args": {}, "id": "tool-1"}],
+        )
+    )
+
+    assert response.additional_kwargs == {"reasoning_content": "Need a tool."}
+
+
+def test_agentrouter_stream_filter_discards_null_events() -> None:
+    class Stream:
+        def __enter__(self) -> "Stream":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def __iter__(self):
+            return iter(["first", None, "last"])
+
+    class Completions:
+        def create(self, **_kwargs: object) -> Stream:
+            return Stream()
+
+    stream = coach_agent._AgentRouterCompletions(Completions()).create(stream=True)
+
+    with stream as events:
+        assert list(events) == ["first", "last"]
+
+
+def test_agentrouter_model_passes_documented_reasoning_body(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     class Model:
         def __init__(self, **kwargs: object) -> None:
             captured.update(kwargs)
+            self.client = object()
 
-    monkeypatch.setattr(coach_agent, "ChatOpenAI", Model)
+    monkeypatch.setattr(coach_agent, "_AgentRouterChatOpenAI", Model)
     monkeypatch.setattr(
         coach_agent,
         "get_settings",
@@ -569,4 +641,4 @@ def test_agentrouter_model_passes_reasoning_effort(monkeypatch) -> None:
 
     coach_agent._model("agentrouter", "deepseek-v4-flash")
 
-    assert captured["reasoning_effort"] == "low"
+    assert captured["extra_body"] == {"reasoning": {"enabled": True, "effort": "low"}}

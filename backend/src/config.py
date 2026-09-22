@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # --- AgentRouter (OpenAI-compatible AI) ---
     agentrouter_api_key: str = ""
     agentrouter_base_url: str = "https://agentrouter.org/v1"
-    agentrouter_model: str = "gpt-5.5"
+    agentrouter_model: str = "deepseek-v4-flash"
     agentrouter_reasoning_effort: str | None = None
 
     # --- Web Search Providers ---

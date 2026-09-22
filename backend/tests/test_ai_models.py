@@ -54,7 +54,7 @@ def test_resolve_model_prefixes() -> None:
     assert resolve_model("agentrouter:gpt-5.5") == ("agentrouter", "gpt-5.5")
 
 
-def test_agentrouter_matches_tradingagents_client_configuration() -> None:
+def test_agentrouter_uses_coros_client_metadata() -> None:
     config = openai_compat_client.provider_config("agentrouter")
 
     assert config.base_url == "https://agentrouter.org/v1"
@@ -62,8 +62,8 @@ def test_agentrouter_matches_tradingagents_client_configuration() -> None:
         "Originator": "codex_cli_rs",
         "User-Agent": "codex_cli_rs/0.101.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464",
         "Version": "0.101.0",
-        "HTTP-Referer": "https://github.com/TauricResearch/TradingAgents",
-        "X-Title": "TradingAgents",
+        "HTTP-Referer": "https://github.com/Takedaxz/coros-performance-analytics",
+        "X-Title": "coros-core",
     }
 
 

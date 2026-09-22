@@ -28,6 +28,71 @@ from src.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+class _SkipNullStream:
+    """Filter AgentRouter's null SSE events before LangChain parses them."""
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+
+    def __enter__(self) -> "_SkipNullStream":
+        self._stream.__enter__()
+        return self
+
+    def __exit__(self, *args: Any) -> bool | None:
+        return cast("bool | None", self._stream.__exit__(*args))
+
+    def __iter__(self) -> Iterator[Any]:
+        return (chunk for chunk in self._stream if chunk is not None)
+
+
+class _AgentRouterCompletions:
+    """Preserve normal completions while filtering invalid AgentRouter stream events."""
+
+    def __init__(self, completions: Any) -> None:
+        self._completions = completions
+
+    def create(self, *args: Any, **kwargs: Any) -> Any:
+        response = self._completions.create(*args, **kwargs)
+        return _SkipNullStream(response) if kwargs.get("stream") else response
+
+
+class _AgentRouterChatOpenAI(ChatOpenAI):
+    """Preserve AgentRouter's non-standard reasoning content."""
+
+    def _convert_chunk_to_generation_chunk(
+        self,
+        chunk: dict[str, Any],
+        default_chunk_class: type[Any],
+        base_generation_info: dict[str, Any] | None,
+    ) -> Any:
+        generation_chunk = super()._convert_chunk_to_generation_chunk(
+            chunk, default_chunk_class, base_generation_info
+        )
+        choices = chunk.get("choices")
+        if generation_chunk is None or not isinstance(choices, list) or not choices:
+            return generation_chunk
+        delta = choices[0].get("delta") if isinstance(choices[0], dict) else None
+        reasoning = delta.get("reasoning_content") if isinstance(delta, dict) else None
+        if isinstance(reasoning, str) and reasoning:
+            generation_chunk.message.additional_kwargs["reasoning_content"] = reasoning
+        return generation_chunk
+
+    def _create_chat_result(
+        self, response: Any, generation_info: dict[str, Any] | None = None
+    ) -> Any:
+        result = super()._create_chat_result(response, generation_info)
+        response_dict = response if isinstance(response, dict) else response.model_dump()
+        choices = response_dict.get("choices")
+        if not isinstance(choices, list):
+            return result
+        for generation, choice in zip(result.generations, choices, strict=False):
+            message = choice.get("message") if isinstance(choice, dict) else None
+            reasoning = message.get("reasoning_content") if isinstance(message, dict) else None
+            if isinstance(reasoning, str) and reasoning:
+                generation.message.additional_kwargs["reasoning_content"] = reasoning
+        return result
+
+
 def _messages(
     question: str,
     context: str,
@@ -62,11 +127,11 @@ def _model(provider: str, model_name: str) -> ChatGoogleGenerativeAI | ChatOpenA
             request_timeout=60,
         )
     config = provider_config(provider)
-    reasoning_effort = (
-        get_settings().agentrouter_reasoning_effort if provider == "agentrouter" else None
+    reasoning_effort = settings.agentrouter_reasoning_effort if provider == "agentrouter" else None
+    chat_openai = cast(
+        "Any", _AgentRouterChatOpenAI if provider == "agentrouter" else ChatOpenAI
     )
-    chat_openai = cast("Any", ChatOpenAI)
-    return cast(
+    model = cast(
         "ChatGoogleGenerativeAI | ChatOpenAI",
         chat_openai(
             model=model_name,
@@ -76,9 +141,16 @@ def _model(provider: str, model_name: str) -> ChatGoogleGenerativeAI | ChatOpenA
             temperature=0.7,
             timeout=60,
             max_retries=0,
-            **({"reasoning_effort": reasoning_effort} if reasoning_effort else {}),
+            **(
+                {"extra_body": {"reasoning": {"enabled": True, "effort": reasoning_effort}}}
+                if reasoning_effort
+                else {}
+            ),
         ),
     )
+    if provider == "agentrouter" and isinstance(model, ChatOpenAI):
+        model.client = _AgentRouterCompletions(model.client)
+    return model
 
 
 def _content(message: BaseMessage) -> str:
@@ -203,7 +275,12 @@ def _append_tool_results(
 
 
 def _streamed_tool_response(response: AIMessageChunk) -> AIMessage:
-    return AIMessage(content=response.content, tool_calls=response.tool_calls)
+    return AIMessage(
+        content=response.content,
+        additional_kwargs=response.additional_kwargs,
+        id=response.id,
+        tool_calls=response.tool_calls,
+    )
 
 
 def _prepare_tool_messages(
@@ -293,20 +370,14 @@ def ask_coach_with_tools_stream(
 
     for _ in range(MAX_TOOL_CALLS):
         response: AIMessageChunk | None = None
-        if provider == "agentrouter":
-            response = _message_chunk(cast("AIMessage", model_with_tools.invoke(messages)))
-            text, thinking_open = _stream_text(response, thinking_open)
+        for chunk in model_with_tools.stream(messages):
+            if response is None:
+                response = cast("AIMessageChunk", chunk)
+            else:
+                response = cast("AIMessageChunk", response + chunk)
+            text, thinking_open = _stream_text(chunk, thinking_open)
             if text:
                 yield text
-        else:
-            for chunk in model_with_tools.stream(messages):
-                if response is None:
-                    response = cast("AIMessageChunk", chunk)
-                else:
-                    response = cast("AIMessageChunk", response + chunk)
-                text, thinking_open = _stream_text(chunk, thinking_open)
-                if text:
-                    yield text
 
         if response is None or not response.tool_calls:
             if thinking_open:
@@ -334,16 +405,9 @@ def ask_coach_with_tools_stream(
             content="Use the tool results above to answer the athlete. Do not call more tools."
         )
     )
-    if provider == "agentrouter":
-        text, thinking_open = _stream_text(
-            _message_chunk(cast("AIMessage", model.invoke(messages))), thinking_open
-        )
+    for chunk in model.stream(messages):
+        text, thinking_open = _stream_text(cast("AIMessageChunk", chunk), thinking_open)
         if text:
             yield text
-    else:
-        for chunk in model.stream(messages):
-            text, thinking_open = _stream_text(cast("AIMessageChunk", chunk), thinking_open)
-            if text:
-                yield text
     if thinking_open:
         yield "</think>\n"
