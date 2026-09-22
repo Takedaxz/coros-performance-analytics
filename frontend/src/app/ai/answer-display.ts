@@ -1,6 +1,11 @@
 export const MAX_SELECTED_RESPONSE_EXCERPT_LENGTH = 4_000;
 const SELECTED_RESPONSE_PREFIX = "Selected response (primary reference):";
 const USER_INSTRUCTION_PREFIX = "User instruction:";
+const INTERNAL_TOOL_USAGE_BLOCK = /\n+\[Tool usage\]\n[\s\S]*$/;
+
+export function removeInternalToolUsage(content: string): string {
+  return content.replace(INTERNAL_TOOL_USAGE_BLOCK, "").trimEnd();
+}
 
 export function parseSelectedResponseQuestion(
   content: string,

@@ -158,6 +158,18 @@ function ChartLegendTooltip({
   );
 }
 
+function ChartAreaGradient({ id, color }: { id: string; color: string }) {
+  return (
+    <defs>
+      <linearGradient id={id} x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0%" stopColor={color} stopOpacity={0.48} />
+        <stop offset="62%" stopColor={color} stopOpacity={0.18} />
+        <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+      </linearGradient>
+    </defs>
+  );
+}
+
 interface DistributionEntry {
   index: number;
   ratio?: number;
@@ -839,11 +851,12 @@ export default function TrendsPage() {
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={loadChartData} margin={{ top: 8, right: 40, left: 0, bottom: 0 }}>
+                    <ChartAreaGradient id="training-load-gradient" color="var(--color-accent-primary)" />
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                     <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                     <YAxis stroke="var(--color-text-muted)" fontSize={11} width={40} axisLine={false} />
                     <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip />} />
-                    <Area type="monotone" dataKey="total_load" name="Training Load" stroke="var(--color-accent-primary)" fill="var(--color-accent-primary)" fillOpacity={0.4} strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-primary)" }} />
+                    <Area type="monotone" dataKey="total_load" name="Training Load" stroke="var(--color-accent-primary)" fill="url(#training-load-gradient)" strokeWidth={2} dot={{ r: 3, fill: "var(--color-accent-primary)" }} />
                     <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -876,11 +889,12 @@ export default function TrendsPage() {
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={stepsChartData} margin={{ top: 8, right: 40, left: 0, bottom: 0 }}>
+                        <ChartAreaGradient id="daily-steps-gradient" color="#4fc3f3" />
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                         <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                         <YAxis stroke="#4fc3f3" fontSize={11} width={40} axisLine={false} tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`} />
                         <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="steps" />} />
-                        <Area type="monotone" dataKey="steps" name="Daily Steps" stroke="#4fc3f3" fill="#4fc3f3" fillOpacity={0.4} strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#4fc3f3" }} />
+                        <Area type="monotone" dataKey="steps" name="Daily Steps" stroke="#4fc3f3" fill="url(#daily-steps-gradient)" strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#4fc3f3" }} />
                         <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
                       </AreaChart>
                     </ResponsiveContainer>
@@ -910,11 +924,12 @@ export default function TrendsPage() {
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={caloriesChartData} margin={{ top: 8, right: 40, left: 0, bottom: 0 }}>
+                        <ChartAreaGradient id="active-calories-gradient" color="#ff9800" />
                         <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                         <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                         <YAxis stroke="#ff9800" fontSize={11} width={40} axisLine={false} />
                         <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="kcal" />} />
-                        <Area type="monotone" dataKey="active_calories_kcal" name="Active Calories" stroke="#ff9800" fill="#ff9800" fillOpacity={0.4} strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#ff9800" }} />
+                        <Area type="monotone" dataKey="active_calories_kcal" name="Active Calories" stroke="#ff9800" fill="url(#active-calories-gradient)" strokeWidth={2} connectNulls={true} dot={{ r: 3, fill: "#ff9800" }} />
                         <Area type="monotone" dataKey="moving_average_7d" name="7-day average" stroke="var(--color-text-secondary)" fill="none" strokeWidth={1.5} strokeDasharray="4 4" />
                       </AreaChart>
                     </ResponsiveContainer>

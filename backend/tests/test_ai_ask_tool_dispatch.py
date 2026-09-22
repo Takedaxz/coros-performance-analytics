@@ -16,6 +16,7 @@ from src.api.routes.ai_routes import (
     _display_tool_calls,
     _format_question_with_search_flags,
     _history_for_model,
+    _remove_internal_tool_usage,
     _unique_tool_calls,
 )
 
@@ -48,6 +49,13 @@ def test_history_keeps_results_for_three_recent_tool_messages_only() -> None:
     assert '"result"' not in formatted[1]["content"]
     assert '"result":{"payload":4}' in formatted[4]["content"]
     assert '"result":{"payload":6}' in formatted[6]["content"]
+
+
+def test_internal_tool_usage_echo_is_removed_from_model_history() -> None:
+    echoed = 'Preview ready.\n[Tool usage]\n[{"name":"propose_create_calendar_workout"}]'
+
+    assert _remove_internal_tool_usage(echoed) == "Preview ready."
+    assert _history_for_model([ChatMessage(role="assistant", content=echoed)])[0]["content"] == "Preview ready."
 
 
 def test_coaching_knowledge_mode_requires_the_library_tool() -> None:

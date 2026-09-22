@@ -8,6 +8,7 @@ import {
   MAX_SELECTED_RESPONSE_EXCERPT_LENGTH,
   parseSelectedResponseQuestion,
   parseThinkingAndAnswer,
+  removeInternalToolUsage,
   removeLegacyEvidenceUsed,
 } from "./answer-display.ts";
 
@@ -40,6 +41,13 @@ test("removes legacy evidence paragraphs without hiding the coaching answer", ()
   assert.equal(
     removeLegacyEvidenceUsed("Run easy tomorrow.\n\nEvidence used: HRV, sleep, and recent load."),
     "Run easy tomorrow.",
+  );
+});
+
+test("hides internal tool usage payloads from coaching answers", () => {
+  assert.equal(
+    removeInternalToolUsage('Review ready.\n[Tool usage]\n[{"name":"propose_create_calendar_workout"}]'),
+    "Review ready.",
   );
 });
 

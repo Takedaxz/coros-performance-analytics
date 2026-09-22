@@ -5,6 +5,7 @@ import csv
 import datetime
 import json
 import logging
+import re
 from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import Any
 from uuid import UUID, uuid4
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 settings = get_settings()
+_INTERNAL_TOOL_USAGE_BLOCK = re.compile(r"\n+\[Tool usage\]\n.*\Z", re.DOTALL)
 
 
 def _ai_enabled() -> bool:
@@ -72,6 +74,11 @@ def _unique_tool_calls(tool_calls: list[ToolCallRecord]) -> list[ToolCallRecord]
             seen.add(key)
             unique.append(tool_call)
     return unique
+
+
+def _remove_internal_tool_usage(content: str) -> str:
+    """Remove an internal tool payload echoed by a model from its answer."""
+    return _INTERNAL_TOOL_USAGE_BLOCK.sub("", content).rstrip()
 
 
 def _format_question_with_search_flags(
@@ -183,7 +190,7 @@ def _history_for_model(history: list[ChatMessage]) -> list[dict[str, str]]:
     older_indices = set(tool_message_indices[-6:-3])
     model_history: list[dict[str, str]] = []
     for index, message in enumerate(history[-12:], start=max(0, len(history) - 12)):
-        content = message.content
+        content = _remove_internal_tool_usage(message.content)
         if index in recent_indices or index in older_indices:
             usage = []
             for tool in message.tool_calls:
@@ -1303,7 +1310,7 @@ async def session_ask_stream(
         tool_calls: list[ToolCallRecord],
     ) -> None:
         await producer
-        full_response = "".join(accumulated) or "Error communicating with AI."
+        full_response = _remove_internal_tool_usage("".join(accumulated)) or "Error communicating with AI."
         async with async_session_factory() as persist_db:
             from datetime import datetime
 

@@ -8786,7 +8786,7 @@ details[open] > .ai-session-group-summary {
 .ai-link-empty-composer .cmd-bar-wrap.has-footer .cmd-bar,
 .ai-link-composer .cmd-bar-wrap.has-footer .cmd-bar {
   grid-area: primary;
-  padding: 16px 220px 16px 56px !important;
+  padding: 16px 210px 16px 46px !important;
 }
 
 .cmd-bar-context { display: contents; }
@@ -9778,6 +9778,11 @@ details[open] > .ai-session-group-summary {
     max-height: min(256px, calc(100dvh - var(--mobile-nav-height) - 160px));
   }
 
+  .ai-link-empty-composer .cmd-bar-wrap.has-footer .cmd-bar,
+  .ai-link-composer .cmd-bar-wrap.has-footer .cmd-bar {
+    padding: 14px 165px 14px 34px !important;
+  }
+
   .web-search-active-chip {
     margin: 8px 12px 0 12px;
     max-width: calc(100% - 24px);
@@ -9972,7 +9977,7 @@ details[open] > .ai-session-group-summary {
   font-family: var(--font-body);
   font-size: var(--text-sm);
   line-height: 1.5;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-fast);
 }
 
 .cmd-bar:focus {

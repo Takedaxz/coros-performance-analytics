@@ -941,11 +941,18 @@ export default function SleepPage() {
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={rhrData}>
+                <defs>
+                  <linearGradient id="resting-heart-rate-gradient" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="var(--color-status-critical)" stopOpacity={0.48} />
+                    <stop offset="62%" stopColor="var(--color-status-critical)" stopOpacity={0.18} />
+                    <stop offset="100%" stopColor="var(--color-status-critical)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-chart-grid)" />
                 <XAxis dataKey="date" tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} tickFormatter={(value) => formatChartAxisDate(value)} axisLine={false} interval="equidistantPreserveStart" />
                 <YAxis tick={{ fill: "var(--color-text-muted)", fontSize: 11 }} axisLine={false} domain={["dataMin - 3", "dataMax + 3"]} unit="bpm" />
                 <Tooltip cursor={{ fill: "var(--color-chart-cursor)" }} content={<ChartLegendTooltip unit="bpm" />} />
-                <Area type="monotone" dataKey="rhr" name="Resting HR" stroke="var(--color-status-critical)" fill="rgba(255, 77, 98, 0.08)" strokeWidth={2} dot={{ r: 3 }} />
+                <Area type="monotone" dataKey="rhr" name="Resting HR" stroke="var(--color-status-critical)" fill="url(#resting-heart-rate-gradient)" strokeWidth={2} dot={{ r: 3 }} />
                 <Area type="monotone" dataKey="sma" name="7-day average" stroke="var(--color-text-secondary)" strokeDasharray="4 4" fill="none" strokeWidth={1.5} />
               </AreaChart>
             </ResponsiveContainer>

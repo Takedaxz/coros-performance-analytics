@@ -16,6 +16,7 @@ import {
   MAX_SELECTED_RESPONSE_EXCERPT_LENGTH,
   parseThinkingAndAnswer,
   parseSelectedResponseQuestion,
+  removeInternalToolUsage,
   removeLegacyEvidenceUsed,
 } from "./answer-display";
 import { usePathname, useRouter } from "next/navigation";
@@ -3455,7 +3456,7 @@ export default function AiPage() {
                           (isLoading && idx === messages.length - 1) ||
                           (msg.status === "streaming" && idx === messages.length - 1);
                         const isAwaitingAnswer = isCurrentSessionStreaming && idx === messages.length - 1 && !answer;
-                        const displayAnswer = removeLegacyEvidenceUsed(answer);
+                        const displayAnswer = removeLegacyEvidenceUsed(removeInternalToolUsage(answer));
                         const tools = msg.tools ? uniqueToolCalls(msg.tools) : [];
                         return (
                           <div key={msg.id} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
