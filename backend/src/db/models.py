@@ -304,6 +304,9 @@ class ActivityRecord(Base):
 
 class ActivityLap(Base):
     __tablename__ = "activity_laps"
+    __table_args__ = (
+        UniqueConstraint("activity_id", "lap_index", name="uq_activity_laps_activity_lap_index"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     activity_id: Mapped[str] = mapped_column(

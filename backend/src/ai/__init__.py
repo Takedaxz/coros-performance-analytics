@@ -123,13 +123,13 @@ def resolve_model(model_name: str | None) -> tuple[str, str]:
     """Resolve a raw model_name string into (provider_id, clean_model_name)."""
     settings = get_settings()
     if not model_name:
-        if _openai_compat_ready():
-            return "openai_compat", settings.openai_compat_model
         if _agentrouter_ready():
             return "agentrouter", settings.agentrouter_model
+        if _openai_compat_ready():
+            return "openai_compat", settings.openai_compat_model
         if _gemini_ready():
             return "gemini", settings.gemini_model
-        return "openai_compat", settings.openai_compat_model
+        return "agentrouter", settings.agentrouter_model
 
     if model_name.startswith("openai_compat:"):
         raw_name = model_name.split("openai_compat:", 1)[1]
@@ -165,10 +165,10 @@ def resolve_model(model_name: str | None) -> tuple[str, str]:
             return "gemini", model_name
 
     # Fallback to active default provider
-    if _openai_compat_ready():
-        return "openai_compat", model_name
     if _agentrouter_ready():
         return "agentrouter", model_name
+    if _openai_compat_ready():
+        return "openai_compat", model_name
     return "gemini", model_name
 
 

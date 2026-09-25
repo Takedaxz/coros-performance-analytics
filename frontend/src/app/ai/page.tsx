@@ -1018,12 +1018,19 @@ function ChevronIcon({ isOpen }: { isOpen: boolean }) {
 
 function ThinkingAccordion({ thinking, isThinkingActive }: { thinking: string; isThinkingActive: boolean }) {
   const [isOpen, setIsOpen] = useState(isThinkingActive);
+  const thinkingContentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isThinkingActive) {
       setIsOpen(true);
     }
   }, [isThinkingActive]);
+
+  useLayoutEffect(() => {
+    if (isThinkingActive && isOpen && thinkingContentRef.current) {
+      thinkingContentRef.current.scrollTop = thinkingContentRef.current.scrollHeight;
+    }
+  }, [thinking, isOpen, isThinkingActive]);
 
   return (
     <details
@@ -1035,7 +1042,7 @@ function ThinkingAccordion({ thinking, isThinkingActive }: { thinking: string; i
         <span>{isThinkingActive ? <WaveThinkingText text="Thinking" /> : "Thought process"}</span>
         <ChevronIcon isOpen={isOpen} />
       </summary>
-      <div className="ai-thinking-accordion-content">
+      <div ref={thinkingContentRef} className="ai-thinking-accordion-content">
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex]}

@@ -347,6 +347,7 @@ async def _backfill_efficiency(db: AsyncSession, activity: Activity) -> None:
 
 async def ensure_activity_fit_downloaded(db: AsyncSession, activity: Activity) -> None:
     """Lazy download & parse FIT file on demand when user views an activity."""
+    await db.refresh(activity, with_for_update=True)
     records_count = await db.scalar(
         select(func.count(ActivityRecord.id)).where(ActivityRecord.activity_id == activity.id)
     )

@@ -56,13 +56,13 @@ def _ai_enabled() -> bool:
 def _active_model() -> str:
     """Return the model identifier for the currently active backend."""
     st = get_settings()
+    if bool(st.agentrouter_api_key):
+        return f"agentrouter:{st.agentrouter_model}"
     if bool(st.gemini_api_key):
         return f"gemini:{st.gemini_model}"
     if bool(st.openai_compat_api_key):
         return f"openai_compat:{st.openai_compat_model}"
-    if bool(st.agentrouter_api_key):
-        return f"agentrouter:{st.agentrouter_model}"
-    return f"gemini:{st.gemini_model}"
+    return f"agentrouter:{st.agentrouter_model}"
 
 
 def _unique_tool_calls(tool_calls: list[ToolCallRecord]) -> list[ToolCallRecord]:

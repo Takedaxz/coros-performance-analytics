@@ -5,6 +5,7 @@ import type { CircleMarker, LatLngBounds, Map as LeafletMap, Polyline } from "le
 import type { GeoJSONSource, Map as MapLibreMap, Marker, Popup, StyleSpecification } from "maplibre-gl";
 import { routePositionAt, type TimedRoutePoint } from "./routeReplay";
 import { openFreeMapStyleUrl, type Theme } from "@/lib/theme";
+import { SATELLITE_STYLE } from "@/lib/satelliteStyle";
 
 interface RoutePoint {
   lat: number;
@@ -26,20 +27,7 @@ interface MapProps {
   onExpand?: () => void;
 }
 
-type PlaybackSpeed = 25 | 50 | 100;
-
-const SATELLITE_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    satellite: {
-      type: "raster",
-      tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
-      tileSize: 256,
-      attribution: 'Source: <a href="https://www.esri.com">Esri</a>, Vantor, Earthstar Geographics, and the GIS User Community',
-    },
-  },
-  layers: [{ id: "satellite", type: "raster", source: "satellite" }],
-};
+type PlaybackSpeed = 1 | 10 | 25 | 50 | 100;
 
 interface PlaybackState {
   elapsedSeconds: number;
@@ -347,8 +335,7 @@ export default function Map({ points, sport, showTelemetryPopup = true, basemap,
     if (!map || !bounds) return;
 
     map.fitBounds(bounds, {
-      animate: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-      duration: 0.35,
+      animate: false,
       padding: [20, 20],
     });
   };
@@ -601,6 +588,9 @@ export default function Map({ points, sport, showTelemetryPopup = true, basemap,
       const map = L.map(container, {
         zoomControl: true,
         scrollWheelZoom: true,
+        zoomAnimation: false,
+        fadeAnimation: false,
+        markerZoomAnimation: false,
       });
       leafletMap = map;
       mapInstanceRef.current = map;
@@ -816,7 +806,7 @@ export default function Map({ points, sport, showTelemetryPopup = true, basemap,
               0:00 / {formatReplayTime(replayDuration)}
             </span>
             <div className="route-replay-speeds" aria-label="Playback speed">
-              {([25, 50, 100] as const).map((speed) => (
+              {([1, 10, 25, 50, 100] as const).map((speed) => (
                 <button
                   key={speed}
                   type="button"
