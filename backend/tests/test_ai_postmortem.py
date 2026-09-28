@@ -102,6 +102,31 @@ async def test_ride_postmortem_uses_speed_and_rpm() -> None:
     assert "spm" not in "\n".join(lines)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_index", [0, 1])
+async def test_postmortem_lap_labels_start_at_one(first_index: int) -> None:
+    start = datetime(2026, 9, 28)
+    activity = Activity(id="run-id", user_id="user-id", sport=SportType.RUN, start_time=start)
+    laps = [
+        ActivityLap(
+            activity_id=activity.id,
+            lap_index=first_index + offset,
+            start_time=start + timedelta(minutes=5 * offset),
+            elapsed_s=300,
+            distance_m=1_000,
+        )
+        for offset in range(2)
+    ]
+    db = AsyncMock()
+    result = Mock()
+    result.scalars.return_value.all.return_value = []
+    db.execute.return_value = result
+
+    lines = await _build_laps_with_km_breakdown(db, activity, laps)
+
+    assert [line.split(":", 1)[0] for line in lines[1:]] == ["- Lap 1", "- Lap 2"]
+
+
 def test_postmortem_prompt_is_activity_aware() -> None:
     assert "professional performance coach" in POSTMORTEM_PROMPT
     assert "do not discuss\n  pace or per-kilometer splits" in POSTMORTEM_PROMPT

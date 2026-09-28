@@ -10920,6 +10920,19 @@ details[open] > .ai-session-group-summary {
   padding: var(--space-4) var(--space-5);
 }
 
+.ai-analysis-action {
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0;
+  width: 34px;
+}
+
+.ai-analysis-action svg {
+  height: 16px;
+  width: 16px;
+}
+
 .ai-analysis-heading {
   align-items: center;
   display: flex;
@@ -10996,15 +11009,6 @@ details[open] > .ai-session-group-summary {
 
   .activity-filter-range-field {
     grid-column: auto;
-  }
-
-  .ai-analysis-header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .ai-analysis-header .btn {
-    width: 100%;
   }
 
   .ai-analysis-response {

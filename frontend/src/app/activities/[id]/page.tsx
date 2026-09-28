@@ -34,6 +34,15 @@ function AiGlyph() {
   );
 }
 
+function RepeatGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 7v5h-5M4 17v-5h5" />
+      <path d="M5.7 9A7 7 0 0 1 18 6.5L20 12M4 12l2 5.5A7 7 0 0 0 18.3 15" />
+    </svg>
+  );
+}
+
 function LoadingGlyph() {
   return (
     <svg className="ai-loading-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
@@ -2685,15 +2694,15 @@ export default function ActivityDetailPage() {
                   )}
                 </div>
               </div>
-              <button className="btn btn-primary btn-sm" onClick={generatePostmortem} disabled={isGenerating}>
-                {isGenerating ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                    <LoadingGlyph />
-                    Analyzing
-                  </span>
-                ) : (
-                  postmortem ? "Run again" : "Run AI Analysis"
-                )}
+              <button
+                type="button"
+                className="btn btn-primary btn-sm ai-analysis-action"
+                onClick={generatePostmortem}
+                disabled={isGenerating}
+                aria-label={isGenerating ? "Analyzing activity" : postmortem ? "Run AI analysis again" : "Run AI analysis"}
+                title={isGenerating ? "Analyzing activity" : postmortem ? "Run AI analysis again" : "Run AI analysis"}
+              >
+                {isGenerating ? <LoadingGlyph /> : postmortem ? <RepeatGlyph /> : <AiGlyph />}
               </button>
             </div>
             {isGenerating && !postmortem && (

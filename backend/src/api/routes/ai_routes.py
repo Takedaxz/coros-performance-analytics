@@ -468,6 +468,7 @@ async def _build_laps_with_km_breakdown(
     if laps:
         lines.append("Splits & Per-Kilometer Breakdown:")
         overall_km_counter = 1
+        lap_number_offset = 1 if laps[0].lap_index == 0 else 0
 
         for lap in laps:
             lap_start = lap.start_time
@@ -483,7 +484,7 @@ async def _build_laps_with_km_breakdown(
             extra_str = f" ({extra})" if extra else ""
 
             lines.append(
-                f"- Lap {lap.lap_index + 1}: {dist_km:.2f} km in {dur_min:.2f} min"
+                f"- Lap {lap.lap_index + lap_number_offset}: {dist_km:.2f} km in {dur_min:.2f} min"
                 f" | {motion_label}: {motion_str} | Avg HR: {hr_str}{extra_str}"
             )
 

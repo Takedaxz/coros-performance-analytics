@@ -1,6 +1,5 @@
 import datetime
 import json
-import logging
 import re
 from typing import Any
 
@@ -11,12 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import get_settings
 from src.mcp.coros_mcp_auth import get_valid_access_token
 
-logger = logging.getLogger(__name__)
-
-_PREFERRED_TOOL = "querySleepData"
-_FALLBACK_TOOL = "get_sleep_data"
+_SLEEP_TOOL = "querySleepOverview"
 
 settings = get_settings()
+
+
+def _duration_minutes(value: str) -> int:
+    hours = re.search(r"(\d+)\s*h", value, re.I)
+    minutes = re.search(r"(\d+)\s*min", value, re.I)
+    return (int(hours.group(1)) * 60 if hours else 0) + (int(minutes.group(1)) if minutes else 0)
 
 
 async def fetch_sleep_via_mcp(
@@ -49,38 +51,19 @@ async def fetch_sleep_via_mcp(
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
 
-            # Discover available tools to choose the right sleep tool name.
+            # Check the tool exposed by the current COROS MCP server.
             tool_list_result = await session.list_tools()
             available = {t.name for t in (tool_list_result.tools or [])}
 
-            tool_name = _PREFERRED_TOOL if _PREFERRED_TOOL in available else (
-                _FALLBACK_TOOL if _FALLBACK_TOOL in available else None
+            if _SLEEP_TOOL not in available:
+                raise ValueError(f"COROS MCP sleep tool {_SLEEP_TOOL} is unavailable")
+
+            result = await session.call_tool(
+                _SLEEP_TOOL, {"startDate": start_day, "endDate": end_day}
             )
 
-            if not tool_name:
-                logger.warning(
-                    "coros_mcp_sleep: neither %s nor %s found in tool list: %s",
-                    _PREFERRED_TOOL,
-                    _FALLBACK_TOOL,
-                    sorted(available),
-                )
-                return []
-
-            try:
-                dt_start = datetime.datetime.strptime(start_day, "%Y%m%d")
-                dt_end = datetime.datetime.strptime(end_day, "%Y%m%d")
-                days_diff = max(1, (dt_end - dt_start).days)
-            except Exception:
-                days_diff = 14
-
-            # Must match the required properties exactly: startDate, endDate, days
-            args: dict[str, Any] = {
-                "startDate": start_day,
-                "endDate": end_day,
-                "days": days_diff
-            }
-
-            result = await session.call_tool(tool_name, args)
+    if result.isError:
+        raise ValueError("COROS MCP sleep query returned an error")
 
     return _parse_mcp_sleep_result(result.content)
 
@@ -106,15 +89,8 @@ def parse_mcp_sleep_prose(text: str) -> list[dict[str, Any]]:
         score_match = re.search(r'Sleep Score:\s*(\d+)', section, re.I)
         score = int(score_match.group(1)) if score_match else None
         
-        main_sleep_match = re.search(r'Main Sleep:\s*([^\n]+)', section, re.I)
-        total_minutes = 0
-        if main_sleep_match:
-            duration_str = main_sleep_match.group(1)
-            h_match = re.search(r'(\d+)\s*h', duration_str, re.I)
-            m_match = re.search(r'(\d+)\s*min', duration_str, re.I)
-            hours = int(h_match.group(1)) if h_match else 0
-            mins = int(m_match.group(1)) if m_match else 0
-            total_minutes = hours * 60 + mins
+        main_sleep_match = re.search(r'Main Sleep(?: \(asleep\))?:\s*([^\n]+)', section, re.I)
+        total_minutes = _duration_minutes(main_sleep_match.group(1)) if main_sleep_match else 0
             
         deep_match = re.search(r'Deep Sleep Ratio:\s*(\d+)\s*%', section, re.I)
         light_match = re.search(r'Light Sleep Ratio:\s*(\d+)\s*%', section, re.I)
@@ -143,21 +119,30 @@ def parse_mcp_sleep_prose(text: str) -> list[dict[str, Any]]:
             }
         })
 
-        for nap_start, nap_end in re.findall(
-            r"Nap Window:\s*\d{4}-\d{2}-\d{2}\s+(\d{2}:\d{2})\s*-\s*\d{4}-\d{2}-\d{2}\s+(\d{2}:\d{2})",
+        nap_total_match = re.search(r"Naps Total(?: \(asleep\))?:\s*([^\n]+)", section, re.I)
+        nap_total_minutes = _duration_minutes(nap_total_match.group(1)) if nap_total_match else None
+        nap_windows = re.findall(
+            r"Nap Window:\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})"
+            r"\s*-\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})",
             section,
             re.I,
-        ):
-            start_dt = datetime.datetime.fromisoformat(f"{y}-{m}-{d}T{nap_start}")
-            end_dt = datetime.datetime.fromisoformat(f"{y}-{m}-{d}T{nap_end}")
+        )
+        for nap_start_day, nap_start, nap_end_day, nap_end in nap_windows:
+            start_dt = datetime.datetime.fromisoformat(f"{nap_start_day}T{nap_start}")
+            end_dt = datetime.datetime.fromisoformat(f"{nap_end_day}T{nap_end}")
             if end_dt <= start_dt:
                 end_dt += datetime.timedelta(days=1)
+            nap_minutes = (
+                nap_total_minutes
+                if len(nap_windows) == 1 and nap_total_minutes is not None
+                else round((end_dt - start_dt).total_seconds() / 60)
+            )
             records.append({
                 "happenDay": happen_day,
                 "isNap": True,
                 "sleepStart": start_dt.isoformat(),
                 "sleepEnd": end_dt.isoformat(),
-                "sleepData": {"totalSleepTime": round((end_dt - start_dt).total_seconds() / 60)},
+                "sleepData": {"totalSleepTime": nap_minutes},
             })
         
     return records
@@ -209,7 +194,6 @@ def _parse_mcp_sleep_result(content: list[Any]) -> list[dict[str, Any]]:
             records.extend(parse_mcp_sleep_prose(raw_text))
 
     return [r for r in records if r]
-
 
 def _normalize_sleep_record(raw: dict[str, Any]) -> dict[str, Any]:
     """Normalize a raw MCP sleep record to match the Mobile API shape.
