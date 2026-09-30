@@ -6,6 +6,7 @@ Publishes progress events for SSE consumption.
 
 import asyncio
 import hashlib
+import json
 import logging
 from collections.abc import Callable
 from datetime import date as date_type
@@ -870,12 +871,13 @@ async def run_sync(
             total_upserted += sleep_count
             _emit(on_event, "progress", f'{{"stage": "sleep_done", "count": {sleep_count}}}')
         except RuntimeError as exc:
-            # MCP not connected yet — normal on first run before OAuth
-            logger.info("coros_mcp_sleep: skipped — %s", exc)
-            _emit(on_event, "progress", '{"stage": "sleep_skipped", "reason": "MCP not connected"}')
+            logger.warning("coros_mcp_sleep: skipped — %s", exc)
+            sync_event.error_message = f"Sleep sync unavailable: {exc}"
+            _emit(on_event, "progress", json.dumps({"stage": "sleep_skipped", "reason": str(exc)}))
         except Exception as exc:
             logger.warning("coros_mcp_sleep: unexpected error — %s", exc)
-            _emit(on_event, "progress", f'{{"stage": "sleep_error", "reason": "{exc}"}}' )
+            sync_event.error_message = f"Sleep sync failed: {exc}"
+            _emit(on_event, "progress", json.dumps({"stage": "sleep_error", "reason": str(exc)}))
 
         sync_event.status = "completed"
         sync_event.records_upserted = total_upserted
@@ -883,7 +885,11 @@ async def run_sync(
         _emit(
             on_event,
             "complete",
-            f'{{"message": "Sync complete", "total_upserted": {total_upserted}}}',
+            json.dumps({
+                "message": "Sync complete",
+                "total_upserted": total_upserted,
+                "warning": sync_event.error_message,
+            }),
         )
 
     except Exception as exc:

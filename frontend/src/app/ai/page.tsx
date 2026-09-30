@@ -2308,6 +2308,7 @@ export default function AiPage() {
   }
 
   async function handleSend(forcedInput?: string, sessionId?: string, overrideHistory?: Message[]) {
+    if (isLoading) return;
     const typedMessage = (forcedInput ?? input).trim();
     const userMsg = formatSelectedResponseQuestion(typedMessage, selectedResponseExcerpt);
     const currentImages = [...pendingImages];
@@ -2768,6 +2769,7 @@ export default function AiPage() {
               onKeyDown={async (e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
+                  if (isLoading) return;
                   if (!input.trim() && !selectedResponseExcerpt && pendingImages.length === 0 && !pendingCsv) return;
                   const msg = input.trim();
                   if (!sessionId) {
@@ -2778,7 +2780,6 @@ export default function AiPage() {
                   }
                 }
               }}
-              disabled={isLoading}
               autoFocus
               rows={1}
             />
@@ -3463,13 +3464,14 @@ export default function AiPage() {
                           (isLoading && idx === messages.length - 1) ||
                           (msg.status === "streaming" && idx === messages.length - 1);
                         const isAwaitingAnswer = isCurrentSessionStreaming && idx === messages.length - 1 && !answer;
-                        const displayAnswer = removeLegacyEvidenceUsed(removeInternalToolUsage(answer));
+                        const displayAnswer = removeLegacyEvidenceUsed(removeInternalToolUsage(answer)) ||
+                          (!isCurrentSessionStreaming ? "The AI response ended without a final answer. Retry this response." : "");
                         const tools = msg.tools ? uniqueToolCalls(msg.tools) : [];
                         return (
                           <div key={msg.id} className="msg-row ai-row msg-enter" style={{ animationDelay: "0ms" }}>
                             <div className="ai-text">
 {(thinking || hasThinkingMarker) && (
-                                <ThinkingAccordion thinking={thinking ?? ""} isThinkingActive={hasOpenThinking || isAwaitingAnswer} />
+                                <ThinkingAccordion thinking={thinking ?? ""} isThinkingActive={isCurrentSessionStreaming && (hasOpenThinking || isAwaitingAnswer)} />
                               )}
                               {msg.content === "" && isCurrentSessionStreaming ? (
                                 <WaveThinkingText text="thinking" />
@@ -3711,7 +3713,6 @@ export default function AiPage() {
                               handleSend();
                             }
                           }}
-                          disabled={isLoading}
                           rows={1}
                         />
                         <div className="cmd-bar-actions">

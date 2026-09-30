@@ -1,6 +1,7 @@
 """Sync routes: trigger API sync, stream progress via SSE, check sync history."""
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
@@ -167,7 +168,11 @@ async def sync_stream(
                 if se and se.status == "completed":
                     yield {
                         "event": "complete",
-                        "data": f'{{"message": "Sync complete", "total_upserted": {se.records_upserted}}}',
+                        "data": json.dumps({
+                            "message": "Sync complete",
+                            "total_upserted": se.records_upserted,
+                            "warning": se.error_message,
+                        }),
                     }
                     return
                 elif se and se.status == "failed":
@@ -212,6 +217,7 @@ async def sync_status(
         "sync_interval_minutes": str(settings.sync_interval_minutes),
         "last_sync_at": _utc_iso(last.completed_at) if last and last.completed_at else "never",
         "last_sync_status": last.status if last else "none",
+        "last_sync_error": last.error_message if last else None,
     }
 
 

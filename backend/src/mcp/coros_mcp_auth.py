@@ -306,6 +306,18 @@ async def get_valid_access_token(db: AsyncSession, mcp_url: str) -> str:
         metadata = await discover_oauth_metadata(mcp_url)
         token_endpoint = metadata["token_endpoint"]
         tokens = await refresh_access_token(token_endpoint, refresh_token, client_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and "Duplicate grant rejected" in exc.response.text:
+            raise RuntimeError(
+                "COROS rejected a repeated authorization refresh. "
+                "Please wait before syncing again."
+            ) from exc
+        if exc.response.status_code in (400, 401):
+            raise RuntimeError(
+                "COROS MCP authorization could not be renewed. "
+                "Reconnect COROS MCP in Settings to sync sleep."
+            ) from exc
+        raise RuntimeError(f"COROS MCP token refresh failed: {exc}") from exc
     except Exception as exc:
         raise RuntimeError(f"COROS MCP token refresh failed: {exc}") from exc
 

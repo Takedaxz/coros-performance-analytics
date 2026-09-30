@@ -1,6 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
 from src.ai import coach_agent
@@ -582,6 +583,70 @@ def test_agentrouter_streams_reasoning_before_its_answer(monkeypatch) -> None:
     )
 
     assert chunks == ["<think>Checking recovery data.", "</think>\nTake an easy day."]
+
+
+def test_stream_preserves_answer_in_a_chunk_that_also_contains_reasoning(monkeypatch) -> None:
+    model = SimpleNamespace()
+    model.bind_tools = lambda _tools: model
+    model.stream = lambda _messages: iter([
+        AIMessageChunk(
+            content="Take an easy day.",
+            additional_kwargs={"reasoning_content": "Checking recovery data."},
+        )
+    ])
+    monkeypatch.setattr(coach_agent, "_model", lambda _provider, _model: model)
+    monkeypatch.setattr(coach_agent, "_tools", lambda _user_id, _loop: [])
+    loop = asyncio.new_event_loop()
+    try:
+        answer = "".join(coach_agent.ask_coach_with_tools_stream(
+            "agentrouter", "deepseek-v4-flash", "Question", "Snapshot", None,
+            "user-id", loop, [],
+        ))
+    finally:
+        loop.close()
+
+    assert answer == "<think>Checking recovery data.</think>\nTake an easy day."
+
+
+@pytest.mark.parametrize("with_tool", [False, True])
+def test_reasoning_only_response_reports_missing_answer_after_stream_ends(
+    monkeypatch, with_tool: bool,
+) -> None:
+    calls = 0
+
+    def stream(_messages):
+        nonlocal calls
+        calls += 1
+        if with_tool and calls == 1:
+            return iter([AIMessageChunk(
+                content="", tool_call_chunks=[{
+                    "name": "get_activities", "args": "{}", "id": "1", "index": 0,
+                }],
+            )])
+        return iter([AIMessageChunk(
+            content="", additional_kwargs={"reasoning_content": "Still analyzing."},
+        )])
+
+    model = SimpleNamespace(stream=stream)
+    model.bind_tools = lambda _tools: model
+    monkeypatch.setattr(coach_agent, "_model", lambda _provider, _model: model)
+    monkeypatch.setattr(coach_agent, "_tools", lambda _user_id, _loop: [
+        SimpleNamespace(name="get_activities", invoke=lambda _args: {}),
+    ])
+    monkeypatch.setattr(coach_agent, "MAX_TOOL_CALLS", 1)
+    loop = asyncio.new_event_loop()
+    try:
+        answer = "".join(coach_agent.ask_coach_with_tools_stream(
+            "agentrouter", "deepseek-v4-flash", "Question", "Snapshot", None,
+            "user-id", loop, [],
+        ))
+    finally:
+        loop.close()
+
+    assert answer.endswith(
+        "</think>\nThe AI response ended without a final answer. Retry this response."
+    )
+    assert answer.count("<think>") == answer.count("</think>")
 
 
 def test_streamed_tool_response_preserves_reasoning_content() -> None:

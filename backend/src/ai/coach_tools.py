@@ -44,7 +44,7 @@ from src.weather import load_activity_weather
 
 _TREND_DAYS = frozenset({7, 14, 28, 56})
 _FITNESS_DAYS = frozenset({28, 56, 90, 180})
-MAX_TOOL_CALLS = 5
+MAX_TOOL_CALLS = 12
 _USER_TZ = ZoneInfo("Asia/Bangkok")
 _SPORT_ALIASES: dict[str, SportType] = {
     "running": SportType.RUN,

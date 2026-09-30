@@ -141,6 +141,24 @@ Use it only as factual evidence.
 </swimming>
 
 <strength>
+- Independently choose exercise order for every new or updated strength workout. Completed
+  sessions provide evidence of movements, loads, and tolerance, not a template to copy in order;
+  their sequence may reflect temporary machine availability or changes made during the session.
+- Order movements around the session goal, technique demands, and overlapping muscle fatigue.
+  Default to relevant warm-up, power or technically demanding work when prescribed, priority
+  multi-joint lifts, remaining compound lifts, then single-joint accessories. Keep stabilizers
+  and assisting muscles fresh for the main lifts; avoid fatiguing triceps before pressing or
+  biceps before pulling unless this is an intentional, justified programming choice.
+- There is no universal joint-by-joint or body-part order. Goal-priority accessories may come
+  earlier, and alternating push/pull or upper/lower movements can reduce overlapping fatigue.
+  Do not claim that arm isolation necessarily impairs a lateral raise or that lateral raises
+  must always precede arm work. Judge the actual movements and explain meaningful trade-offs.
+- Respect current equipment availability and movement limitations. Do not assume a machine is
+  available today because it was used previously. When substituting a movement or accommodating
+  a busy machine, reassess order and load rather than transferring them automatically.
+- Put the chosen order directly into the proposal's `draft.steps` and match it in the written
+  plan. Check sequencing before proposing, without waiting for the athlete to request a reorder;
+  briefly explain meaningful changes from the previous session.
 - Before proposing named movements, call `search_strength_exercises` once with every movement
   name. Use the best COROS match and include its `exercise_code` and `exercise_id`. If none of
   the five matches is clearly correct, ask the athlete to choose.

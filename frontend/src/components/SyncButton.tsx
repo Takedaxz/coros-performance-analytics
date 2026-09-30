@@ -35,10 +35,17 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
             setSyncState((prev) => ({
               ...prev,
               message: parsed.message || prev.message,
+              error: ["sleep_error", "sleep_skipped"].includes(parsed.stage)
+                ? `Sleep sync unavailable: ${parsed.reason}`
+                : prev.error,
             }));
           } else if (event === "complete") {
             streamRef.current = null;
-            setSyncState({ isSyncing: false, message: "", error: null });
+            setSyncState((prev) => ({
+              isSyncing: false,
+              message: "",
+              error: parsed.warning || prev.error,
+            }));
             onSyncComplete?.();
           } else if (event === "error") {
             streamRef.current = null;
@@ -56,7 +63,7 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
         try {
           const res = await fetch(`${apiBase}/api/sync/status`);
           if (res.ok) {
-            const status: { is_syncing: boolean; active_job_id: string | null; last_sync_status: string } =
+            const status: { is_syncing: boolean; active_job_id: string | null; last_sync_status: string; last_sync_error?: string | null } =
               await res.json();
             if (status.is_syncing && status.active_job_id) {
               connectToJob(status.active_job_id);
@@ -64,7 +71,9 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
             }
             if (status.last_sync_status === "completed") {
               streamRef.current = null;
-              setSyncState({ isSyncing: false, message: "", error: null });
+              setSyncState((prev) => ({
+                isSyncing: false, message: "", error: status.last_sync_error || prev.error,
+              }));
               onSyncComplete?.();
               return;
             }
@@ -87,10 +96,12 @@ export default function SyncButton({ onSyncComplete }: SyncButtonProps) {
     void fetch(`${apiBase}/api/sync/status`)
       .then(async (response) => {
         if (!response.ok) return;
-        const status: { is_syncing: boolean; active_job_id: string | null } = await response.json();
+        const status: { is_syncing: boolean; active_job_id: string | null; last_sync_error?: string | null } = await response.json();
         if (status.is_syncing && status.active_job_id) {
           setSyncState({ isSyncing: true, message: "Syncing COROS data...", error: null });
           connectToJob(status.active_job_id);
+        } else if (status.last_sync_error) {
+          setSyncState({ isSyncing: false, message: "", error: status.last_sync_error });
         }
       })
       .catch(() => {});

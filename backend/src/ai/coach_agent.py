@@ -26,6 +26,7 @@ from src.ai.prompts import COACH_SYSTEM_PROMPT
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
+_INCOMPLETE_ANSWER_MESSAGE = "The AI response ended without a final answer. Retry this response."
 
 
 class _SkipNullStream:
@@ -166,13 +167,16 @@ def _content(message: BaseMessage) -> str:
 def _stream_text(chunk: AIMessageChunk, thinking_open: bool) -> tuple[str, bool]:
     """Convert compatible-provider reasoning chunks into the UI's think markers."""
     reasoning = chunk.additional_kwargs.get("reasoning_content")
+    output = ""
     if isinstance(reasoning, str) and reasoning:
-        return ("" if thinking_open else "<think>") + reasoning, True
+        output = ("" if thinking_open else "<think>") + reasoning
+        thinking_open = True
 
     text = _content(chunk)
     if text:
-        return ("</think>\n" if thinking_open else "") + text, False
-    return "", thinking_open
+        output += ("</think>\n" if thinking_open else "") + text
+        thinking_open = False
+    return output, thinking_open
 
 
 def _tool_activity(response: AIMessage) -> str:
@@ -382,6 +386,11 @@ def ask_coach_with_tools_stream(
         if response is None or not response.tool_calls:
             if thinking_open:
                 yield "</think>\n"
+            if response is None or not _content(response).strip():
+                logger.warning(
+                    "AI Coach stream ended without a final answer", extra={"provider": provider}
+                )
+                yield _INCOMPLETE_ANSWER_MESSAGE
             return
 
         activity = _tool_activity(_streamed_tool_response(response))
@@ -405,9 +414,14 @@ def ask_coach_with_tools_stream(
             content="Use the tool results above to answer the athlete. Do not call more tools."
         )
     )
+    has_final_answer = False
     for chunk in model.stream(messages):
+        has_final_answer = has_final_answer or bool(_content(chunk).strip())
         text, thinking_open = _stream_text(cast("AIMessageChunk", chunk), thinking_open)
         if text:
             yield text
     if thinking_open:
         yield "</think>\n"
+    if not has_final_answer:
+        logger.warning("AI Coach stream ended without a final answer", extra={"provider": provider})
+        yield _INCOMPLETE_ANSWER_MESSAGE
