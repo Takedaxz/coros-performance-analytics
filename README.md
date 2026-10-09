@@ -4,13 +4,7 @@
 
 COROS Core ingests data from your COROS watch via the official API, computes advanced training metrics, and provides an AI coach for natural-language training analysis — all running on your own infrastructure with PostgreSQL and Redis.
 
-<p align="center">
-  <img src="README/hero.png" alt="COROS Core Dashboard" width="100%" />
-</p>
-
 [![COROS Core demo](README/demo.gif)](README/demo.mp4)
-
-[Watch the full-quality video](README/demo.mp4)
 
 ---
 
