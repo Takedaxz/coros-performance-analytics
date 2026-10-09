@@ -8,6 +8,8 @@ COROS Core ingests data from your COROS watch via the official API, computes adv
   <img src="README/hero.png" alt="COROS Core Dashboard" width="100%" />
 </p>
 
+[Watch the COROS Core demo](README/demo.mp4)
+
 ---
 
 <p align="center">
