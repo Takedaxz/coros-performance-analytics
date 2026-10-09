@@ -4358,7 +4358,7 @@ table.data-table .lap-split-table tr:hover td {
   margin-top: var(--space-2);
 }
 
-.plan-duplicate-workout-dialog {
+.plan-copy-workout-dialog {
   background: var(--color-bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
@@ -4369,11 +4369,11 @@ table.data-table .lap-split-table tr:hover td {
   width: 100%;
 }
 
-.plan-duplicate-workout-dialog h2,
-.plan-duplicate-workout-dialog p { margin: 0; }
-.plan-duplicate-workout-dialog h2 { color: var(--color-text-primary); font-size: 18px; }
-.plan-duplicate-workout-dialog p { color: var(--color-text-secondary); font-size: 13px; }
-.plan-duplicate-workout-date { color: var(--color-text-muted); display: grid; font-size: 12px; font-weight: var(--weight-semibold); gap: var(--space-2); }
+.plan-copy-workout-dialog h2,
+.plan-copy-workout-dialog p { margin: 0; }
+.plan-copy-workout-dialog h2 { color: var(--color-text-primary); font-size: 18px; }
+.plan-copy-workout-dialog p { color: var(--color-text-secondary); font-size: 13px; }
+.plan-copy-workout-date { color: var(--color-text-muted); display: grid; font-size: 12px; font-weight: var(--weight-semibold); gap: var(--space-2); }
 
 .plan-workout-editor-backdrop {
   align-items: center;

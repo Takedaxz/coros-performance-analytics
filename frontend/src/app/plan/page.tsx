@@ -74,7 +74,7 @@ type CalendarMoveNotice = { kind: "pending" | "success" | "error"; message: stri
 type DeleteTarget =
   | { kind: "calendar"; uid: string; name: string }
   | { kind: "library"; workout: LibraryWorkout };
-type DuplicateTarget = { uid: string; name: string; date: string };
+type CopyTarget = { uid: string; name: string; date: string };
 
 const WORKOUT_ICON_PATHS = {
   calendar: "M3 5h18M7 3v4m10-4v4M5 9h14v12H5z",
@@ -605,7 +605,7 @@ export default function TrainingPlanPage() {
   const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
   const [deletingLibraryWorkoutId, setDeletingLibraryWorkoutId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-  const [duplicateTarget, setDuplicateTarget] = useState<DuplicateTarget | null>(null);
+  const [copyTarget, setCopyTarget] = useState<CopyTarget | null>(null);
   const [isSavingWorkout, setIsSavingWorkout] = useState(false);
   const [isLoadingWorkoutEditor, setIsLoadingWorkoutEditor] = useState(false);
   const [workoutLoadError, setWorkoutLoadError] = useState("");
@@ -930,24 +930,24 @@ export default function TrainingPlanPage() {
       setCalendarMoveNotice({ kind: "error", message: cause instanceof Error ? cause.message : "Could not move workout." });
     }
   };
-  const duplicateWorkout = async () => {
-    if (!duplicateTarget?.date) return;
-    const target = duplicateTarget;
+  const copyWorkout = async () => {
+    if (!copyTarget?.date) return;
+    const target = copyTarget;
     const source = events.find((event) => event.uid === target.uid);
     if (!source) return;
-    setDuplicateTarget(null);
-    setCalendarMoveNotice({ kind: "pending", message: `Duplicating ${source.summary}…` });
+    setCopyTarget(null);
+    setCalendarMoveNotice({ kind: "pending", message: `Copying ${source.summary}…` });
     try {
       const response = await fetch(`${apiBase}/api/training-plan/coros/workouts/${encodeURIComponent(target.uid)}/duplicate`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date: target.date, confirmed: true }),
       });
       if (!response.ok) throw new Error((await response.json() as { detail?: string }).detail || `HTTP ${response.status}`);
-      const duplicated: TrainingEvent = await response.json();
-      setEvents((current) => [...current, duplicated]);
+      const copiedWorkout: TrainingEvent = await response.json();
+      setEvents((current) => [...current, copiedWorkout]);
       setSelectedDate(target.date);
-      setCalendarMoveNotice({ kind: "success", message: `${source.summary} duplicated.` });
+      setCalendarMoveNotice({ kind: "success", message: `${source.summary} copied.` });
     } catch (cause) {
-      setCalendarMoveNotice({ kind: "error", message: cause instanceof Error ? cause.message : "Could not duplicate workout." });
+      setCalendarMoveNotice({ kind: "error", message: cause instanceof Error ? cause.message : "Could not copy workout." });
     }
   };
 
@@ -1029,7 +1029,7 @@ export default function TrainingPlanPage() {
     if (!workoutDraft) return;
     setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.map((step) => step.repeat_group === group ? { ...step, repeat_count } : step) });
   };
-  const duplicateStep = (index: number) => {
+  const copyStep = (index: number) => {
     if (!workoutDraft) return;
     const steps = [...workoutDraft.steps];
     steps.splice(index + 1, 0, { ...steps[index] });
@@ -1099,7 +1099,7 @@ export default function TrainingPlanPage() {
     const hasCustomStepTitle = workoutDraft.sport !== "strength" && workoutDraft.sport !== "hyrox";
     const supportsSetRest = step.kind === "training" && (workoutDraft.sport === "strength" || workoutDraft.sport === "hyrox" && isHyroxFunctionalStation(step.name));
     return <article className={`plan-workout-step${isActive ? " is-active" : " is-collapsed"}${isDragging ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`} data-step-kind={step.kind} key={`${index}-${step.name}`} onDragOver={(event) => allowWorkoutDrop(event, dragItem)} onDrop={(event) => finishWorkoutDrop(event, dragItem)}>
-      <header className="plan-workout-step-title"><WorkoutDragHandle onDragStart={(event) => beginWorkoutDrag(event, dragItem)} onDragEnd={endWorkoutDrag} /><span className="plan-workout-step-index">{String(index + 1).padStart(2, "0")}</span><button className="plan-workout-step-toggle" type="button" aria-expanded={isActive} onClick={() => setActiveWorkoutStep(isActive ? null : index)}><small>Step {index + 1}</small><strong>{displayStepName(step)}</strong><em>{stepSummary(step, hrProfile)}</em></button><div className="plan-workout-step-header-actions">{video && <button type="button" aria-label={`${isVideoOpen ? "Hide" : "Show"} ${displayStepName(step)} technique video`} title={`${isVideoOpen ? "Hide" : "Show"} technique video`} aria-pressed={isVideoOpen} onClick={() => setActiveExerciseVideoStep(isVideoOpen ? null : index)}><WorkoutIcon name="video" size={15} /></button>}<button type="button" aria-label="Duplicate step" title="Duplicate step" onClick={() => duplicateStep(index)}><WorkoutIcon name="copy" size={15} /></button><button type="button" aria-label="Delete step" title="Delete step" disabled={workoutDraft.steps.length === 1} onClick={() => setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.filter((_, position) => position !== index) })}><WorkoutIcon name="trash" size={15} /></button></div></header>
+      <header className="plan-workout-step-title"><WorkoutDragHandle onDragStart={(event) => beginWorkoutDrag(event, dragItem)} onDragEnd={endWorkoutDrag} /><span className="plan-workout-step-index">{String(index + 1).padStart(2, "0")}</span><button className="plan-workout-step-toggle" type="button" aria-expanded={isActive} onClick={() => setActiveWorkoutStep(isActive ? null : index)}><small>Step {index + 1}</small><strong>{displayStepName(step)}</strong><em>{stepSummary(step, hrProfile)}</em></button><div className="plan-workout-step-header-actions">{video && <button type="button" aria-label={`${isVideoOpen ? "Hide" : "Show"} ${displayStepName(step)} technique video`} title={`${isVideoOpen ? "Hide" : "Show"} technique video`} aria-pressed={isVideoOpen} onClick={() => setActiveExerciseVideoStep(isVideoOpen ? null : index)}><WorkoutIcon name="video" size={15} /></button>}<button type="button" aria-label="Copy step" title="Copy step" onClick={() => copyStep(index)}><WorkoutIcon name="copy" size={15} /></button><button type="button" aria-label="Delete step" title="Delete step" disabled={workoutDraft.steps.length === 1} onClick={() => setWorkoutDraft({ ...workoutDraft, steps: workoutDraft.steps.filter((_, position) => position !== index) })}><WorkoutIcon name="trash" size={15} /></button></div></header>
       {video && isVideoOpen && <aside className="plan-workout-exercise-video" aria-label={`${displayStepName(step)} technique preview`}><video src={video} controls loop muted playsInline preload="metadata" /></aside>}
        {isActive && <div className="plan-workout-step-fields">
          {isStrengthMovement && <label><span>Movement</span><ExerciseCombobox value={step.name} options={exerciseOptions} loading={exerciseOptionsLoading} onChange={(selectedName, option) => updateStep(index, { name: resolveExerciseName(selectedName, selectedName), exercise_code: selectedName, exercise_id: option?.id ?? null })} /></label>}
@@ -1313,7 +1313,7 @@ export default function TrainingPlanPage() {
                     {event.workout_steps?.length ? <WorkoutStructure steps={event.workout_steps} profile={hrProfile} videos={exerciseVideos} options={exerciseOptions} /> : null}
                     {source === "coros" && (
                       <div className="plan-workout-actions">
-                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => setDuplicateTarget({ uid: event.uid, name: event.summary, date: selectedDate })}>Duplicate</button>
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => setCopyTarget({ uid: event.uid, name: event.summary, date: selectedDate })}>Copy</button>
                         <button className="btn btn-secondary btn-sm" type="button" onClick={() => void openEditWorkout(event.uid)}>Edit</button>
                         <button className="btn btn-secondary btn-sm" type="button" onClick={() => setDeleteTarget({ kind: "calendar", uid: event.uid, name: event.summary })}>Delete</button>
                       </div>
@@ -1323,13 +1323,13 @@ export default function TrainingPlanPage() {
               </aside>
             </div>
           )}
-          {duplicateTarget && (
-            <div className="plan-workout-editor-backdrop" role="dialog" aria-modal="true" aria-labelledby="duplicate-workout-title">
-              <section className="plan-duplicate-workout-dialog">
-                <h2 id="duplicate-workout-title">Duplicate workout</h2>
-                <p>{duplicateTarget.name}</p>
-                <div className="plan-duplicate-workout-date"><span>Schedule date</span><CustomDatePicker value={duplicateTarget.date} minDate={todayKey} ariaLabel="Duplicate workout date" onChange={(date) => setDuplicateTarget({ ...duplicateTarget, date })} /></div>
-                <div className="plan-workout-actions"><button className="btn btn-secondary btn-sm" type="button" onClick={() => setDuplicateTarget(null)}>Cancel</button><button className="btn btn-primary btn-sm" type="button" disabled={!duplicateTarget.date} onClick={() => void duplicateWorkout()}>Duplicate</button></div>
+          {copyTarget && (
+            <div className="plan-workout-editor-backdrop" role="dialog" aria-modal="true" aria-labelledby="copy-workout-title">
+              <section className="plan-copy-workout-dialog">
+                <h2 id="copy-workout-title">Copy workout</h2>
+                <p>{copyTarget.name}</p>
+                <div className="plan-copy-workout-date"><span>Schedule date</span><CustomDatePicker value={copyTarget.date} minDate={todayKey} ariaLabel="Copy workout date" onChange={(date) => setCopyTarget({ ...copyTarget, date })} /></div>
+                <div className="plan-workout-actions"><button className="btn btn-secondary btn-sm" type="button" onClick={() => setCopyTarget(null)}>Cancel</button><button className="btn btn-primary btn-sm" type="button" disabled={!copyTarget.date} onClick={() => void copyWorkout()}>Copy</button></div>
               </section>
             </div>
           )}
