@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, type ChangeEvent as ReactChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { memo, useState, useEffect, useLayoutEffect, useRef, useCallback, type ChangeEvent as ReactChangeEvent, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import Sidebar from "@/components/Sidebar";
 import PageTitle from "@/components/PageTitle";
 import ReactMarkdown from "react-markdown";
@@ -22,6 +22,12 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+const MemoizedMarkdown = memo(ReactMarkdown);
+const markdownRemarkPlugins = [remarkGfm, remarkMath];
+const markdownRehypePlugins = [rehypeKatex];
+const thinkingMarkdownComponents = { table: MarkdownTable };
+const answerMarkdownComponents = { a: InlineCitationLink, table: MarkdownTable };
 
 const TOOL_LABELS: Record<string, string> = {
   compare_activities: "Workout comparison",
@@ -1043,13 +1049,13 @@ function ThinkingAccordion({ thinking, isThinkingActive }: { thinking: string; i
         <ChevronIcon isOpen={isOpen} />
       </summary>
       <div ref={thinkingContentRef} className="ai-thinking-accordion-content">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-          components={{ table: MarkdownTable }}
+        <MemoizedMarkdown
+          remarkPlugins={markdownRemarkPlugins}
+          rehypePlugins={markdownRehypePlugins}
+          components={thinkingMarkdownComponents}
         >
           {thinking}
-        </ReactMarkdown>
+        </MemoizedMarkdown>
       </div>
     </details>
   );
@@ -3477,13 +3483,13 @@ export default function AiPage() {
                                 <WaveThinkingText text="thinking" />
                               ) : displayAnswer ? (
                                 <div className="markdown-body" onMouseDown={() => setResponseSelection(null)} onMouseUp={handleResponseSelection}>
-                                  <ReactMarkdown
-                                    remarkPlugins={[remarkGfm, remarkMath]}
-                                    rehypePlugins={[rehypeKatex]}
-                                    components={{ a: InlineCitationLink, table: MarkdownTable }}
+                                  <MemoizedMarkdown
+                                    remarkPlugins={markdownRemarkPlugins}
+                                    rehypePlugins={markdownRehypePlugins}
+                                    components={answerMarkdownComponents}
                                   >
                                     {displayAnswer.replaceAll(" -- ", " — ")}
-                                  </ReactMarkdown>
+                                  </MemoizedMarkdown>
                                 </div>
                               ) : null}
                               {tools.length > 0 && (
