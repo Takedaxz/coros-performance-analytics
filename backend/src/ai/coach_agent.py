@@ -126,6 +126,7 @@ def _model(provider: str, model_name: str) -> ChatGoogleGenerativeAI | ChatOpenA
             api_key=settings.gemini_api_key,
             temperature=0.7,
             request_timeout=60,
+            include_thoughts=True,
         )
     config = provider_config(provider)
     reasoning_effort = settings.agentrouter_reasoning_effort if provider == "agentrouter" else None
@@ -176,6 +177,35 @@ def _stream_text(chunk: AIMessageChunk, thinking_open: bool) -> tuple[str, bool]
     if text:
         output += ("</think>\n" if thinking_open else "") + text
         thinking_open = False
+    return output, thinking_open
+
+
+def _gemini_content(message: BaseMessage) -> str:
+    if isinstance(message.content, str):
+        return message.content
+    return "".join(
+        block if isinstance(block, str) else block["text"]
+        for block in message.content
+        if isinstance(block, str)
+        or (block.get("type") == "text" and isinstance(block.get("text"), str))
+    )
+
+
+def _gemini_stream_text(chunk: AIMessageChunk, thinking_open: bool) -> tuple[str, bool]:
+    """Keep Gemini thought summaries separate without altering streamed text parts."""
+    blocks = [chunk.content] if isinstance(chunk.content, str) else chunk.content
+    output = ""
+    for block in blocks:
+        is_thought = isinstance(block, dict) and block.get("type") == "thinking"
+        text = block if isinstance(block, str) else block.get("thinking" if is_thought else "text")
+        if not isinstance(text, str) or not text:
+            continue
+        if is_thought and not thinking_open:
+            output += "<think>"
+        elif not is_thought and thinking_open:
+            output += "</think>\n"
+        output += text
+        thinking_open = is_thought
     return output, thinking_open
 
 
@@ -371,6 +401,8 @@ def ask_coach_with_tools_stream(
     provider_tools = _provider_tools(tools) if isinstance(model, ChatOpenAI) else tools
     model_with_tools = model.bind_tools(provider_tools)
     thinking_open = False
+    stream_text = _gemini_stream_text if provider == "gemini" else _stream_text
+    answer_content = _gemini_content if provider == "gemini" else _content
 
     for _ in range(MAX_TOOL_CALLS):
         response: AIMessageChunk | None = None
@@ -379,14 +411,14 @@ def ask_coach_with_tools_stream(
                 response = cast("AIMessageChunk", chunk)
             else:
                 response = cast("AIMessageChunk", response + chunk)
-            text, thinking_open = _stream_text(chunk, thinking_open)
+            text, thinking_open = stream_text(chunk, thinking_open)
             if text:
                 yield text
 
         if response is None or not response.tool_calls:
             if thinking_open:
                 yield "</think>\n"
-            if response is None or not _content(response).strip():
+            if response is None or not answer_content(response).strip():
                 logger.warning(
                     "AI Coach stream ended without a final answer", extra={"provider": provider}
                 )
@@ -416,8 +448,8 @@ def ask_coach_with_tools_stream(
     )
     has_final_answer = False
     for chunk in model.stream(messages):
-        has_final_answer = has_final_answer or bool(_content(chunk).strip())
-        text, thinking_open = _stream_text(cast("AIMessageChunk", chunk), thinking_open)
+        has_final_answer = has_final_answer or bool(answer_content(chunk).strip())
+        text, thinking_open = stream_text(cast("AIMessageChunk", chunk), thinking_open)
         if text:
             yield text
     if thinking_open:
